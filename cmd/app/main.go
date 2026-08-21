@@ -111,9 +111,14 @@ func run() error {
 	server := &http.Server{
 		Addr: cfg.Addr,
 		Handler: handler.New(handler.Deps{
-			Renderer:     rend,
-			Sessions:     sessions,
-			Middleware:   auth.NewMiddleware(sessions, apiClients, cfg.BasePath),
+			Renderer: rend,
+			Sessions: sessions,
+			// 20 failed Basic attempts, then one more every 3s, per IP. Far
+			// looser than the browser login throttle: a machine caller with a
+			// stale secret should be slowed to a crawl, not locked out, and the
+			// budget only ever moves on FAILURE.
+			Middleware: auth.NewMiddleware(sessions, apiClients, cfg.BasePath).
+				WithBasicThrottle(auth.NewThrottle(1.0/3.0, 20)),
 			Manager:      manager,
 			Messages:     msgRepo,
 			MessageStats: msgRepo,

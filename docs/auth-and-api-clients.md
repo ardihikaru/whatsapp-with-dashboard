@@ -18,7 +18,31 @@ rejected on `/api/v1`, and a bearer token is rejected on the pages.
 
 ## JSON API
 
-Machine callers must use local API-client credentials:
+Machine callers use local API-client credentials, presented in either of two
+ways. Both resolve to the same client, and every `/api/v1` endpoint accepts
+either:
+
+- `Authorization: Bearer <token>` — obtained from `POST /api/v1/auth/login`.
+  Verified with one SHA-256 and an indexed lookup, revocable per token, and
+  subject to `token_ttl_seconds` / `no_expiry`.
+- `Authorization: Basic base64(login_id:secret)` — the credential sent directly
+  on every request. No token is minted, so `POST /api/v1/auth/logout` returns
+  `400`: cutting off a Basic caller means deactivating the client or rotating
+  its secret.
+
+Bearer remains the better default for chatty or long-lived callers. Basic is for
+cases where a two-step exchange is awkward.
+
+Basic costs a bcrypt compare per request, so successful verifications are cached
+in memory for 60 seconds, keyed by login id plus a SHA-256 of the secret (the raw
+secret is never retained). Deactivating, deleting, renaming or rotating a client
+drops its cached entries immediately, so revocation is not delayed by the cache.
+Failed Basic attempts are throttled per IP, because a caller varying the secret
+misses the cache by construction.
+
+Basic sends the secret on every request: use TLS outside a trusted network.
+
+To create the credentials:
 
 1. Open `/admin/api-clients`.
 2. Create a client with a name, login id, description, and token expiry.

@@ -54,6 +54,9 @@ func (r *Repository) RotateSecret(ctx context.Context, id string) (string, error
 	if err := tx.Commit(); err != nil {
 		return "", err
 	}
+	// The old secret must stop working on the Basic path too — rotating while a
+	// cached verification survives would leave the replaced credential live.
+	r.basic.invalidateClient(id)
 	return secret, nil
 }
 

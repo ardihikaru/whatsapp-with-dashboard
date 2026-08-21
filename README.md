@@ -186,15 +186,50 @@ Two independent doors that share nothing:
   in memory, so a restart signs you out. The app **refuses to boot** with no
   credential configured — a default password on a service holding a WhatsApp
   identity is an account takeover waiting for someone to port-forward it.
-- **Machine** — API clients created at `/admin/api-clients`, with bcrypt secrets
-  and SHA-256-hashed bearer tokens.
+- **Machine** — API clients created at `/admin/api-clients`, with bcrypt secrets.
+  Two interchangeable ways to present them, below.
 
-A browser session cookie is not accepted on `/api/v1`, and a bearer token is not
-accepted on the browser pages.
+A browser session cookie is not accepted on `/api/v1`, and an API credential is
+not accepted on the browser pages.
+
+### Two ways for a machine caller to authenticate
+
+```sh
+# A. Bearer — exchange the credentials for a token once, then reuse it.
+Authorization: Bearer <token from POST /api/v1/auth/login>
+
+# B. Basic — send the credentials directly on every request.
+Authorization: Basic base64(login_id:secret)
+```
+
+Both resolve to the same client, and every `/api/v1` endpoint accepts either.
+Pick with this:
+
+| | Bearer | Basic |
+|---|---|---|
+| Round trips | login first, then reuse | one, always |
+| Per-request cost | SHA-256 + indexed lookup | bcrypt, cached 60s (see below) |
+| Revoke one credential | yes, per token | no — deactivate the client or rotate its secret |
+| Expiry | `token_ttl_seconds` / `no_expiry` | none; the secret is valid until changed |
+| Secret on the wire | only at login | **every request** — use TLS |
+| `POST /api/v1/auth/logout` | revokes the token | `400`, there is no token to revoke |
+
+**Bearer is still the better default** for anything chatty or long-lived: the
+token is cheap to verify and can be revoked on its own. Basic exists for callers
+where a two-step exchange is awkward — cron jobs, webhooks, quick `curl`.
+
+Because Basic re-presents the raw secret every time, verifying it means bcrypt
+(~80ms of CPU). Successful verifications are therefore cached in memory for **60
+seconds**, keyed by login id and a SHA-256 of the secret — the raw secret is
+never held. The cache is dropped immediately when a client is deactivated,
+deleted, renamed, or has its secret rotated, so revocation still bites at once.
+Failed Basic attempts are rate-limited per IP (20, then one every 3s), since a
+caller varying the secret on every request would miss the cache by construction.
 
 ## Send a message as a machine caller
 
 ```sh
+# Bearer
 TOKEN=$(curl -sS -X POST "http://localhost:8800/api/v1/auth/login" \
   -H "Content-Type: application/json" \
   -d '{"login_id":"taskmgr","secret":"replace-with-secret"}' | jq -r .token)
@@ -202,7 +237,15 @@ TOKEN=$(curl -sS -X POST "http://localhost:8800/api/v1/auth/login" \
 curl -sS -X POST "http://localhost:8800/api/v1/messages" \
   -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
   -d '{"to":"+6281200000000","text":"Hello\n\nhttps://example.test/task/123"}'
+
+# Basic — same call, no login step
+curl -sS -X POST "http://localhost:8800/api/v1/messages" \
+  -u "taskmgr:replace-with-secret" -H "Content-Type: application/json" \
+  -d '{"to":"+6281200000000","text":"Hello","category":"otp","client_ref":"order-123"}'
 ```
+
+`category` and `client_ref` are optional and are stored with the message, so you
+can trace what was sent for which order in `/logs`.
 
 Responses: `200` sent/failed, `202` still queued after 15s, `400` validation,
 `409` not connected, `429` queue full. Sends are queued per session (cap 100),

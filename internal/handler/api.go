@@ -73,11 +73,21 @@ func (h *handlers) PostAPILogin(w http.ResponseWriter, r *http.Request) {
 }
 
 // PostAPILogout revokes the current API-client bearer token.
+// PostAPILogout revokes the bearer token that authenticated this request.
+//
+// It is meaningful ONLY on the bearer path. A caller authenticated with HTTP
+// Basic minted no token, so there is nothing to revoke — answering 204 there
+// would report success for work that did not happen, and leave someone
+// believing they had cut off access they still have. Revoking Basic access
+// means deactivating the client or rotating its secret.
 func (h *handlers) PostAPILogout(w http.ResponseWriter, r *http.Request) {
 	principal, _ := auth.APIPrincipalFrom(r.Context())
-	if principal.TokenHash != "" {
-		_ = h.APIClients.RevokeToken(r.Context(), principal.TokenHash)
+	if principal.TokenHash == "" {
+		writeError(w, http.StatusBadRequest,
+			"logout applies to bearer tokens only; a Basic-authenticated client has no token to revoke")
+		return
 	}
+	_ = h.APIClients.RevokeToken(r.Context(), principal.TokenHash)
 	w.WriteHeader(http.StatusNoContent)
 }
 

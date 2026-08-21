@@ -2,7 +2,6 @@ package handler
 
 import (
 	"fmt"
-	"net"
 	"net/http"
 	"time"
 
@@ -51,7 +50,7 @@ func (h *handlers) PostLogin(w http.ResponseWriter, r *http.Request) {
 		h.loginFailed(w, r, "Permintaan tidak valid.", http.StatusBadRequest)
 		return
 	}
-	ip := clientIP(r)
+	ip := auth.ClientIP(r)
 	if wait := h.LoginThrottle.Take(ip, time.Now()); wait > 0 {
 		h.loginFailed(w, r,
 			fmt.Sprintf("Terlalu banyak percobaan. Coba lagi dalam %d detik.", int(wait.Seconds())+1),
@@ -108,19 +107,4 @@ func (h *handlers) PostLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Redirect(w, r, h.BasePath+"/login", http.StatusSeeOther)
-}
-
-// clientIP is the throttle key: the host half of RemoteAddr.
-//
-// Deliberately NOT X-Forwarded-For — that header is attacker-controlled unless a
-// trusted proxy is known to overwrite it, and a spoofable key is a throttle that
-// does not exist. Behind a reverse proxy every attempt collapses onto the
-// proxy's address, which throttles the proxy; for a single-operator tool that is
-// the safer way to be wrong.
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }

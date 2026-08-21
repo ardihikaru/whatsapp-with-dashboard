@@ -45,14 +45,20 @@ paths:
                 $ref: '#/components/schemas/Error'
   /api/v1/auth/logout:
     post:
-      summary: Invalidate the current session
+      summary: Revoke the bearer token used for this request
+      description: >
+        Bearer only. A client authenticated with HTTP Basic minted no token and
+        has nothing to revoke, so it receives 400; cut off a Basic client by
+        deactivating it or rotating its secret instead.
       operationId: logout
       tags: [auth]
       security:
         - bearerAuth: []
       responses:
         '204':
-          description: Session invalidated.
+          description: Token revoked.
+        '400':
+          description: The request was authenticated with Basic, which mints no token.
   /api/v1/health:
     get:
       summary: Process health (public)
@@ -72,6 +78,7 @@ paths:
       tags: [dashboard]
       security:
         - bearerAuth: []
+        - basicAuth: []
       responses:
         '200':
           description: KPI label -> formatted value.
@@ -86,7 +93,7 @@ paths:
       summary: List sessions (live snapshots)
       operationId: listSessions
       tags: [sessions]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       responses:
         '200':
           description: All sessions.
@@ -100,7 +107,7 @@ paths:
       summary: Create a session (state=new; pair it separately)
       operationId: createSession
       tags: [sessions]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       requestBody:
         required: true
         content:
@@ -130,7 +137,7 @@ paths:
       summary: One session + recent event ring
       operationId: getSession
       tags: [sessions]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       responses:
         '200':
           description: Snapshot with last_events.
@@ -157,7 +164,7 @@ paths:
       summary: Delete session (unlinks the device and purges all rows)
       operationId: deleteSession
       tags: [sessions]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       responses:
         '204': {description: Deleted.}
         '404':
@@ -170,7 +177,7 @@ paths:
       summary: Reconnect a paired session (records desired state active)
       operationId: activateSession
       tags: [sessions]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       responses:
@@ -194,7 +201,7 @@ paths:
       summary: Drop the socket, keep credentials
       operationId: deactivateSession
       tags: [sessions]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       responses:
@@ -218,7 +225,7 @@ paths:
       summary: Live pairing snapshot (raw QR payload for machine clients)
       operationId: getPairing
       tags: [sessions]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       responses:
@@ -247,7 +254,7 @@ paths:
       summary: Send a plain-text message using automatic session routing
       operationId: sendMessageAuto
       tags: [messages]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       requestBody:
         required: true
         content:
@@ -298,7 +305,7 @@ paths:
         shown anywhere in the WhatsApp UI.
       operationId: sendGroupMessage
       tags: [messages]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       requestBody:
         required: true
         content:
@@ -347,7 +354,7 @@ paths:
       description: How WA_ALERT_GROUP_JID is discovered for the alerting path.
       operationId: listSessionGroups
       tags: [messages]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       parameters:
         - {name: id, in: path, required: true, schema: {type: string}}
       responses:
@@ -381,7 +388,7 @@ paths:
       summary: Send a plain-text message through this session
       operationId: sendMessage
       tags: [messages]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       requestBody:
         required: true
         content:
@@ -430,7 +437,7 @@ paths:
       summary: Recent message audit log for this session
       operationId: listMessages
       tags: [messages]
-      security: [{bearerAuth: []}]
+      security: [{bearerAuth: []}, {basicAuth: []}]
       parameters:
         - {name: limit, in: query, schema: {type: integer, default: 50, maximum: 500}}
       responses:
@@ -452,6 +459,21 @@ components:
     bearerAuth:
       type: http
       scheme: bearer
+      description: >
+        Token from POST /api/v1/auth/login. Verified with a single SHA-256 and an
+        indexed lookup, so it is the cheaper option for a chatty caller. Can be
+        revoked individually and carries an expiry.
+    basicAuth:
+      type: http
+      scheme: basic
+      description: >
+        The API client's login_id and secret sent directly on every request, as
+        an alternative to exchanging them for a token. No token is minted, so
+        there is nothing to revoke individually: revoking Basic access means
+        deactivating the client or rotating its secret. Verified against bcrypt,
+        with successful verifications cached in memory for 60 seconds; failed
+        attempts are rate-limited per IP. Requires TLS in production, since the
+        secret travels on every request.
   schemas:
     LoginRequest:
       type: object

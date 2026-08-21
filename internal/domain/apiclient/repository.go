@@ -24,10 +24,17 @@ var (
 type Repository struct {
 	pool *sql.DB
 	now  func() time.Time
+	// basic memoises verified HTTP Basic credentials so the bcrypt compare does
+	// not run on every request. See basic.go.
+	basic *basicCache
 }
 
 func NewRepository(pool *sql.DB) *Repository {
-	return &Repository{pool: pool, now: func() time.Time { return time.Now().UTC() }}
+	return &Repository{
+		pool:  pool,
+		now:   func() time.Time { return time.Now().UTC() },
+		basic: newBasicCache(basicCacheTTL),
+	}
 }
 
 func (r *Repository) Create(ctx context.Context, name, loginID, description string, settings TokenSettings) (CreatedClient, error) {
@@ -125,6 +132,9 @@ func (r *Repository) Update(ctx context.Context, id, name, loginID, description 
 	if err != nil {
 		return err
 	}
+	// The login id may have just changed, so a cached (login_id, secret) pair
+	// could now name the wrong client.
+	r.basic.invalidateClient(id)
 	return requireAffected(res)
 }
 
@@ -135,6 +145,8 @@ func (r *Repository) SetActive(ctx context.Context, id string, active bool) erro
 	if err != nil {
 		return err
 	}
+	// Deactivation must bite NOW, not when the cache entry happens to expire.
+	r.basic.invalidateClient(id)
 	return requireAffected(res)
 }
 
@@ -143,5 +155,6 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 	if err != nil {
 		return err
 	}
+	r.basic.invalidateClient(id)
 	return requireAffected(res)
 }
