@@ -12,15 +12,23 @@ import (
 // scanClient is used by repository.go, token.go AND list_query.go, which is why
 // it sits in its own file rather than with either caller.
 
+// clientCols is THE column list every client SELECT must use, in the order
+// scanClient reads them. It lives next to the scanner deliberately: the two were
+// duplicated across four files, so adding token_expires_at meant editing five
+// places and getting a runtime scan mismatch if one was missed.
+const clientCols = `id, name, login_id, description, secret_hash, active,
+	        token_ttl_seconds, no_expiry, token_expires_at, created_at, updated_at`
+
 func scanClient(scanner interface {
 	Scan(dest ...any) error
 }) (Client, error) {
 	var c Client
 	var active, noExpiry int
 	var ttl sql.NullInt64
+	var expiresAt sql.NullString
 	var created, updated string
 	if err := scanner.Scan(&c.ID, &c.Name, &c.LoginID, &c.Description, &c.SecretHash,
-		&active, &ttl, &noExpiry, &created, &updated); err != nil {
+		&active, &ttl, &noExpiry, &expiresAt, &created, &updated); err != nil {
 		return Client{}, err
 	}
 	c.Active = active != 0
@@ -29,6 +37,11 @@ func scanClient(scanner interface {
 		c.TokenTTLSeconds = &v
 	}
 	c.NoExpiry = noExpiry != 0
+	if expiresAt.Valid && expiresAt.String != "" {
+		if t, err := time.Parse(timeLayout, expiresAt.String); err == nil {
+			c.TokenExpiresAt = &t
+		}
+	}
 	c.CreatedAt, _ = time.Parse(timeLayout, created)
 	c.UpdatedAt, _ = time.Parse(timeLayout, updated)
 	return c, nil
@@ -36,6 +49,9 @@ func scanClient(scanner interface {
 
 func validateSettings(settings TokenSettings) error {
 	if settings.NoExpiry {
+		return nil
+	}
+	if settings.ExpiresAt != nil {
 		return nil
 	}
 	if settings.TTLSeconds == nil {

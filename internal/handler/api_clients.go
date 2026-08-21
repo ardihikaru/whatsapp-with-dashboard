@@ -40,16 +40,29 @@ type apiClientView struct {
 	CreatedAt   string
 }
 
+// apiClientForm is the raw admin form, kept as strings so a rejected submission
+// can be re-rendered exactly as it was typed. CustomMode selects which of the
+// four Custom* fields the expiry parser reads; see api_clients_expiry.go.
 type apiClientForm struct {
 	Name             string
 	LoginID          string
 	Description      string
 	ExpiryChoice     string
+	CustomMode       string
+	CustomDate       string
+	CustomYears      string
+	CustomMonths     string
 	CustomTTLSeconds string
 }
 
+// newAPIClientForm is the blank create form: the default expiry preset with the
+// custom sub-form parked on its first mode.
+func newAPIClientForm() apiClientForm {
+	return apiClientForm{ExpiryChoice: defaultExpiryChoice, CustomMode: "date"}
+}
+
 func (h *handlers) GetAPIClients(w http.ResponseWriter, r *http.Request) {
-	h.renderAPIClients(w, r, apiClientForm{ExpiryChoice: "86400"}, "", "")
+	h.renderAPIClients(w, r, newAPIClientForm(), "", "")
 }
 
 func (h *handlers) PostAPIClientCreate(w http.ResponseWriter, r *http.Request) {
@@ -64,7 +77,7 @@ func (h *handlers) PostAPIClientCreate(w http.ResponseWriter, r *http.Request) {
 		h.renderAPIClients(w, r, form, err.Error(), "")
 		return
 	}
-	h.renderAPIClients(w, r, apiClientForm{ExpiryChoice: "86400"}, "", created.Secret)
+	h.renderAPIClients(w, r, newAPIClientForm(), "", created.Secret)
 }
 
 func (h *handlers) GetAPIClientEdit(w http.ResponseWriter, r *http.Request) {

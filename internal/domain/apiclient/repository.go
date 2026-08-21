@@ -19,6 +19,9 @@ var (
 	ErrInvalidCredentials = errors.New("invalid login id or secret")
 	ErrInactiveClient     = errors.New("api client is inactive")
 	ErrNotFound           = errors.New("api client not found")
+	// ErrExpiredClient means the client's absolute token cutoff
+	// (token_expires_at) is in the past, so no new token can be issued.
+	ErrExpiredClient = errors.New("api client access period has ended")
 )
 
 type Repository struct {
@@ -62,15 +65,17 @@ func (r *Repository) Create(ctx context.Context, name, loginID, description stri
 	c := Client{
 		ID: wa.NewID(), Name: name, LoginID: loginID, Description: description,
 		SecretHash: string(hash), Active: true, TokenTTLSeconds: settings.TTLSeconds,
-		NoExpiry: settings.NoExpiry, CreatedAt: ts, UpdatedAt: ts,
+		NoExpiry: settings.NoExpiry, TokenExpiresAt: settings.ExpiresAt,
+		CreatedAt: ts, UpdatedAt: ts,
 	}
 	_, err = r.pool.ExecContext(ctx,
 		`INSERT INTO api_clients
 		 (id, name, login_id, description, secret_hash, active, token_ttl_seconds,
-		  no_expiry, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`,
+		  no_expiry, token_expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
 		c.ID, c.Name, c.LoginID, c.Description, c.SecretHash, nullableInt(c.TokenTTLSeconds),
-		boolToInt(c.NoExpiry), ts.Format(timeLayout), ts.Format(timeLayout))
+		boolToInt(c.NoExpiry), nullableTime(c.TokenExpiresAt),
+		ts.Format(timeLayout), ts.Format(timeLayout))
 	if err != nil {
 		return CreatedClient{}, err
 	}
@@ -79,8 +84,7 @@ func (r *Repository) Create(ctx context.Context, name, loginID, description stri
 
 func (r *Repository) List(ctx context.Context) ([]Client, error) {
 	rows, err := r.pool.QueryContext(ctx,
-		`SELECT id, name, login_id, description, secret_hash, active,
-		        token_ttl_seconds, no_expiry, created_at, updated_at
+		`SELECT `+clientCols+`
 		 FROM api_clients ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -99,8 +103,7 @@ func (r *Repository) List(ctx context.Context) ([]Client, error) {
 
 func (r *Repository) Get(ctx context.Context, id string) (Client, error) {
 	row := r.pool.QueryRowContext(ctx,
-		`SELECT id, name, login_id, description, secret_hash, active,
-		        token_ttl_seconds, no_expiry, created_at, updated_at
+		`SELECT `+clientCols+`
 		 FROM api_clients WHERE id = ?`, id)
 	c, err := scanClient(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -125,10 +128,10 @@ func (r *Repository) Update(ctx context.Context, id, name, loginID, description 
 	res, err := r.pool.ExecContext(ctx,
 		`UPDATE api_clients
 		 SET name = ?, login_id = ?, description = ?, token_ttl_seconds = ?,
-		     no_expiry = ?, updated_at = ?
+		     no_expiry = ?, token_expires_at = ?, updated_at = ?
 		 WHERE id = ?`,
 		name, loginID, description, nullableInt(settings.TTLSeconds), boolToInt(settings.NoExpiry),
-		r.now().Format(timeLayout), id)
+		nullableTime(settings.ExpiresAt), r.now().Format(timeLayout), id)
 	if err != nil {
 		return err
 	}

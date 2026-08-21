@@ -38,7 +38,10 @@ paths:
               schema:
                 $ref: '#/components/schemas/Error'
         '401':
-          description: Invalid credentials or inactive API client.
+          description: >
+            Invalid credentials, an inactive API client, or a client whose
+            access period has ended (its expiry was configured as an absolute
+            date that is now in the past).
           content:
             application/json:
               schema:

@@ -13,8 +13,12 @@ type Client struct {
 	Active          bool
 	TokenTTLSeconds *int
 	NoExpiry        bool
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// TokenExpiresAt is an ABSOLUTE cutoff. When set it wins over
+	// TokenTTLSeconds: tokens expire exactly then rather than TTL after issue,
+	// which is what "berlaku sampai tanggal X" actually means.
+	TokenExpiresAt *time.Time
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // Token is one bearer token issued to an API client. TokenHash is persisted;
@@ -28,9 +32,12 @@ type Token struct {
 	LastUsedAt *time.Time
 }
 
+// TokenSettings is the write-side view of a client's expiry policy. Exactly one
+// of the three fields decides, in this order: NoExpiry, ExpiresAt, TTLSeconds.
 type TokenSettings struct {
 	TTLSeconds *int
 	NoExpiry   bool
+	ExpiresAt  *time.Time
 }
 
 type CreatedClient struct {

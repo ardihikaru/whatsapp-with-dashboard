@@ -128,6 +128,7 @@ var schema = []string{
 	  active            INTEGER NOT NULL DEFAULT 1,
 	  token_ttl_seconds INTEGER,
 	  no_expiry         INTEGER NOT NULL DEFAULT 0,
+	  token_expires_at  TEXT,
 	  created_at        TEXT NOT NULL,
 	  updated_at        TEXT NOT NULL
 	)`,
@@ -170,7 +171,8 @@ func EnsureSchema(ctx context.Context, pool *sql.DB) error {
 			return err
 		}
 	}
-	return nil
+	// 0003 absolute token cutoff, same reason.
+	return ensureColumn(ctx, pool, "api_clients", "token_expires_at", "TEXT")
 }
 
 func ensureColumn(ctx context.Context, pool *sql.DB, table, column, typ string) error {

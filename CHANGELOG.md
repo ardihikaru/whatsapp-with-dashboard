@@ -1,5 +1,26 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Multi-year token presets** on `/admin/api-clients`: "Masa berlaku access
+  token" now offers 1 tahun, 3 tahun and 5 tahun alongside the existing 1/7/30
+  hari, so a long-lived integration no longer has to be expressed in seconds.
+- **"Durasi khusus" is now a mode picker** rather than a bare seconds box:
+  - *Berdasarkan tanggal* — a date picker. This is an ABSOLUTE cutoff, stored in
+    the new `api_clients.token_expires_at` column: every token issued to that
+    client expires at the end of the chosen day no matter when it was minted,
+    and once the date has passed `POST /api/v1/auth/login` returns `401`
+    (`api client access period has ended`) instead of handing back a token that
+    is already dead.
+  - *Durasi dalam tahun* / *Durasi dalam bulan* — a count, stored as a TTL
+    (1 tahun = 365 hari, 1 bulan = 30 hari, matching the existing 30-hari
+    preset).
+  - *Durasi dalam detik* — the previous behaviour, kept so clients already
+    holding an arbitrary TTL stay editable without their value being rounded.
+- Migration `0003_api_client_expiry_date.sql` for the new column; the SQLite
+  dev/test schema picks it up automatically.
+
 ## [0.1.0] — 2026-08-21
 
 Forked from `laundry-saas-v1/apps/whatsapp-session-management` into a standalone

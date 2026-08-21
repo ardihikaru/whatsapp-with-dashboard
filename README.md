@@ -233,7 +233,7 @@ Pick with this:
 | Round trips | login first, then reuse | one, always |
 | Per-request cost | SHA-256 + indexed lookup | bcrypt, cached 60s (see below) |
 | Revoke one credential | yes, per token | no — deactivate the client or rotate its secret |
-| Expiry | `token_ttl_seconds` / `no_expiry` | none; the secret is valid until changed |
+| Expiry | `token_ttl_seconds` / `token_expires_at` / `no_expiry` | none; the secret is valid until changed |
 | Secret on the wire | only at login | **every request** — use TLS |
 | `POST /api/v1/auth/logout` | revokes the token | `400`, there is no token to revoke |
 

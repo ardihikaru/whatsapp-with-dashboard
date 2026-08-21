@@ -5,28 +5,79 @@
     <option value="86400"{{if eq .ExpiryChoice "86400"}} selected{{end}}>1 hari</option>
     <option value="604800"{{if eq .ExpiryChoice "604800"}} selected{{end}}>7 hari</option>
     <option value="2592000"{{if eq .ExpiryChoice "2592000"}} selected{{end}}>30 hari</option>
+    <option value="31536000"{{if eq .ExpiryChoice "31536000"}} selected{{end}}>1 tahun</option>
+    <option value="94608000"{{if eq .ExpiryChoice "94608000"}} selected{{end}}>3 tahun</option>
+    <option value="157680000"{{if eq .ExpiryChoice "157680000"}} selected{{end}}>5 tahun</option>
     <option value="custom"{{if eq .ExpiryChoice "custom"}} selected{{end}}>Durasi khusus</option>
     <option value="no_expiry"{{if eq .ExpiryChoice "no_expiry"}} selected{{end}}>Tanpa kedaluwarsa</option>
   </select>
 </label>
-<label class="textfield">
-  <span class="textfield-label">Durasi khusus (detik)</span>
-  <input type="number" min="1" name="custom_ttl_seconds" value="{{.CustomTTLSeconds}}"
-         data-expiry-custom{{if ne .ExpiryChoice "custom"}} disabled{{end}}>
-</label>
+<div data-expiry-group{{if ne .ExpiryChoice "custom"}} hidden{{end}}>
+  <label class="textfield">
+    <span class="textfield-label">Jenis durasi khusus</span>
+    <select name="custom_mode" class="select" data-expiry-mode>
+      <option value="date"{{if eq .CustomMode "date"}} selected{{end}}>Berdasarkan tanggal</option>
+      <option value="years"{{if eq .CustomMode "years"}} selected{{end}}>Durasi dalam tahun</option>
+      <option value="months"{{if eq .CustomMode "months"}} selected{{end}}>Durasi dalam bulan</option>
+      <option value="seconds"{{if eq .CustomMode "seconds"}} selected{{end}}>Durasi dalam detik</option>
+    </select>
+  </label>
+  <label class="textfield" data-expiry-field="date"{{if or (ne .ExpiryChoice "custom") (ne .CustomMode "date")}} hidden{{end}}>
+    <span class="textfield-label">Berlaku sampai tanggal</span>
+    <input type="date" name="custom_date" value="{{.CustomDate}}"
+           data-expiry-custom{{if or (ne .ExpiryChoice "custom") (ne .CustomMode "date")}} disabled{{end}}>
+    <small class="muted">Token berlaku sampai akhir hari tersebut, berapa pun kapan token itu diterbitkan.</small>
+  </label>
+  <label class="textfield" data-expiry-field="years"{{if or (ne .ExpiryChoice "custom") (ne .CustomMode "years")}} hidden{{end}}>
+    <span class="textfield-label">Umur token (tahun)</span>
+    <input type="number" min="1" max="100" name="custom_years" value="{{.CustomYears}}"
+           data-expiry-custom{{if or (ne .ExpiryChoice "custom") (ne .CustomMode "years")}} disabled{{end}}>
+    <small class="muted">1 tahun dihitung 365 hari.</small>
+  </label>
+  <label class="textfield" data-expiry-field="months"{{if or (ne .ExpiryChoice "custom") (ne .CustomMode "months")}} hidden{{end}}>
+    <span class="textfield-label">Umur token (bulan)</span>
+    <input type="number" min="1" max="1200" name="custom_months" value="{{.CustomMonths}}"
+           data-expiry-custom{{if or (ne .ExpiryChoice "custom") (ne .CustomMode "months")}} disabled{{end}}>
+    <small class="muted">1 bulan dihitung 30 hari.</small>
+  </label>
+  <label class="textfield" data-expiry-field="seconds"{{if or (ne .ExpiryChoice "custom") (ne .CustomMode "seconds")}} hidden{{end}}>
+    <span class="textfield-label">Umur token (detik)</span>
+    <input type="number" min="1" name="custom_ttl_seconds" value="{{.CustomTTLSeconds}}"
+           data-expiry-custom{{if or (ne .ExpiryChoice "custom") (ne .CustomMode "seconds")}} disabled{{end}}>
+  </label>
+</div>
 <script>
-/* The server only reads custom_ttl_seconds when expiry_choice == "custom"; the
-   field used to stay live and silently discard what was typed into it. */
+/* The server reads exactly ONE custom field, chosen by custom_mode, and only when
+   expiry_choice == "custom". Every other custom field ships DISABLED so the
+   browser never submits it: a stale value left in a hidden input must not be able
+   to become the one that counts. The same state is rendered server-side above, so
+   the form is already correct before this script runs. */
 (function () {
   var form = document.currentScript.closest('form');
   if (!form) return;
   var choice = form.querySelector('[data-expiry-choice]');
-  var custom = form.querySelector('[data-expiry-custom]');
-  if (!choice || !custom) return;
-  choice.addEventListener('change', function () {
-    custom.disabled = choice.value !== 'custom';
-    if (!custom.disabled) custom.focus();
-  });
+  var group = form.querySelector('[data-expiry-group]');
+  var mode = form.querySelector('[data-expiry-mode]');
+  if (!choice || !group || !mode) return;
+  var fields = form.querySelectorAll('[data-expiry-field]');
+
+  function sync(moveFocus) {
+    var custom = choice.value === 'custom';
+    group.hidden = !custom;
+    var active = null;
+    fields.forEach(function (field) {
+      var on = custom && field.getAttribute('data-expiry-field') === mode.value;
+      field.hidden = !on;
+      var input = field.querySelector('[data-expiry-custom]');
+      if (input) input.disabled = !on;
+      if (on) active = input;
+    });
+    if (moveFocus && active) active.focus();
+  }
+
+  choice.addEventListener('change', function () { sync(true); });
+  mode.addEventListener('change', function () { sync(true); });
+  sync(false);
 })();
 </script>
 {{end}}

@@ -66,8 +66,7 @@ func (r *Repository) Login(ctx context.Context, loginID, secret string) (IssuedT
 		return IssuedToken{}, ErrInvalidCredentials
 	}
 	row := r.pool.QueryRowContext(ctx,
-		`SELECT id, name, login_id, description, secret_hash, active,
-		        token_ttl_seconds, no_expiry, created_at, updated_at
+		`SELECT `+clientCols+`
 		 FROM api_clients WHERE login_id = ?`, loginID)
 	c, err := scanClient(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -87,14 +86,9 @@ func (r *Repository) Login(ctx context.Context, loginID, secret string) (IssuedT
 		return IssuedToken{}, err
 	}
 	now := r.now()
-	var expires *time.Time
-	if !c.NoExpiry {
-		ttl := 24 * time.Hour
-		if c.TokenTTLSeconds != nil {
-			ttl = time.Duration(*c.TokenTTLSeconds) * time.Second
-		}
-		t := now.Add(ttl)
-		expires = &t
+	expires, err := tokenExpiry(c, now)
+	if err != nil {
+		return IssuedToken{}, err
 	}
 	_, err = r.pool.ExecContext(ctx,
 		`INSERT INTO api_access_tokens
@@ -105,6 +99,32 @@ func (r *Repository) Login(ctx context.Context, loginID, secret string) (IssuedT
 		return IssuedToken{}, err
 	}
 	return IssuedToken{Token: token, ExpiresAt: expires}, nil
+}
+
+// tokenExpiry resolves a client's three mutually exclusive expiry modes into the
+// instant to stamp on a freshly issued token; nil means "never expires".
+//
+// The absolute cutoff is checked BEFORE the token is written: once the date has
+// passed, login itself fails rather than handing back a token that is already
+// dead. Returning one would look like a successful login to the caller and then
+// 401 on the very next request, with nothing to point at.
+func tokenExpiry(c Client, now time.Time) (*time.Time, error) {
+	if c.NoExpiry {
+		return nil, nil
+	}
+	if c.TokenExpiresAt != nil {
+		t := *c.TokenExpiresAt
+		if !now.Before(t) {
+			return nil, ErrExpiredClient
+		}
+		return &t, nil
+	}
+	ttl := 24 * time.Hour
+	if c.TokenTTLSeconds != nil {
+		ttl = time.Duration(*c.TokenTTLSeconds) * time.Second
+	}
+	t := now.Add(ttl)
+	return &t, nil
 }
 
 func (r *Repository) AuthenticateBearer(ctx context.Context, token string) (auth.APIPrincipal, bool) {

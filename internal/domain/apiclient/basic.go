@@ -134,8 +134,7 @@ func (r *Repository) AuthenticateBasic(ctx context.Context, loginID, secret stri
 	}
 
 	row := r.pool.QueryRowContext(ctx,
-		`SELECT id, name, login_id, description, secret_hash, active,
-		        token_ttl_seconds, no_expiry, created_at, updated_at
+		`SELECT `+clientCols+`
 		 FROM api_clients WHERE login_id = ?`, loginID)
 	c, err := scanClient(row)
 	if err != nil {

@@ -9,9 +9,6 @@ import (
 // for callers that genuinely need every client — the /logs page resolves consumer
 // names from it — but the admin table must not grow unbounded with the table.
 
-const listCols = `id, name, login_id, description, secret_hash, active,
-	        token_ttl_seconds, no_expiry, created_at, updated_at`
-
 // searchWhere builds the optional name/login_id/description match. An empty
 // search returns no clause so the common case stays a plain scan.
 func searchWhere(search string) (string, []any) {
@@ -44,7 +41,7 @@ func (r *Repository) ListPage(ctx context.Context, search string, limit, offset 
 	where, args := searchWhere(search)
 	args = append(args, limit, offset)
 	rows, err := r.pool.QueryContext(ctx,
-		`SELECT `+listCols+` FROM api_clients`+where+
+		`SELECT `+clientCols+` FROM api_clients`+where+
 			` ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err

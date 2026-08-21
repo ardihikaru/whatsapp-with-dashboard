@@ -123,3 +123,10 @@
   cursor: not-allowed;
 }
 
+
+/* `hidden` has to beat the display rules above — .textfield sets display:block,
+   which would otherwise re-show a field the expiry form just hid. */
+[hidden] { display: none !important; }
+
+/* Hint text under a control (expiry sub-form). */
+.textfield > small.muted { display: block; margin-top: 6px; font-size: 12px; }

@@ -24,7 +24,12 @@ either:
 
 - `Authorization: Bearer <token>` — obtained from `POST /api/v1/auth/login`.
   Verified with one SHA-256 and an indexed lookup, revocable per token, and
-  subject to `token_ttl_seconds` / `no_expiry`.
+  subject to the client's expiry policy: `no_expiry` (never expires),
+  `token_expires_at` (an absolute cutoff — the token dies exactly then, and once
+  the date has passed login itself returns `401`), or `token_ttl_seconds` (the
+  default: the token lives that long from the moment it is issued). Those three
+  are resolved in that order, and are what the "Masa berlaku access token"
+  control on `/admin/api-clients` writes.
 - `Authorization: Basic base64(login_id:secret)` — the credential sent directly
   on every request. No token is minted, so `POST /api/v1/auth/logout` returns
   `400`: cutting off a Basic caller means deactivating the client or rotating

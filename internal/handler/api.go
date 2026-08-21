@@ -54,6 +54,10 @@ func (h *handlers) PostAPILogin(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusUnauthorized, "api client is inactive")
 			return
 		}
+		if errors.Is(err, apiclient.ErrExpiredClient) {
+			writeError(w, http.StatusUnauthorized, "api client access period has ended")
+			return
+		}
 		if errors.Is(err, apiclient.ErrInvalidCredentials) {
 			writeError(w, http.StatusUnauthorized, "invalid login id or secret")
 			return
