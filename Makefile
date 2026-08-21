@@ -25,7 +25,7 @@ IMAGE           ?= whatsapp-with-dashboard:local
 # and enabling it would widen the blast radius of any injection for free.
 WA_DSN := $(WSM_MYSQL_USER):$(WSM_MYSQL_PASSWORD)@tcp($(WSM_MYSQL_HOST):$(WSM_MYSQL_PORT))/$(WSM_MYSQL_DATABASE)?parseTime=true&charset=utf8mb4&loc=UTC&multiStatements=true
 
-.PHONY: help build test vet hashpw db-bootstrap db-drop migrate-up migrate-status \
+.PHONY: help build test vet hashpw db-bootstrap db-verify db-drop migrate-up migrate-status \
         migrate-down-all run docker-build up down logs
 
 help: ## Show this help
@@ -55,6 +55,14 @@ db-bootstrap: ## Create the app DB + least-privilege user (root, once)
 	    scripts/bootstrap-db.sql.tmpl \
 	  | docker exec -i $(MYSQL_CONTAINER) mysql -uroot -p$(MYSQL_ROOT_PASSWORD)
 	@echo "created database $(WSM_MYSQL_DATABASE) and user $(WSM_MYSQL_USER)@'%'"
+
+db-verify: ## Show the app user's grants (must be scoped to this schema only)
+	@docker exec -i $(MYSQL_CONTAINER) mysql -uroot -p$(MYSQL_ROOT_PASSWORD) -e \
+	  "SHOW GRANTS FOR '$(WSM_MYSQL_USER)'@'%';" 2>/dev/null
+	@echo
+	@echo "Expect ONE privilege line, on \`$(WSM_MYSQL_DATABASE)\`.* — the GRANT USAGE ON *.*"
+	@echo "line always accompanies it and is MySQL's no-privileges placeholder, not an"
+	@echo "escalation. Real privileges on *.* would violate the shared-host rule."
 
 db-drop: ## Drop THIS app's DB and user (root; DESTRUCTIVE, this schema only)
 	docker exec -i $(MYSQL_CONTAINER) mysql -uroot -p$(MYSQL_ROOT_PASSWORD) -e \

@@ -46,7 +46,20 @@ reconciles the MySQL rows against the whatsmeow devices.
 
 - Go 1.25 (`go.mod` pins it; `GOTOOLCHAIN=auto` fetches it automatically)
 - Docker + Docker Compose
-- The shared **master-compose-ai** stack running:
+- The shared **master-compose-ai** stack running
+
+Get the code:
+
+```sh
+git clone git@github.com:ardihikaru/whatsapp-with-dashboard.git
+cd whatsapp-with-dashboard
+```
+
+> Shell snippets below are POSIX sh (bash/zsh). In **fish**, `VAR=$(...)`
+> assignment is written `set VAR (...)`; the `make` targets work unchanged in
+> any shell, which is why the steps below prefer them.
+
+Start the shared stack if it is not already up:
 
 ```sh
 cd /home/ardi/devel/projects/master-compose-ai
@@ -102,8 +115,7 @@ make db-bootstrap
 Verify the grant is scoped:
 
 ```sh
-docker exec -i master-compose-ai-mysqldb-master-1 \
-  mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e "SHOW GRANTS FOR 'wa_dashboard'@'%';"
+make db-verify
 ```
 
 You should see exactly one privilege line, on `` `wa_dashboard`.* ``. (A
@@ -130,8 +142,19 @@ make migrate-status
 make run          # host mode
 ```
 
-Then open <http://localhost:8800> and sign in with `WSM_ADMIN_USER` and the
-password you hashed.
+Wait for `listening on http://localhost:8800 (docs at /docs)`, then check it
+answers:
+
+```sh
+curl -sS http://localhost:8800/api/v1/health     # {"status":"ok",...}
+```
+
+Open <http://localhost:8800> and sign in with `WSM_ADMIN_USER` (default `admin`)
+and the password you hashed in step 1 — the **password**, not the hash. Stop the
+app with `Ctrl-C`.
+
+If it exits at boot instead, the message says which variable is wrong; see
+[Troubleshooting](#troubleshooting).
 
 ### 5. Pair a device
 
@@ -264,8 +287,8 @@ The two stores need different treatment, and only one of them is irreplaceable:
 sqlite3 wsm-store.db ".backup '/backup/wsm-$(date +%F).db'"
 
 # MySQL — metadata and API clients.
-docker exec master-compose-ai-mysqldb-master-1 \
-  mysqldump -uroot -p"$MYSQL_ROOT_PASSWORD" wa_dashboard > wa_dashboard.sql
+docker exec master-compose-ai-mysqldb-master-1 mysqldump -uroot \
+  -p"$(grep '^MYSQL_ROOT_PASSWORD=' .env | cut -d= -f2-)" wa_dashboard > wa_dashboard.sql
 ```
 
 In container mode the SQLite file lives on the `whatsapp-with-dashboard-sqlite`
