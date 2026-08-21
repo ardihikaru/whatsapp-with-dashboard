@@ -1,0 +1,23 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Pair device — {{.Session.Name}} <span class="mono">(+{{.Session.Phone}})</span></h4>
+  <a class="btn btn-outline" href="{{u "/sessions"}}">Back to sessions</a>
+</div>
+<div class="card">
+  {{if .Resume}}
+  <div id="pair-box" hx-get="{{u "/sessions"}}/{{.Session.ID}}/pair/status"
+       hx-trigger="load" hx-swap="innerHTML">
+    <p>Resuming pairing…</p>
+  </div>
+  {{else}}
+  <div id="pair-box">
+    <p>Link the WhatsApp account for <strong>+{{.Session.Phone}}</strong>. Use a dedicated
+       test number — never a personal or production one.</p>
+    <button class="btn btn-primary" hx-post="{{u "/sessions"}}/{{.Session.ID}}/pair/start?mode=qr"
+            hx-target="#pair-box" hx-swap="innerHTML">Pair with QR code</button>
+    <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.Session.ID}}/pair/start?mode=phone"
+            hx-target="#pair-box" hx-swap="innerHTML">Pair with phone number</button>
+  </div>
+  {{end}}
+</div>
+{{end}}

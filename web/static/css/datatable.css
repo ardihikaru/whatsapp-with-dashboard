@@ -1,0 +1,99 @@
+/* Wide tables scroll INSIDE their card instead of widening the document. */
+.table-scroll { overflow-x: auto; }
+
+/* .table is width:100%, which inside a scroller means 100% of the SCROLLER —
+   so the browser squeezes columns to fit instead of scrolling, and a long text
+   column wraps one word per line (a 9-column log row measured 266px tall).
+   A min-width gives the table a floor to scroll past. */
+.table-scroll .table-wide { min-width: 900px; }
+
+/* Auto table layout hands the free-text column whatever the short columns leave
+   over — 149px, i.e. ~10 wrapped lines. Give the text a floor and stop the
+   timestamp/uid columns wrapping; the table then scrolls rather than stacks. */
+.table-wide .cell-message { min-width: 280px; }
+.table-wide th,
+.table-wide .mono { white-space: nowrap; }
+
+.table-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px dashed rgba(145, 158, 171, 0.2);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.pager { display: flex; align-items: center; gap: 4px; }
+
+.pager a, .pager span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  padding: 0 8px;
+  border-radius: var(--radius-btn);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+
+.pager a:hover { background: rgba(145, 158, 171, 0.08); color: var(--text-primary); }
+.pager .pager-current { color: #FFFFFF; background: var(--primary); }
+.pager .pager-gap { color: var(--text-disabled); font-weight: 400; }
+
+/* Row actions pinned right and kept on one line so a 4-button cell cannot
+   triple the row height on a narrow viewport. */
+.cell-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: nowrap;
+  white-space: nowrap;
+}
+
+.cell-actions .btn { height: 30px; padding: 0 10px; font-size: 13px; }
+
+/* Free-text cell content clipped to one line (title carries the full value). */
+.cell-clip {
+  display: block;
+  max-width: 320px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+}
+
+/* message status chips — badge-{{.Status}} had no queued/sent/failed rules */
+.badge-queued   { color: var(--warning-dark); background: rgba(255, 171, 0, 0.16); }
+.badge-sent     { color: var(--success-dark); background: rgba(34, 197, 94, 0.16); }
+.badge-failed   { color: var(--error-dark);   background: rgba(255, 86, 48, 0.16); }
+.badge-active   { color: var(--success-dark); background: rgba(34, 197, 94, 0.16); }
+.badge-inactive { color: var(--grey-600);     background: rgba(145, 158, 171, 0.16); }
+
+/* The badge inks above are tuned for the light surface; lift them on dark. */
+[data-theme="dark"] .badge-queued,
+[data-theme="dark"] .badge-pairing      { color: var(--warning-light); }
+[data-theme="dark"] .badge-sent,
+[data-theme="dark"] .badge-active,
+[data-theme="dark"] .badge-connected    { color: var(--success-light); }
+[data-theme="dark"] .badge-failed,
+[data-theme="dark"] .badge-disconnected { color: var(--error-light); }
+[data-theme="dark"] .badge-inactive,
+[data-theme="dark"] .badge-new          { color: var(--grey-400); }
+
+/* one-time secret reveal */
+.secret-box { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.secret-box .mono { word-break: break-all; }
+
+/* sidebar footer: the way back out to the platform backoffice */
+.nav-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border-sidebar);
+}

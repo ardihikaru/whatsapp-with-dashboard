@@ -1,0 +1,22 @@
+/* ---------- auth (centered) layout ---------- */
+
+.auth-layout {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(60% 60% at 100% 0%, var(--auth-tint-1) 0%, transparent 70%),
+    radial-gradient(60% 60% at 0% 100%, var(--auth-tint-2) 0%, transparent 70%),
+    var(--bg-body);
+}
+
+.auth-card { width: 100%; max-width: 420px; padding: 40px; }
+
+.auth-logo { margin-bottom: 24px; }
+
+.auth-card h4 { margin-bottom: 8px; }
+
+.auth-subtitle { color: var(--text-secondary); margin-bottom: 24px; }
+

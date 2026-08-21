@@ -1,0 +1,88 @@
+package handler
+
+import (
+	"io/fs"
+	"net/http"
+)
+
+// mountUI registers the operator's browser surface under d.BasePath.
+//
+// Every pattern below is built as bp+"/path". With BasePath="" that yields the
+// original route table byte for byte, which is what keeps `make run-wsm` and the
+// handler tests working unchanged; with "/wsm" the whole surface moves and the
+// templates follow it through the `u` template function (internal/renderer).
+//
+// GET / IS THE ONE PATTERN THAT NEEDS CARE. Mounted, the front door is
+// "GET /wsm/{$}" — and a browser that asks for "/wsm" without the trailing
+// slash does NOT match it. Go's ServeMux redirects /wsm → /wsm/ automatically
+// only for subtree patterns ending in "/", so the bare-prefix redirect is
+// registered explicitly below. Without it, the sidebar link from the backoffice
+// lands on a 404 while every path underneath works — the kind of gap that reads
+// as "the whole thing is broken" from one link and "fine" from everywhere else.
+func (h *handlers) mountUI(mux *http.ServeMux) {
+	bp := h.BasePath
+	page := h.Middleware.RequirePage
+
+	// Shell.
+	mux.HandleFunc("GET "+bp+"/{$}", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, bp+"/dashboard", http.StatusFound)
+	})
+	if bp != "" {
+		// "/wsm" (no trailing slash) → "/wsm/". See the note above.
+		mux.HandleFunc("GET "+bp, func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, bp+"/", http.StatusMovedPermanently)
+		})
+	}
+	// The door itself: both registered OUTSIDE page(...), like /theme/toggle.
+	mux.HandleFunc("GET "+bp+"/login", h.GetLogin)   // local admin sign-in form
+	mux.HandleFunc("POST "+bp+"/login", h.PostLogin) // verify + mint session
+	mux.Handle("POST "+bp+"/logout", page(http.HandlerFunc(h.PostLogout)))
+	mux.Handle("GET "+bp+"/dashboard", page(http.HandlerFunc(h.GetDashboard)))
+	mux.Handle("GET "+bp+"/dashboard/widgets", page(http.HandlerFunc(h.GetWidgets)))
+
+	// Outbound message log.
+	mux.Handle("GET "+bp+"/logs", page(http.HandlerFunc(h.GetLogs)))
+	mux.Handle("GET "+bp+"/logs/rows", page(http.HandlerFunc(h.GetLogRows)))
+	if h.DarkMode {
+		mux.HandleFunc("POST "+bp+"/theme/toggle", h.PostThemeToggle)
+	}
+
+	// API clients.
+	mux.Handle("GET "+bp+"/admin/api-clients", page(http.HandlerFunc(h.GetAPIClients)))
+	mux.Handle("POST "+bp+"/admin/api-clients", page(http.HandlerFunc(h.PostAPIClientCreate)))
+	mux.Handle("GET "+bp+"/admin/api-clients/{id}/edit", page(http.HandlerFunc(h.GetAPIClientEdit)))
+	mux.Handle("POST "+bp+"/admin/api-clients/{id}/edit", page(http.HandlerFunc(h.PostAPIClientEdit)))
+	mux.Handle("POST "+bp+"/admin/api-clients/{id}/activate", page(http.HandlerFunc(h.PostAPIClientActivate)))
+	mux.Handle("POST "+bp+"/admin/api-clients/{id}/deactivate", page(http.HandlerFunc(h.PostAPIClientDeactivate)))
+	mux.Handle("POST "+bp+"/admin/api-clients/{id}/rotate", page(http.HandlerFunc(h.PostAPIClientRotate)))
+	mux.Handle("POST "+bp+"/admin/api-clients/{id}/delete", page(http.HandlerFunc(h.PostAPIClientDelete)))
+
+	// Sessions + pairing pages and partials.
+	mux.Handle("GET "+bp+"/sessions", page(http.HandlerFunc(h.GetSessions)))
+	mux.Handle("GET "+bp+"/sessions/rows", page(http.HandlerFunc(h.GetSessionRows)))
+	mux.Handle("GET "+bp+"/sessions/new", page(http.HandlerFunc(h.GetSessionNew)))
+	mux.Handle("POST "+bp+"/sessions", page(http.HandlerFunc(h.PostSessionCreate)))
+	mux.Handle("POST "+bp+"/sessions/{id}/activate", page(http.HandlerFunc(h.PostSessionActivate)))
+	mux.Handle("POST "+bp+"/sessions/{id}/deactivate", page(http.HandlerFunc(h.PostSessionDeactivate)))
+	mux.Handle("POST "+bp+"/sessions/{id}/delete", page(http.HandlerFunc(h.PostSessionDelete)))
+	mux.Handle("GET "+bp+"/sessions/{id}/pair", page(http.HandlerFunc(h.GetPair)))
+	mux.Handle("POST "+bp+"/sessions/{id}/pair/start", page(http.HandlerFunc(h.PostPairStart)))
+	mux.Handle("GET "+bp+"/sessions/{id}/pair/status", page(http.HandlerFunc(h.GetPairStatus)))
+	mux.Handle("GET "+bp+"/sessions/{id}/qr.png", page(http.HandlerFunc(h.GetQRPNG)))
+
+	// Send page.
+	mux.Handle("GET "+bp+"/send", page(http.HandlerFunc(h.GetSend)))
+	mux.Handle("POST "+bp+"/send", page(http.HandlerFunc(h.PostSend)))
+
+	// Static assets (embedded). StripPrefix carries bp too — the files are
+	// addressed inside the embedded FS, which knows nothing about the mount.
+	staticFS, err := fs.Sub(h.AssetsFS, "web/static")
+	if err != nil {
+		panic(err) // embed layout is fixed at compile time
+	}
+	mux.Handle("GET "+bp+"/static/", http.StripPrefix(bp+"/static/", http.FileServerFS(staticFS)))
+
+	// Swagger UI is part of the browser surface and moves with it. The spec it
+	// fetches does NOT — see routes_api.go.
+	mux.HandleFunc("GET "+bp+"/docs", h.GetDocs)
+}

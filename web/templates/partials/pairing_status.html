@@ -1,0 +1,32 @@
+{{define "pairing_status"}}
+{{if .Done}}
+  {{if .Err}}
+  <div class="pair-failed">
+    <div class="alert alert-error">Pairing failed: {{.Err}}</div>
+    <button class="btn btn-primary" hx-post="{{u "/sessions"}}/{{.SessionID}}/pair/start?mode={{.Mode}}"
+            hx-target="#pair-box" hx-swap="innerHTML">Restart pairing</button>
+  </div>
+  {{else}}
+  <div class="pair-success">✅ Device linked. <a href="{{u "/sessions"}}">Back to sessions</a></div>
+  {{end}}
+  <!-- terminal states render NO hx-trigger → polling stops -->
+{{else}}
+<div hx-get="{{u "/sessions"}}/{{.SessionID}}/pair/status" hx-trigger="every 2s" hx-swap="outerHTML">
+  {{if .HasCode}}
+  <img class="qr-box" src="{{u "/sessions"}}/{{.SessionID}}/qr.png?g={{.Gen}}"
+       width="288" height="288" alt="WhatsApp pairing QR">
+  <p>Scan in WhatsApp → <strong>Linked devices</strong> → <strong>Link a device</strong>.<br>
+     Code refreshes automatically · {{.SecondsLeft}}s left</p>
+  {{else}}
+  <p>Waiting for WhatsApp…</p>
+  {{end}}
+  {{if .PhoneCode}}
+  <p class="pair-code">{{.PhoneCode}}</p>
+  <p>On the phone: <strong>Link a device</strong> → <strong>Link with phone number instead</strong>
+     → enter this code.</p>
+  {{else if .PhoneErr}}
+  <div class="alert alert-error">Phone pair-code failed: {{.PhoneErr}} — you can still scan the QR.</div>
+  {{end}}
+</div>
+{{end}}
+{{end}}

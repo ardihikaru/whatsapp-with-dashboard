@@ -1,0 +1,41 @@
+-- Bootstrap the whatsapp-with-dashboard app store on the SHARED
+-- master-compose-ai MySQL (container master-compose-ai-mysqldb-master-1).
+--
+-- Run as root, ONCE.  `make db-bootstrap` substitutes __DB__ / __USER__ /
+-- __PASSWORD__ from .env and pipes this into the container.
+--
+-- HOUSE RULE: one schema + one least-privilege user per product.  NEVER grant
+-- on *.* — this server is shared, and it already holds other products' data.
+--
+-- NOTE: master-compose-ai's config/mysql/init_files/ only runs against a FRESH
+-- data directory, and data/mysql/data is long since initialised.  Dropping a
+-- file in there would silently never execute; this has to be applied live.
+--
+-- COLLATION: that stack starts mysqld with --collation-server=utf8mb4_unicode_ci,
+-- but every table in migrations/0001_app_tables.sql declares
+-- utf8mb4_0900_ai_ci explicitly.  We pin the DATABASE default to match the
+-- tables rather than leave a schema default that nothing actually uses — which
+-- would be a trap for whoever adds the next table.
+
+CREATE DATABASE IF NOT EXISTS `__DB__`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
+
+-- '%' rather than 'localhost': the app reaches mysqld from a container on
+-- master-compose-ai-net (172.19.x.x) in container mode, and through the
+-- docker-proxy on 127.0.0.1:5306 in host mode.  Neither of those is
+-- 'localhost' from mysqld's point of view.
+CREATE USER IF NOT EXISTS '__USER__'@'%' IDENTIFIED BY '__PASSWORD__';
+ALTER  USER '__USER__'@'%' IDENTIFIED BY '__PASSWORD__';
+
+-- Schema-scoped only.  The DDL verbs are there because goose owns the schema:
+--   REFERENCES  — 0001 creates two foreign keys
+--   ALTER/INDEX — 0002 adds the attribution columns and five indexes
+--   CREATE/DROP — goose_db_version, and `make migrate-down-all`
+-- Deliberately no GRANT OPTION, no SUPER, no PROCESS, nothing on *.*.
+GRANT SELECT, INSERT, UPDATE, DELETE,
+      CREATE, DROP, ALTER, INDEX, REFERENCES,
+      CREATE TEMPORARY TABLES
+  ON `__DB__`.* TO '__USER__'@'%';
+
+FLUSH PRIVILEGES;

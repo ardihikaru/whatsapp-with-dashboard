@@ -1,0 +1,167 @@
+/* ---------- app shell (dashboard layout) ---------- */
+
+.app { display: flex; min-height: 100vh; }
+
+.sidebar {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  width: var(--nav-width);
+  flex-shrink: 0;
+  /* The nav is a fixed 100vh box; without this, a short window silently clips
+     the bottom items (the footer back-link first) with no way to reach them. */
+  overflow-y: auto;
+  padding: 16px;
+  background: var(--bg-paper);
+  border-right: 1px dashed var(--border-sidebar);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sidebar-logo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 8px 24px;
+  font-family: var(--font-heading);
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--logo-ink);
+}
+
+.nav-subheader {
+  padding: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-disabled);
+}
+
+.nav { display: flex; flex-direction: column; gap: 4px; }
+
+/* nav-section/css-vars.ts: item height 44, radius 8, active = primary on
+   rgba(primary, .08), hover .16 */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 12px;
+  border-radius: var(--radius-btn);
+  color: var(--text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  transition: background-color 120ms ease;
+}
+
+.nav-item:hover { background: rgba(145, 158, 171, 0.08); }
+
+.nav-item.active {
+  color: var(--primary);
+  font-weight: 600;
+  background: rgba(0, 167, 111, 0.08);
+}
+
+.nav-item.active:hover { background: rgba(0, 167, 111, 0.16); }
+
+.nav-icon { display: inline-flex; width: 24px; height: 24px; }
+
+/* nav sub-menus (collapsible <details> groups) */
+.nav-text { flex: 1; }
+
+.nav-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--error-darker);
+  background: rgba(255, 86, 48, 0.16);
+}
+
+[data-theme="dark"] .nav-badge { color: var(--error-lighter); }
+
+.nav-dot {
+  width: 24px;
+  display: inline-flex;
+  justify-content: center;
+}
+
+.nav-dot::before {
+  content: "";
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.48;
+}
+
+.nav-group { position: relative; }
+
+.nav-group > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.nav-group > summary::-webkit-details-marker { display: none; }
+
+.nav-caret {
+  display: inline-flex;
+  transition: transform 150ms ease;
+  color: var(--text-disabled);
+}
+
+.nav-group[open] > summary > .nav-caret { transform: rotate(90deg); }
+
+.nav-children {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 4px 0 4px 16px;
+  padding-left: 12px;
+  border-left: 1px solid rgba(145, 158, 171, 0.2);
+}
+
+.nav-children .nav-item { height: 36px; }
+
+.main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  height: var(--header-height);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 40px;
+  background: var(--bg-header);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.header-title {
+  font-family: var(--font-heading);
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.header-actions { display: flex; align-items: center; gap: 16px; }
+
+.header-user { color: var(--text-secondary); font-size: 13px; }
+
+.content { padding: 8px 40px 64px; }
+
+.page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 24px 0 40px;
+}

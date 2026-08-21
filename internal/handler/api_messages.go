@@ -1,0 +1,136 @@
+package handler
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"go.mau.fi/whatsmeow/types"
+
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
+)
+
+// PostAPISendMessage is the machine-facing send endpoint (docs/06 §6):
+// 200 sent / 200 failed / 202 still queued after 15s / 400 validation /
+// 404 unknown / 409 not connected / 429 queue full.
+func (h *handlers) PostAPISendMessage(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	digits, text, attr, ok := decodeSendRequest(w, r)
+	if !ok {
+		return
+	}
+	h.postAPISendThrough(w, r, s, wa.ToJID(digits), digits, text, attr)
+}
+
+func (h *handlers) PostAPISendMessageAuto(w http.ResponseWriter, r *http.Request) {
+	digits, text, attr, valid := decodeSendRequest(w, r)
+	if !valid {
+		return
+	}
+	s, _, ok := h.Manager.SelectConnected(r.Context())
+	if !ok {
+		writeError(w, http.StatusConflict, "no connected session available")
+		return
+	}
+	h.postAPISendThrough(w, r, s, wa.ToJID(digits), digits, text, attr)
+}
+
+// decodeSendRequest parses the send body, including the optional attribution the
+// log page breaks down by. category defaults to "notification"; api_client_id is
+// NOT read here — it comes from the bearer principal in sendThroughJID.
+func decodeSendRequest(w http.ResponseWriter, r *http.Request) (string, string, message.Attribution, bool) {
+	var req struct {
+		To        string `json:"to"`
+		Text      string `json:"text"`
+		ClientRef string `json:"client_ref"`
+		TenantRef string `json:"tenant_ref"`
+		Category  string `json:"category"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return "", "", message.Attribution{}, false
+	}
+	req.Text = strings.TrimSpace(req.Text)
+	if req.Text == "" || len(req.Text) > maxTextChars {
+		writeError(w, http.StatusBadRequest, "text is required, max 4096 characters")
+		return "", "", message.Attribution{}, false
+	}
+	digits, err := wa.NormalizePhone(req.To)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return "", "", message.Attribution{}, false
+	}
+	attr := message.Attribution{
+		ClientRef: strings.TrimSpace(req.ClientRef),
+		TenantRef: strings.TrimSpace(req.TenantRef),
+		Category:  message.NormalizeCategory(req.Category, message.CategoryNotification),
+	}
+	return digits, req.Text, attr, true
+}
+
+// postAPISendThrough is the shared JSON tail of every machine send path — phone
+// or group. It takes a resolved types.JID rather than digits so the group handler
+// reuses it verbatim (see sendThroughJID).
+func (h *handlers) postAPISendThrough(
+	w http.ResponseWriter, r *http.Request, s *wa.ManagedSession, to types.JID, toDisplay, text string, attr message.Attribution,
+) {
+	outcome, status := h.sendThroughJID(r, s, to, toDisplay, text, attr)
+	if status >= 400 {
+		writeError(w, status, outcome.Error)
+		return
+	}
+	snap := s.Snapshot()
+	resp := map[string]any{
+		"id":           outcome.ID,
+		"status":       outcome.Status,
+		"session_id":   snap.ID,
+		"session_name": snap.Name,
+	}
+	if outcome.WAMessageID != "" {
+		resp["wa_message_id"] = outcome.WAMessageID
+	}
+	if outcome.Error != "" {
+		resp["error"] = outcome.Error
+	}
+	writeJSON(w, status, resp)
+}
+
+// GetAPISessionMessages returns the recent audit log for one session.
+func (h *handlers) GetAPISessionMessages(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+	msgs, err := h.Messages.Recent(r.Context(), s.ID, limit)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "could not read messages")
+		return
+	}
+	type apiMessage struct {
+		ID          string     `json:"id"`
+		ToPhone     string     `json:"to_phone"`
+		Status      string     `json:"status"`
+		WAMessageID string     `json:"wa_message_id"`
+		Error       string     `json:"error"`
+		Attempts    int        `json:"attempts"`
+		CreatedAt   time.Time  `json:"created_at"`
+		SentAt      *time.Time `json:"sent_at"`
+	}
+	out := make([]apiMessage, 0, len(msgs))
+	for _, m := range msgs {
+		out = append(out, apiMessage{ID: m.ID, ToPhone: m.ToPhone, Status: m.Status,
+			WAMessageID: m.WAMessageID, Error: m.Error, Attempts: m.Attempts,
+			CreatedAt: m.CreatedAt, SentAt: m.SentAt})
+	}
+	writeJSON(w, http.StatusOK, out)
+}

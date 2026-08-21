@@ -1,0 +1,37 @@
+{{define "content"}}
+<div class="page-heading">
+  <div>
+    <h4>Gateway overview 👋</h4>
+    <p class="page-subtitle">Volume, tingkat sukses, latensi, dan konsumen di seluruh sesi WhatsApp</p>
+  </div>
+  <button class="btn btn-primary" hx-get="{{u "/dashboard/widgets"}}" hx-target="#widgets" hx-swap="innerHTML">
+    Refresh
+  </button>
+</div>
+<div id="widgets" hx-get="{{u "/dashboard/widgets"}}" hx-trigger="every 60s" hx-swap="innerHTML">
+  {{template "widgets" .}}
+</div>
+<div class="section-title">Insights</div>
+<div class="chart-grid">
+  <div class="chart-card">
+    <div class="chart-title">Volume pesan (30 hari)</div>
+    <script type="application/json" data-chart="volume">{{.Volume}}</script>
+    <div id="chart-volume" class="chart-canvas"></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Volume per sesi (14 hari)</div>
+    <script type="application/json" data-chart="persession">{{.PerSession}}</script>
+    <div id="chart-persession" class="chart-canvas"></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Latensi kirim (24 jam)</div>
+    <script type="application/json" data-chart="latency">{{.Latency}}</script>
+    <div id="chart-latency" class="chart-canvas"></div>
+  </div>
+  <div class="chart-card">
+    <div class="chart-title">Volume per konsumen API (7 hari)</div>
+    <script type="application/json" data-chart="consumers">{{.Consumers}}</script>
+    <div id="chart-consumers" class="chart-canvas"></div>
+  </div>
+</div>
+{{end}}

@@ -1,0 +1,125 @@
+/* --- Phase 2/3: sessions table, badges, pairing, send form --- */
+
+.table { width: 100%; border-collapse: collapse; font-size: 14px; }
+.table th {
+  text-align: left; padding: 12px 16px; color: var(--text-secondary);
+  background: rgba(145, 158, 171, 0.08); font-weight: 600;
+}
+.table th:first-child { border-radius: 8px 0 0 8px; }
+.table th:last-child { border-radius: 0 8px 8px 0; }
+.table td { padding: 12px 16px; border-bottom: 1px dashed rgba(145, 158, 171, 0.2); vertical-align: middle; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 13px; }
+.row-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.row-actions .btn { height: 30px; padding: 0 10px; font-size: 13px; }
+.btn-danger { color: #ff5630; border-color: rgba(255, 86, 48, 0.5); }
+.btn-danger:hover { background: rgba(255, 86, 48, 0.08); border-color: #ff5630; }
+
+.badge {
+  display: inline-block; padding: 2px 10px; border-radius: 6px;
+  font-size: 12px; font-weight: 700; text-transform: capitalize;
+}
+.badge-new          { color: #637381; background: rgba(145, 158, 171, 0.16); }
+.badge-pairing      { color: #b76e00; background: rgba(255, 171, 0, 0.16); }
+.badge-connected    { color: #118d57; background: rgba(34, 197, 94, 0.16); }
+.badge-disconnected { color: #b71d18; background: rgba(255, 86, 48, 0.16); }
+.badge-logged_out   { color: #5119b7; background: rgba(142, 51, 255, 0.16); }
+
+.qr-box { display: block; margin: 16px 0; border-radius: 12px; background: #fff; padding: 12px; }
+.pair-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 32px; font-weight: 700; letter-spacing: 4px; margin: 16px 0 8px;
+}
+.pair-success { font-size: 16px; padding: 8px 0; }
+
+.form-card {
+  max-width: 560px;
+  padding: 24px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+
+.alert-success { color: #118d57; background: rgba(34, 197, 94, 0.12); }
+.textfield textarea, .textfield select {
+  width: 100%; border: 1px solid rgba(145, 158, 171, 0.32); border-radius: 8px;
+  padding: 12px 14px; font: inherit; color: var(--text-primary); background: transparent;
+}
+.textfield textarea:focus, .textfield select:focus { outline: none; border-color: var(--text-primary); }
+.textfield select option { color: initial; }
+
+/* --- Phase 4: /logs + /admin/api-clients UI fixes ---------------------------
+   Every selector below was already used by a template but had no rule at all,
+   so the element rendered unstyled. Tokens only — no new hex outside :root. */
+
+/* section headings between cards (logs, dashboard) */
+.section-title {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  margin: 32px 0 16px;
+}
+
+/* de-emphasised text: em-dash placeholders, empty states, footer counts */
+.muted { color: var(--text-secondary); }
+.text-danger { color: var(--error); }
+
+/* filter bar (logs, api clients) — a wrapping row of labelled controls */
+.filter-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 16px;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1 1 160px;
+  min-width: 160px;
+  margin: 0;
+}
+
+.filter-field > .textfield-label { margin-bottom: 0; }
+
+.filter-field input,
+.filter-field select {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  font: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid rgba(145, 158, 171, 0.32);
+  border-radius: var(--radius-btn);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.filter-field input:focus,
+.filter-field select:focus { border-color: var(--text-primary); }
+.filter-field select option { color: initial; }
+
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Disabled controls must stay readable — --text-disabled on a tinted well,
+   never the browser default grey-on-grey. */
+.textfield input:disabled,
+.textfield select:disabled,
+.textfield textarea:disabled,
+.filter-field input:disabled,
+.filter-field select:disabled {
+  color: var(--text-disabled);
+  background: rgba(145, 158, 171, 0.12);
+  border-color: rgba(145, 158, 171, 0.2);
+  cursor: not-allowed;
+}
+

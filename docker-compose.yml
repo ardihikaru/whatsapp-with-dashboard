@@ -1,0 +1,99 @@
+# whatsapp-with-dashboard — CONTAINER MODE.
+#
+# The app's MySQL store lives on the SHARED master-compose-ai stack
+# (/home/ardi/devel/projects/master-compose-ai). That stack is NOT started by
+# this file and NOT owned by this repo.
+#
+#   host mode       make run            -> 127.0.0.1:5306      (published port)
+#   container mode  make up             -> mysqldb-master:3306 (container DNS)
+#
+# 127.0.0.1 inside this container is the CONTAINER's loopback, not the host's,
+# so the published 5306 is unreachable from in here. Joining the shared network
+# and using the service name is both shorter and the house pattern.
+#
+# The .env in this repo is written for HOST MODE. The `environment:` block below
+# overrides the host-mode values in-container — compose gives `environment:`
+# precedence over `env_file:`, and that seam is what lets ONE .env serve both.
+#
+# NEVER run `docker compose down` (let alone `down -v`) inside master-compose-ai:
+# that stack holds other products' data.
+
+name: whatsapp-with-dashboard
+
+networks:
+  infra:
+    # Owned by the master-compose-ai stack, NOT created here. If this errors with
+    # "network declared as external, but could not be found", that stack is down —
+    # start it there; never `docker network create` it here.
+    external: true
+    name: master-compose-ai-net
+
+volumes:
+  wsm-sqlite:
+    # whatsmeow's crypto/device store. THIS IS CRYPTOGRAPHIC IDENTITY MATERIAL:
+    # losing it means re-pairing the handset by QR, in person. Treat it like a
+    # credential and never `docker compose down -v` this stack casually.
+    name: whatsapp-with-dashboard-sqlite
+
+services:
+  app:
+    build:
+      context: .
+    image: whatsapp-with-dashboard:local
+    restart: unless-stopped
+
+    # HARD SINGLETON — see the Dockerfile. Two replicas against one store make
+    # WhatsApp log the session out. Do not add deploy.replicas, do not roll this.
+
+    env_file:
+      - .env
+    environment:
+      # --- container-mode overrides (these win over env_file) ---
+      WSM_MYSQL_HOST: mysqldb-master
+      WSM_MYSQL_PORT: "3306"
+      # Neutralise any host-mode WSM_APP_DSN left in .env: internal/config lets
+      # WSM_APP_DSN win VERBATIM over the WSM_MYSQL_* parts, and envOr() treats
+      # "" as unset — so an empty string here restores the composed DSN above.
+      WSM_APP_DSN: ""
+      # The SQLite store on the named volume, not the repo working directory.
+      WSM_DB_PATH: /data/wsm.db
+      WSM_ADDR: ":8800"
+
+    volumes:
+      - wsm-sqlite:/data
+
+    ports:
+      # Loopback only. This is an admin surface with a WhatsApp identity behind
+      # it; do not publish it on the LAN without a reverse proxy and TLS.
+      - "127.0.0.1:${WSM_EXPOSED_PORT:-8800}:8800"
+
+    networks: [infra]
+
+    # whatsmeow needs time to disconnect its websockets cleanly on SIGTERM.
+    # cmd/app tears down as server.Shutdown(5s) -> manager.Close() (joins every
+    # send pump) -> appDB.Close() -> the SQLite store LAST. 15s leaves headroom
+    # over that 5s budget; a SIGKILL mid-teardown risks the crypto store.
+    stop_grace_period: 15s
+
+    # No healthcheck: distroless/static has nothing to exec. GET /api/v1/health
+    # is public — probe it from the host or a reverse proxy:
+    #   curl -sf http://127.0.0.1:8800/api/v1/health
+
+  # One-shot goose runner, ON the shared network so it resolves mysqldb-master
+  # the same way the app does. Opt-in: the normal path is `make migrate-up` on
+  # the host. This exists for hosts with no Go toolchain.
+  #
+  #   docker compose --profile migrate run --rm migrate up
+  #   docker compose --profile migrate run --rm migrate status
+  migrate:
+    profiles: ["migrate"]
+    build:
+      context: .
+      dockerfile: Dockerfile.migrate
+    env_file:
+      - .env
+    environment:
+      WSM_MYSQL_HOST: mysqldb-master
+      WSM_MYSQL_PORT: "3306"
+    networks: [infra]
+    restart: "no"

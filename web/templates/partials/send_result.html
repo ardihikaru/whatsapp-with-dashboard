@@ -1,0 +1,9 @@
+{{define "send_result"}}
+{{if eq .Status "sent"}}
+<div class="alert alert-success">Sent{{if .SessionName}} via {{.SessionName}}{{end}} - WhatsApp message ID <span class="mono">{{.WAMessageID}}</span></div>
+{{else if eq .Status "queued"}}
+<div class="alert">Queued{{if .SessionName}} via {{.SessionName}}{{end}} - {{.Error}}</div>
+{{else}}
+<div class="alert alert-error">{{.Error}}</div>
+{{end}}
+{{end}}

@@ -1,0 +1,12 @@
+{{define "widgets"}}
+<div class="widget-grid">
+  {{range .Widgets}}
+  <div class="widget-card widget-{{.Variant}}">
+    <div class="widget-avatar">{{printf "%.1s" .Label}}</div>
+    <div class="widget-label">{{.Label}}</div>
+    <div class="widget-value">{{.Value}}</div>
+  </div>
+  {{end}}
+</div>
+<div class="widget-meta">Generated {{.GeneratedAt.Format "15:04:05 MST"}} · refreshes every 60s</div>
+{{end}}

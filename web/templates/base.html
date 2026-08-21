@@ -1,0 +1,38 @@
+{{define "base"}}<!doctype html>
+<html lang="en"{{if eq .Theme "dark"}} data-theme="dark"{{end}}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · Clino WhatsApp</title>
+  <link rel="icon" href="{{u "/static/img/logo.svg"}}">
+  <!-- minimal.css was split at 809 lines (scripts/loc-check.sh, 200-line rule).
+       ORDER IS LOAD-BEARING and is the original file's order: light badge inks in
+       forms/datatable must precede the dark overrides, and charts.css carries the
+       @media that overrides the sidebar rules in layout.css. Concatenating these
+       eight in this order reproduces the old minimal.css byte-for-byte. -->
+  <link rel="stylesheet" href="{{u "/static/css/base.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/layout.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/components.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/auth.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/widgets.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/charts.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/forms.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/datatable.css"}}">
+  <script src="{{u "/static/js/htmx.min.js"}}" defer></script>
+  {{if .NeedECharts}}
+  <script src="{{u "/static/js/echarts.min.js"}}" defer></script>
+  <script src="{{u "/static/js/charts-init.js"}}" defer></script>
+  {{end}}
+</head>
+<body>
+  <div class="app">
+    {{template "sidebar" .}}
+    <div class="main">
+      {{template "header" .}}
+      <main class="content">
+        {{template "content" .}}
+      </main>
+    </div>
+  </div>
+</body>
+</html>{{end}}

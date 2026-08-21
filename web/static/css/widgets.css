@@ -1,0 +1,71 @@
+/* ---------- dashboard widgets (analytics-widget-summary) ---------- */
+
+.widget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 24px;
+}
+
+.widget-card {
+  padding: 24px;
+  border-radius: var(--radius-card);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.widget-avatar {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--widget-avatar-bg);
+  font-family: var(--font-heading);
+  font-size: 20px;
+  font-weight: 800;
+}
+
+.widget-label { font-size: 14px; font-weight: 600; }
+
+.widget-value {
+  font-family: var(--font-heading);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.widget-primary {
+  color: var(--widget-primary-ink);
+  background: linear-gradient(135deg, rgba(200, 250, 214, 0.48), rgba(91, 228, 155, 0.48)), var(--widget-surface);
+}
+
+.widget-secondary {
+  color: var(--widget-secondary-ink);
+  background: linear-gradient(135deg, rgba(239, 214, 255, 0.48), rgba(198, 132, 255, 0.48)), var(--widget-surface);
+}
+
+.widget-info {
+  color: var(--widget-info-ink);
+  background: linear-gradient(135deg, rgba(202, 253, 245, 0.48), rgba(97, 243, 243, 0.48)), var(--widget-surface);
+}
+
+.widget-success {
+  color: var(--widget-success-ink);
+  background: linear-gradient(135deg, rgba(211, 252, 210, 0.48), rgba(119, 237, 139, 0.48)), var(--widget-surface);
+}
+
+.widget-warning {
+  color: var(--widget-warning-ink);
+  background: linear-gradient(135deg, rgba(255, 245, 204, 0.48), rgba(255, 214, 102, 0.48)), var(--widget-surface);
+}
+
+.widget-error {
+  color: var(--widget-error-ink);
+  background: linear-gradient(135deg, rgba(255, 233, 213, 0.48), rgba(255, 172, 130, 0.48)), var(--widget-surface);
+}
+
+.widget-meta { margin-top: 24px; font-size: 12px; color: var(--text-disabled); }
+

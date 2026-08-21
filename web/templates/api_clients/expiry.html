@@ -1,0 +1,32 @@
+{{define "api_client_expiry"}}
+<label class="textfield">
+  <span class="textfield-label">Masa berlaku access token</span>
+  <select name="expiry_choice" class="select" data-expiry-choice>
+    <option value="86400"{{if eq .ExpiryChoice "86400"}} selected{{end}}>1 hari</option>
+    <option value="604800"{{if eq .ExpiryChoice "604800"}} selected{{end}}>7 hari</option>
+    <option value="2592000"{{if eq .ExpiryChoice "2592000"}} selected{{end}}>30 hari</option>
+    <option value="custom"{{if eq .ExpiryChoice "custom"}} selected{{end}}>Durasi khusus</option>
+    <option value="no_expiry"{{if eq .ExpiryChoice "no_expiry"}} selected{{end}}>Tanpa kedaluwarsa</option>
+  </select>
+</label>
+<label class="textfield">
+  <span class="textfield-label">Durasi khusus (detik)</span>
+  <input type="number" min="1" name="custom_ttl_seconds" value="{{.CustomTTLSeconds}}"
+         data-expiry-custom{{if ne .ExpiryChoice "custom"}} disabled{{end}}>
+</label>
+<script>
+/* The server only reads custom_ttl_seconds when expiry_choice == "custom"; the
+   field used to stay live and silently discard what was typed into it. */
+(function () {
+  var form = document.currentScript.closest('form');
+  if (!form) return;
+  var choice = form.querySelector('[data-expiry-choice]');
+  var custom = form.querySelector('[data-expiry-custom]');
+  if (!choice || !custom) return;
+  choice.addEventListener('change', function () {
+    custom.disabled = choice.value !== 'custom';
+    if (!custom.disabled) custom.focus();
+  });
+})();
+</script>
+{{end}}

@@ -1,0 +1,21 @@
+# Goose runner for CONTAINER MODE.
+#
+# The app image deliberately does NOT embed migrations/ and does not migrate on
+# boot: a schema change is an operator action, not a start-up side effect of a
+# service that is a hard singleton.
+#
+# goose is baked in at BUILD time rather than `go run`-fetched per invocation,
+# so running a migration needs no network and no warm module cache.
+FROM golang:1.25-alpine AS build
+RUN go install github.com/pressly/goose/v3/cmd/goose@v3.24.3
+
+FROM alpine:3.20
+RUN apk add --no-cache ca-certificates
+COPY --from=build /go/bin/goose /usr/local/bin/goose
+COPY migrations/ /migrations/
+WORKDIR /migrations
+
+# The DSN is composed from the same WSM_MYSQL_* vars the app uses, plus
+# multiStatements=true, which goose needs and the app deliberately does not set.
+ENTRYPOINT ["/bin/sh", "-c", \
+  "exec goose -dir /migrations mysql \"$WSM_MYSQL_USER:$WSM_MYSQL_PASSWORD@tcp($WSM_MYSQL_HOST:$WSM_MYSQL_PORT)/$WSM_MYSQL_DATABASE?parseTime=true&charset=utf8mb4&loc=UTC&multiStatements=true\" \"$@\"", "--"]

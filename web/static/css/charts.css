@@ -1,0 +1,67 @@
+/* ---------- charts (ECharts) & diagram (GoJS) ---------- */
+
+.page-heading .page-subtitle {
+  margin-top: 4px;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 24px;
+}
+
+.chart-card {
+  padding: 24px;
+  background: var(--bg-paper);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.chart-title {
+  font-family: var(--font-heading);
+  font-size: 16px;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.chart-canvas { height: 320px; width: 100%; }
+
+.diagram-canvas {
+  height: 460px;
+  width: 100%;
+  border-radius: var(--radius-btn);
+  background: var(--bg-body);
+}
+
+.diagram-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.diagram-legend span { display: inline-flex; align-items: center; gap: 8px; }
+
+.diagram-legend .dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.dot-start { background: var(--info); }
+.dot-success { background: var(--success); }
+.dot-error { background: var(--error); }
+.dot-default { background: var(--grey-500); }
+
+/* ---------- responsive ---------- */
+
+@media (max-width: 900px) {
+  .sidebar { display: none; }
+  .header, .content { padding-left: 20px; padding-right: 20px; }
+}
+

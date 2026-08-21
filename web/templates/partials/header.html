@@ -1,0 +1,10 @@
+{{define "header"}}
+<header class="header">
+  <div class="header-title">{{.Title}}</div>
+  <div class="header-actions">
+    {{template "theme_toggle" .}}
+    <span class="header-user">{{.Username}}</span>
+    <button class="btn btn-outline" hx-post="{{u "/logout"}}">Logout</button>
+  </div>
+</header>
+{{end}}

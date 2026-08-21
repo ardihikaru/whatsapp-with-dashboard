@@ -1,0 +1,23 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>New WhatsApp Session</h4>
+</div>
+<div class="card form-card">
+  <div id="form-error"></div>
+  <form hx-post="{{u "/sessions"}}" hx-target="#form-error" hx-swap="innerHTML"
+        action="{{u "/sessions"}}" method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Session name</span>
+      <input type="text" name="name" placeholder="e.g. Taskmgr notifications" required autofocus>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">WhatsApp phone number (international format)</span>
+      <input type="tel" name="phone" placeholder="+62 812-0000-0000" required>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Create &amp; pair</button>
+      <a class="btn btn-outline" href="{{u "/sessions"}}">Cancel</a>
+    </div>
+  </form>
+</div>
+{{end}}

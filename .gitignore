@@ -1,0 +1,13 @@
+# The SQLite file holds WhatsApp cryptographic identity material (whatsmeow
+# keys) — treat it like a credential, never commit it. See README § Backup.
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+# Local env: MySQL and admin credentials.
+.env
+
+# Compiled binary / local bind-mount data.
+/wsm
+/data/

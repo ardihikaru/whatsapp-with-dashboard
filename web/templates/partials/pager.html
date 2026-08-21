@@ -1,0 +1,20 @@
+{{/* Numbered table footer. Dot is a handler.pagerView. Renders nothing when
+     there is a single page of results and nothing to say about a range. */}}
+{{define "pager"}}
+{{if or (gt .Pages 1) (gt .Total 0)}}
+<div class="table-footer">
+  <span>
+    {{if gt .Total 0}}Menampilkan {{.From}}–{{.To}} dari {{.Total}}{{else}}Tidak ada data{{end}}
+  </span>
+  {{if gt .Pages 1}}
+  <nav class="pager" aria-label="Halaman">
+    {{range .Links}}
+      {{if .Gap}}<span class="pager-gap">{{.Label}}</span>
+      {{else if .Current}}<span class="pager-current" aria-current="page">{{.Label}}</span>
+      {{else}}<a href="{{.URL}}">{{.Label}}</a>{{end}}
+    {{end}}
+  </nav>
+  {{end}}
+</div>
+{{end}}
+{{end}}

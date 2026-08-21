@@ -1,0 +1,41 @@
+{{define "login"}}<!doctype html>
+<html lang="en"{{if eq .Theme "dark"}} data-theme="dark"{{end}}>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · WSM</title>
+  <link rel="icon" href="{{u "/static/img/logo.svg"}}">
+  <link rel="stylesheet" href="{{u "/static/css/base.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/layout.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/components.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/auth.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/widgets.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/charts.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/forms.css"}}">
+  <link rel="stylesheet" href="{{u "/static/css/datatable.css"}}">
+  <script src="{{u "/static/js/htmx.min.js"}}" defer></script>
+</head>
+<body>
+  <div class="auth-layout">
+    <div class="theme-toggle-floating">{{template "theme_toggle" .}}</div>
+    <div class="auth-card card">
+      <img class="auth-logo" src="{{u "/static/img/logo.svg"}}" alt="" width="48" height="48">
+      <h4>Sign in to WhatsApp Session Management</h4>
+      <p class="auth-subtitle">Masuk dengan akun admin</p>
+      <div id="login-error">{{template "login_error" .}}</div>
+      <form hx-post="{{u "/login"}}" hx-target="#login-error" hx-swap="innerHTML"
+            action="{{u "/login"}}" method="post" novalidate>
+        <label class="textfield">
+          <span class="textfield-label">Username</span>
+          <input type="text" name="username" autocomplete="username" required autofocus>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Password</span>
+          <input type="password" name="password" autocomplete="current-password" required>
+        </label>
+        <button class="btn btn-primary btn-large" type="submit">Sign in</button>
+      </form>
+    </div>
+  </div>
+</body>
+</html>{{end}}

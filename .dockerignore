@@ -1,0 +1,14 @@
+# The build context is the repo root now, so this file is what keeps a live
+# WhatsApp identity out of the image. Keep the *.db rules first and permanent.
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
+
+.git
+.env
+.env.example
+data/
+docs/
+README.md
+CHANGELOG.md

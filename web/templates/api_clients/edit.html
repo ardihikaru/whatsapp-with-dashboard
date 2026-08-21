@@ -1,0 +1,54 @@
+{{define "content"}}
+<div class="page-heading">
+  <div>
+    <h4>Ubah API Client</h4>
+    <p class="page-subtitle">{{.Client.Name}}</p>
+  </div>
+  <a class="btn btn-outline" href="{{u "/admin/api-clients"}}">Kembali</a>
+</div>
+{{if .Secret}}{{template "api_client_secret" .Secret}}{{end}}
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+<div class="card form-card">
+  <form action="{{u "/admin/api-clients"}}/{{.Client.ID}}/edit" method="post">
+    <label class="textfield">
+      <span class="textfield-label">Nama</span>
+      <input type="text" name="name" value="{{.Form.Name}}" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Login ID</span>
+      <input type="text" name="login_id" value="{{.Form.LoginID}}" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Deskripsi</span>
+      <textarea name="description" rows="3">{{.Form.Description}}</textarea>
+    </label>
+    {{template "api_client_expiry" .Form}}
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Simpan</button>
+    </div>
+  </form>
+</div>
+<div class="card form-card">
+  <p>Status: {{if .Client.Active}}<span class="badge badge-active">aktif</span>{{else}}<span class="badge badge-inactive">nonaktif</span>{{end}}</p>
+  <div class="row-actions" style="margin-top:16px">
+    <form action="{{u "/admin/api-clients"}}/{{.Client.ID}}/rotate" method="post">
+      <button class="btn btn-outline" type="submit"
+              onclick="return confirm('Putar ulang secret {{.Client.Name}}? Secret lama dan semua token aktifnya langsung berhenti berlaku.')">Putar ulang secret</button>
+    </form>
+    {{if .Client.Active}}
+    <form action="{{u "/admin/api-clients"}}/{{.Client.ID}}/deactivate" method="post">
+      <button class="btn btn-outline" type="submit"
+              onclick="return confirm('Nonaktifkan {{.Client.Name}}? Token yang sedang berjalan akan ditolak.')">Nonaktifkan</button>
+    </form>
+    {{else}}
+    <form action="{{u "/admin/api-clients"}}/{{.Client.ID}}/activate" method="post">
+      <button class="btn btn-outline" type="submit">Aktifkan</button>
+    </form>
+    {{end}}
+    <form action="{{u "/admin/api-clients"}}/{{.Client.ID}}/delete" method="post">
+      <button class="btn btn-outline btn-danger" type="submit"
+              onclick="return confirm('Hapus {{.Client.Name}} secara permanen? Integrasi yang memakai client ini akan langsung berhenti.')">Hapus</button>
+    </form>
+  </div>
+</div>
+{{end}}

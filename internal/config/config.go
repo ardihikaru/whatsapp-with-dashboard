@@ -1,0 +1,256 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"golang.org/x/crypto/bcrypt"
+)
+
+// Defaults. The app now uses TWO stores (hybrid model, docs/07 §2):
+//   - MySQL for the app's own tables (wa_sessions, wa_messages, api_clients,
+//     api_access_tokens) — see AppDSN below;
+//   - SQLite for the whatsmeow sqlstore crypto tables, which whatsmeow can only
+//     drive on SQLite or Postgres (no MySQL dialect upstream) — see DBPath.
+const (
+	DefaultAddr   = ":8800"
+	DefaultDBPath = "wsm-store.db" // whatsmeow crypto store ONLY
+	// modernc.org/sqlite (pure Go). Was "sqlite3" (mattn, CGO) until Fase 9 —
+	// see internal/db.SQLiteDialect for why there is now only one.
+	DefaultSQLiteDialect = "sqlite"
+	DefaultTTL           = 12 * time.Hour
+	DefaultSendRate      = 1.0
+	DefaultSendBurst     = 3
+	DefaultReconcilePar  = 4
+
+	// MySQL app-store defaults target the SHARED master-compose-ai stack.
+	//
+	// 127.0.0.1:5306 is the HOST-side mapping of that stack's mysqldb-master
+	// (docker-compose.yml there publishes ${MYSQL_EXPOSED_PORT:-5306}:3306).
+	// From INSIDE a container on master-compose-ai-net the address is instead
+	// mysqldb-master:3306 — our own docker-compose.yml overrides
+	// WSM_MYSQL_HOST/PORT for that case, which is why the defaults baked in
+	// here are the host-mode values.
+	//
+	// House rule (one schema + one least-privilege user per product): the app
+	// gets its own `wa_dashboard` database and never connects as root.
+	DefaultMySQLHost = "127.0.0.1"
+	DefaultMySQLPort = "5306"
+	DefaultMySQLUser = "wa_dashboard"
+	DefaultMySQLPass = "" // no default: a wrong password should fail loudly
+	DefaultMySQLDB   = "wa_dashboard"
+
+	// DefaultAdminUser is the login name when WSM_ADMIN_USER is unset. The
+	// PASSWORD has no default on purpose — see adminPasswordHash.
+	DefaultAdminUser = "admin"
+
+	DefaultBaseURL = "http://localhost:8800"
+
+	// PlatformURL is the sidebar's "back to the parent app" link. Upstream this
+	// pointed at the platform backoffice; standalone there is no parent, so the
+	// default is EMPTY, which platformLink() renders as "hide the link". Set
+	// WA_PLATFORM_URL to an ABSOLUTE url if this ever hangs off something.
+	DefaultPlatformURL = ""
+)
+
+// Config is the resolved application configuration.
+// Precedence: environment variables > built-in defaults.
+type Config struct {
+	Addr          string
+	DBPath        string // whatsmeow crypto store (SQLite) path
+	AppDSN        string // MySQL DSN for the app tables
+	SQLiteDialect string
+	SessionTTL    time.Duration
+	SendRate      float64
+	SendBurst     int
+	ReconcilePar  int
+	DarkMode      bool
+
+	// AdminUser / AdminPasswordHash are the ONE local operator credential for
+	// the browser surface. Upstream this app was an OIDC relying party of a
+	// separate auth-service; standalone there is no such service, so the admin
+	// comes from the environment. The MACHINE api (api_clients + bearer tokens)
+	// is unrelated and untouched — see internal/domain/apiclient.
+	AdminUser         string
+	AdminPasswordHash []byte // bcrypt; never the plaintext
+	// AdminPasswordPlaintext records that the hash was derived from
+	// WSM_ADMIN_PASSWORD so main can warn once. Kept as a flag rather than a log
+	// call so this package stays free of side effects.
+	AdminPasswordPlaintext bool
+
+	BaseURL string
+	// BasePath is the URL prefix the BROWSER surface is mounted under, DERIVED
+	// from BaseURL rather than configured separately, so "where we are mounted"
+	// and "what we tell the world" cannot drift.
+	//
+	//   https://app.clino.id/wsm  → "/wsm"
+	//   http://localhost:8800     → ""
+	//
+	// The JSON API is deliberately NOT under it — see routes_api.go.
+	BasePath     string
+	CookieSecure bool
+
+	// PlatformURL is the backoffice link rendered in the sidebar footer ("" hides it).
+	PlatformURL string
+}
+
+// Load resolves the configuration and fails fast on an invalid env value.
+func Load() (*Config, error) {
+	cfg := &Config{
+		Addr:          envOr("WSM_ADDR", DefaultAddr),
+		DBPath:        envOr("WSM_DB_PATH", DefaultDBPath),
+		AppDSN:        appDSN(),
+		SQLiteDialect: envOr("WSM_SQLITE_DIALECT", DefaultSQLiteDialect),
+		SessionTTL:    DefaultTTL,
+		SendRate:      DefaultSendRate,
+		SendBurst:     DefaultSendBurst,
+		ReconcilePar:  DefaultReconcilePar,
+		BaseURL:       envOr("WA_BASE_URL", DefaultBaseURL),
+		PlatformURL:   DefaultPlatformURL,
+	}
+	bp, err := basePath(cfg.BaseURL)
+	if err != nil {
+		return nil, err
+	}
+	cfg.BasePath = bp
+	cfg.AdminUser = envOr("WSM_ADMIN_USER", DefaultAdminUser)
+	hash, plaintext, err := adminPasswordHash()
+	if err != nil {
+		return nil, err
+	}
+	cfg.AdminPasswordHash, cfg.AdminPasswordPlaintext = hash, plaintext
+	// LookupEnv, not envOr: WA_PLATFORM_URL="" is a meaningful value (hide the link).
+	if v, ok := os.LookupEnv("WA_PLATFORM_URL"); ok {
+		cfg.PlatformURL = v
+	}
+	if raw := os.Getenv("WA_COOKIE_SECURE"); raw != "" {
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid WA_COOKIE_SECURE %q: %v", raw, err)
+		}
+		cfg.CookieSecure = b
+	}
+	if raw := os.Getenv("WSM_SESSION_TTL"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return nil, fmt.Errorf("invalid WSM_SESSION_TTL %q: %v", raw, err)
+		}
+		cfg.SessionTTL = d
+	}
+	if raw := os.Getenv("WSM_SEND_RATE"); raw != "" {
+		f, err := strconv.ParseFloat(raw, 64)
+		if err != nil || f <= 0 {
+			return nil, fmt.Errorf("invalid WSM_SEND_RATE %q: %v", raw, err)
+		}
+		cfg.SendRate = f
+	}
+	if raw := os.Getenv("WSM_SEND_BURST"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("invalid WSM_SEND_BURST %q: %v", raw, err)
+		}
+		cfg.SendBurst = n
+	}
+	if raw := os.Getenv("WSM_RECONCILE_PAR"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return nil, fmt.Errorf("invalid WSM_RECONCILE_PAR %q: %v", raw, err)
+		}
+		cfg.ReconcilePar = n
+	}
+	cfg.DarkMode = true
+	if raw := os.Getenv("WSM_DARK_MODE"); raw != "" {
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid WSM_DARK_MODE %q: %v", raw, err)
+		}
+		cfg.DarkMode = b
+	}
+	return cfg, nil
+}
+
+func envOr(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// appDSN builds the MySQL DSN for the app tables. WSM_APP_DSN wins verbatim;
+// otherwise it is assembled from WSM_MYSQL_* parts. parseTime=true so the
+// driver returns time.Time (the repos still store RFC3339 strings, but
+// parseTime keeps any native DATETIME reads well-behaved).
+func appDSN() string {
+	if v := os.Getenv("WSM_APP_DSN"); v != "" {
+		return v
+	}
+	host := envOr("WSM_MYSQL_HOST", DefaultMySQLHost)
+	port := envOr("WSM_MYSQL_PORT", DefaultMySQLPort)
+	user := envOr("WSM_MYSQL_USER", DefaultMySQLUser)
+	pass := envOr("WSM_MYSQL_PASSWORD", DefaultMySQLPass)
+	name := envOr("WSM_MYSQL_DATABASE", DefaultMySQLDB)
+	return fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&loc=UTC",
+		user, pass, host, port, name)
+}
+
+// adminPasswordHash resolves the admin password to a bcrypt hash.
+//
+// WSM_ADMIN_PASSWORD_HASH is the form to prefer: the credential never exists as
+// plaintext in the environment, so it does not leak through `docker inspect`, a
+// crash dump, or a CI log. WSM_ADMIN_PASSWORD is accepted for local runs and is
+// hashed HERE, once, so the verify path downstream is identical either way and
+// there is only one comparison to get right.
+//
+// NEITHER BEING SET IS A BOOT FAILURE, deliberately. A generated-and-logged
+// password changes on every restart and writes a live credential into the
+// container log; a documented default ships an account takeover to anyone who
+// port-forwards this. Failing here costs one error message at a moment when
+// someone is watching — and it matches how Load already treats a bad
+// WA_BASE_URL or WSM_SESSION_TTL.
+func adminPasswordHash() ([]byte, bool, error) {
+	if raw := unquote(strings.TrimSpace(os.Getenv("WSM_ADMIN_PASSWORD_HASH"))); raw != "" {
+		// bcrypt.Cost parses the digest header; it is the cheapest way to reject
+		// a truncated value — or a pasted plaintext password — at boot instead
+		// of as a permanently failing login nobody can explain.
+		if _, err := bcrypt.Cost([]byte(raw)); err != nil {
+			return nil, false, fmt.Errorf("WSM_ADMIN_PASSWORD_HASH is not a bcrypt hash: %w", err)
+		}
+		return []byte(raw), false, nil
+	}
+	if raw := os.Getenv("WSM_ADMIN_PASSWORD"); raw != "" {
+		if len([]rune(raw)) < 8 {
+			return nil, false, errors.New("WSM_ADMIN_PASSWORD must be at least 8 characters")
+		}
+		// GenerateFromPassword rejects input over 72 bytes (bcrypt's hard limit)
+		// rather than silently truncating it.
+		h, err := bcrypt.GenerateFromPassword([]byte(raw), bcrypt.DefaultCost)
+		if err != nil {
+			return nil, false, fmt.Errorf("invalid WSM_ADMIN_PASSWORD: %w", err)
+		}
+		return h, true, nil
+	}
+	return nil, false, errors.New(
+		"no admin credential configured: set WSM_ADMIN_PASSWORD_HASH " +
+			"(recommended — generate one with `make hashpw`) or WSM_ADMIN_PASSWORD")
+}
+
+// unquote strips one layer of surrounding quotes.
+//
+// .env holds the bcrypt hash SINGLE-QUOTED, because an unquoted "$2a$10$..."
+// is eaten by make's export and by a POSIX shell's `.` alike. docker compose's
+// env_file parser strips those quotes for us; `docker run --env-file` does NOT,
+// and passes the value through with the quotes still attached — which would
+// then fail bcrypt.Cost at boot for a reason nobody would guess from the error.
+// Accepting both spellings costs four lines.
+func unquote(s string) string {
+	if len(s) >= 2 {
+		if (s[0] == '\'' && s[len(s)-1] == '\'') || (s[0] == '"' && s[len(s)-1] == '"') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
+}

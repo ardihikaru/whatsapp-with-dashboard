@@ -1,0 +1,96 @@
+// Package handler wires HTTP routes to thin page and API handlers.
+package handler
+
+import (
+	"io/fs"
+	"net/http"
+	"time"
+
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
+)
+
+// Deps carries everything the handlers need.
+type Deps struct {
+	Renderer   *renderer.Renderer
+	Sessions   *auth.Store
+	Middleware *auth.Middleware
+	Manager    *wa.Manager
+	Messages   message.Repository
+	// MessageStats is the read side of the audit log (the /logs page and the real
+	// dashboard). It is the same concrete repo as Messages, held by its analytics
+	// type so the write interface stays free of query methods.
+	MessageStats *message.SQLRepository
+	APIClients   *apiclient.Repository
+	SessionTTL   time.Duration
+	DarkMode     bool
+	// PlatformURL is the absolute backoffice url for the sidebar's back-link.
+	PlatformURL string
+	AssetsFS    fs.FS // embedded FS rooted at the app dir (web/..., openapi.yaml)
+
+	// BasePath is the mount prefix for the BROWSER surface ("/wsm" when served
+	// under a path, "" at a host root). Derived from WA_BASE_URL by config.Load,
+	// so what we serve and what we advertise cannot drift apart.
+	BasePath string
+
+	// Admin is the single local operator credential guarding the browser
+	// surface, resolved from the environment at boot (config.AdminUser /
+	// AdminPasswordHash). The zero value authenticates nobody.
+	Admin auth.AdminCredential
+	// LoginThrottle rate-limits failed logins per IP; nil means no throttling.
+	LoginThrottle *auth.Throttle
+	CookieSecure  bool
+}
+
+// New builds the full route table on a Go 1.22+ ServeMux (docs/08).
+//
+// ── THE SPLIT IS THE PUBLIC/INTERNAL BOUNDARY, NOT A FILE-SIZE TRICK ────────
+//
+// mountUI (routes_ui.go) serves the operator's browser surface and is mounted
+// under d.BasePath. mountAPI (routes_api.go) serves the JSON API and stays at
+// the ROOT, unprefixed, and is not publicly routed at all.
+//
+// That asymmetry is deliberate. Machine callers dial WSM_URL + "/api/v1/..."
+// over container DNS on a private network and never reach this service through
+// an ingress, so prefixing the API would break every one of them to gain
+// nothing. Leaving it at the root also keeps /api/v1 from clashing with a parent
+// app's own /api when the UI is mounted under a path prefix.
+//
+// NOTHING IS STRIPPED: the service owns its prefix end to end. An ingress that
+// strips the prefix would pass every curl check against the API and STILL break
+// the login POST, because the login page renders its own form action from
+// BasePath — the failure looks like "the form does nothing" and points nowhere
+// near the proxy.
+func New(d Deps) http.Handler {
+	h := &handlers{Deps: d}
+	mux := http.NewServeMux()
+	h.mountUI(mux)
+	h.mountAPI(mux)
+	return withLogging(mux)
+}
+
+// handlers groups the route methods around the shared dependencies.
+type handlers struct {
+	Deps
+}
+
+// cookiePath is the Path every cookie this service sets must carry: the mount,
+// or "/" when unmounted. Centralised because Set and Clear must agree exactly —
+// a browser keys a cookie by (name, domain, path), so a logout written at a
+// different Path leaves the original in place and the operator stays signed in
+// with nothing in any log to say why.
+func (h *handlers) cookiePath() string {
+	if h.BasePath == "" {
+		return "/"
+	}
+	return h.BasePath
+}
+
+// cookieOpts is what internal/auth needs to write the session cookie: where it
+// applies, and whether it may cross a plaintext hop.
+func (h *handlers) cookieOpts() auth.CookieOpts {
+	return auth.CookieOpts{Path: h.cookiePath(), Secure: h.CookieSecure}
+}

@@ -1,0 +1,121 @@
+/* Sismaya Lite — Minimal UI Kit (minimalcc v6.0.1) design tokens ported to
+   plain CSS. Hex values verified from src/theme/core/colors.json; shadows from
+   custom-shadows.ts; layout metrics from layouts/dashboard + nav-section. */
+
+:root {
+  /* palette — Clino/Sneat (design/tokens/laundry.tokens.json): primary indigo,
+     ink #22303E. Restyled from the module's original green so the WhatsApp
+     gateway matches the rest of the Clino platform. */
+  --primary-lighter: #E7E7FF; --primary-light: #B4B5FF; --primary: #5E61FF;
+  --primary-dark: #595CF2;    --primary-darker: #2B2D7A;
+  --secondary-lighter: #EFD6FF; --secondary-light: #C684FF; --secondary: #8E33FF;
+  --secondary-dark: #5119B7;    --secondary-darker: #27097A;
+  --info-lighter: #CAFDF5; --info-light: #61F3F3; --info: #00B8D9;
+  --info-dark: #006C9C;    --info-darker: #003768;
+  --success-lighter: #D3FCD2; --success-light: #77ED8B; --success: #22C55E;
+  --success-dark: #118D57;    --success-darker: #065E49;
+  --warning-lighter: #FFF5CC; --warning-light: #FFD666; --warning: #FFAB00;
+  --warning-dark: #B76E00;    --warning-darker: #7A4100;
+  --error-lighter: #FFE9D5; --error-light: #FFAC82; --error: #FF5630;
+  --error-dark: #B71D18;    --error-darker: #7A0916;
+  --grey-100: #F9FAFB; --grey-200: #F4F6F8; --grey-300: #DFE3E8;
+  --grey-400: #C4CDD5; --grey-500: #919EAB; --grey-600: #637381;
+  --grey-700: #454F5B; --grey-800: #1C252E; --grey-900: #141A21;
+
+  --text-primary: #22303E; /* Clino ink */
+  --text-secondary: var(--grey-600);
+  --text-disabled: var(--grey-500);
+  --bg-body: #F5F5F9; /* Clino background */
+  --bg-paper: #FFFFFF;
+
+  /* per-mode surfaces & inks (overridden in [data-theme="dark"]) */
+  --bg-header: rgba(255, 255, 255, 0.8);
+  --border-sidebar: var(--grey-300);
+  --logo-ink: var(--primary-darker);
+  --alert-error-ink: var(--error-darker);
+  --auth-tint-1: rgba(200, 250, 214, 0.4);
+  --auth-tint-2: rgba(239, 214, 255, 0.32);
+  --widget-surface: #FFFFFF;
+  --widget-avatar-bg: rgba(255, 255, 255, 0.72);
+  --widget-primary-ink: var(--primary-darker);
+  --widget-secondary-ink: var(--secondary-darker);
+  --widget-info-ink: var(--info-darker);
+  --widget-success-ink: var(--success-darker);
+  --widget-warning-ink: var(--warning-darker);
+  --widget-error-ink: var(--error-darker);
+
+  /* customShadows (colorChannel grey-500 = 145 158 171) */
+  --shadow-z1: 0 1px 2px 0 rgba(145, 158, 171, 0.16);
+  --shadow-card: 0 0 2px 0 rgba(145, 158, 171, 0.2),
+                 0 12px 24px -4px rgba(145, 158, 171, 0.12);
+  --shadow-dropdown: 0 0 2px 0 rgba(145, 158, 171, 0.24),
+                     -20px 20px 40px -4px rgba(145, 158, 171, 0.24);
+
+  /* layout */
+  --nav-width: 300px;
+  --header-height: 72px;
+  --radius-card: 16px;
+  --radius-btn: 8px;
+
+  --font-body: 'Public Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+               Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-heading: 'Barlow', var(--font-body);
+}
+
+/* minimalcc dark scheme: palette.ts text.dark / background.dark,
+   custom-shadows.ts black channel, stylesMode darker→lighter accent inks */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Clino/Sneat dark: brighter indigo primary for contrast on dark surfaces. */
+  --primary-lighter: #3B3D6B; --primary-light: #8789FF; --primary: #8789FF;
+  --primary-dark: #6D70FF;    --primary-darker: #E7E7FF;
+
+  --text-primary: #FFFFFF;
+  --text-secondary: var(--grey-500);
+  --text-disabled: var(--grey-600);
+  --bg-body: var(--grey-900);
+  --bg-paper: var(--grey-800);
+
+  --shadow-z1: 0 1px 2px 0 rgba(0, 0, 0, 0.16);
+  --shadow-card: 0 0 2px 0 rgba(0, 0, 0, 0.2),
+                 0 12px 24px -4px rgba(0, 0, 0, 0.12);
+  --shadow-dropdown: 0 0 2px 0 rgba(0, 0, 0, 0.24),
+                     -20px 20px 40px -4px rgba(0, 0, 0, 0.24);
+
+  --bg-header: rgba(20, 26, 33, 0.8);
+  --border-sidebar: rgba(145, 158, 171, 0.2);
+  --logo-ink: var(--primary-light);
+  --alert-error-ink: var(--error-lighter);
+  --auth-tint-1: rgba(0, 167, 111, 0.12);
+  --auth-tint-2: rgba(142, 51, 255, 0.12);
+  --widget-surface: var(--grey-800);
+  --widget-avatar-bg: rgba(20, 26, 33, 0.48);
+  --widget-primary-ink: var(--primary-lighter);
+  --widget-secondary-ink: var(--secondary-lighter);
+  --widget-info-ink: var(--info-lighter);
+  --widget-success-ink: var(--success-lighter);
+  --widget-warning-ink: var(--warning-lighter);
+  --widget-error-ink: var(--error-lighter);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.57;
+  color: var(--text-primary);
+  background: var(--bg-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+h4 {
+  font-family: var(--font-heading);
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+

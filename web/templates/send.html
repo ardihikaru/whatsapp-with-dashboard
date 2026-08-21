@@ -1,0 +1,46 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Send Message</h4>
+</div>
+<div class="card form-card">
+  <div id="send-result"></div>
+  {{if .Connected}}
+  <form hx-post="{{u "/send"}}" hx-target="#send-result" hx-swap="innerHTML"
+        hx-sync="this:drop" hx-disabled-elt="find button"
+        action="{{u "/send"}}" method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Routing</span>
+      <select name="routing" class="select">
+        <option value="auto" selected>Automatic routing</option>
+        <option value="explicit">Select a session</option>
+      </select>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Session</span>
+      <select name="session_id" class="select">
+        <option value="">Automatic</option>
+        {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+      </select>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">To (international format)</span>
+      <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Message</span>
+      <textarea name="text" rows="8" maxlength="4096"
+                placeholder="Plain text — line breaks, links and @mentions arrive as typed."></textarea>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">
+        <span class="btn-label">Send</span>
+        <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+        <span class="htmx-indicator">Sending...</span>
+      </button>
+    </div>
+  </form>
+  {{else}}
+  <p>No connected sessions. <a href="{{u "/sessions"}}">Pair or activate a session</a> first. Automatic routing becomes available when at least one session is connected.</p>
+  {{end}}
+</div>
+{{end}}

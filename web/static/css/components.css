@@ -1,0 +1,137 @@
+
+/* ---------- components ---------- */
+
+/* Padding lives on the base card: every .card in the app wraps either a table or
+   a form, and both were previously flush against the 16px radius. .form-card and
+   .auth-card override with their own inset. */
+.card {
+  padding: 24px;
+  background: var(--bg-paper);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-btn);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 120ms ease, box-shadow 120ms ease;
+}
+
+.btn-primary {
+  color: #FFFFFF;
+  background: var(--primary);
+  box-shadow: 0 8px 16px 0 rgba(0, 167, 111, 0.24);
+}
+
+.btn-primary:hover { background: var(--primary-dark); box-shadow: none; }
+.btn:disabled {
+  cursor: not-allowed;
+  color: var(--text-disabled);
+  background: rgba(145, 158, 171, 0.24);
+  box-shadow: none;
+}
+
+.btn.htmx-request .btn-label,
+.htmx-request .btn .btn-label {
+  display: none;
+}
+
+.btn .htmx-indicator {
+  display: none;
+}
+
+.btn.htmx-request .htmx-indicator,
+.htmx-request .btn .htmx-indicator {
+  display: inline-flex;
+  opacity: 1;
+}
+
+.send-spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(255, 255, 255, 0.48);
+  border-top-color: #FFFFFF;
+  border-radius: 50%;
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.btn-outline {
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid rgba(145, 158, 171, 0.32);
+}
+
+.btn-outline:hover { background: rgba(145, 158, 171, 0.08); border-color: var(--text-primary); }
+
+.btn-large { height: 48px; width: 100%; font-size: 15px; }
+
+.btn-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  color: var(--text-secondary);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.btn-icon:hover { background: rgba(145, 158, 171, 0.08); }
+
+.theme-toggle-floating { position: fixed; top: 24px; right: 24px; }
+
+.textfield { display: block; margin-bottom: 20px; }
+
+.textfield-label {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.textfield input {
+  width: 100%;
+  height: 48px;
+  padding: 0 14px;
+  font: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid rgba(145, 158, 171, 0.2);
+  border-radius: var(--radius-btn);
+  outline: none;
+  transition: border-color 120ms ease;
+}
+
+.textfield input:hover { border-color: var(--text-primary); }
+
+.textfield input:focus { border: 2px solid var(--text-primary); padding: 0 13px; }
+
+.alert {
+  padding: 12px 16px;
+  margin-bottom: 20px;
+  border-radius: var(--radius-btn);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.alert-error { color: var(--alert-error-ink); background: rgba(255, 86, 48, 0.12); }
+

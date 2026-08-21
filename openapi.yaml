@@ -1,0 +1,516 @@
+openapi: 3.0.3
+info:
+  title: WhatsApp Session Management API
+  description: >
+    Go + HTMX gateway app managing WhatsApp device sessions (pair, activate,
+    deactivate) and sending plain-text messages through them. JSON API callers
+    must use an API-client login id and secret at /api/v1/auth/login, then send
+    the returned token as `Authorization: Bearer <token>`. Browser cookies are
+    only for the admin pages. Sends are queued per session (cap 100),
+    rate-limited (1 msg/s, burst 3) and retried up to 3 times; delivery is
+    at-least-once when a send times out.
+  version: 0.3.0
+servers:
+  - url: http://localhost:8800
+paths:
+  /api/v1/auth/login:
+    post:
+      summary: Log in as an API client
+      operationId: login
+      tags: [auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          description: Authenticated; bearer token returned.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+        '400':
+          description: Malformed JSON body.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Invalid credentials or inactive API client.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /api/v1/auth/logout:
+    post:
+      summary: Invalidate the current session
+      operationId: logout
+      tags: [auth]
+      security:
+        - bearerAuth: []
+      responses:
+        '204':
+          description: Session invalidated.
+  /api/v1/health:
+    get:
+      summary: Process health (public)
+      operationId: health
+      tags: [system]
+      responses:
+        '200':
+          description: OK.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Health'
+  /api/v1/stats:
+    get:
+      summary: Dashboard KPI values
+      operationId: stats
+      tags: [dashboard]
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: KPI label -> formatted value.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+  /api/v1/sessions:
+    get:
+      summary: List sessions (live snapshots)
+      operationId: listSessions
+      tags: [sessions]
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: All sessions.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+    post:
+      summary: Create a session (state=new; pair it separately)
+      operationId: createSession
+      tags: [sessions]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, phone]
+              properties:
+                name: {type: string}
+                phone: {type: string, description: 'International format, e.g. +62 812-0000-0000'}
+      responses:
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          description: Validation error (empty name / bad phone).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    get:
+      summary: One session + recent event ring
+      operationId: getSession
+      tags: [sessions]
+      security: [{bearerAuth: []}]
+      responses:
+        '200':
+          description: Snapshot with last_events.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Session'
+                  - type: object
+                    properties:
+                      last_events:
+                        type: array
+                        items:
+                          type: object
+                          properties:
+                            at: {type: string, format: date-time}
+                            note: {type: string}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    delete:
+      summary: Delete session (unlinks the device and purges all rows)
+      operationId: deleteSession
+      tags: [sessions]
+      security: [{bearerAuth: []}]
+      responses:
+        '204': {description: Deleted.}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/activate:
+    post:
+      summary: Reconnect a paired session (records desired state active)
+      operationId: activateSession
+      tags: [sessions]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Snapshot after the toggle.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Session'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Not paired yet, or device record gone (re-pair).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/deactivate:
+    post:
+      summary: Drop the socket, keep credentials
+      operationId: deactivateSession
+      tags: [sessions]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Snapshot after the toggle.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Session'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Not paired yet.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/pairing:
+    get:
+      summary: Live pairing snapshot (raw QR payload for machine clients)
+      operationId: getPairing
+      tags: [sessions]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Pairing state; done=true with empty error means linked.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode: {type: string, enum: [qr, phone]}
+                  gen: {type: integer, description: 'QR rotation counter'}
+                  has_code: {type: boolean}
+                  qr: {type: string, description: 'Raw pairing payload to render as QR'}
+                  phone_code: {type: string, description: 'XXXX-XXXX pair code (mode=phone)'}
+                  seconds_left: {type: integer}
+                  done: {type: boolean}
+                  error: {type: string}
+        '404':
+          description: Unknown session, or session is not pairing.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/messages:
+    post:
+      summary: Send a plain-text message using automatic session routing
+      operationId: sendMessageAuto
+      tags: [messages]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, text]
+              properties:
+                to: {type: string, description: 'International format, e.g. +62 812-0000-0000'}
+                text: {type: string, maxLength: 4096, description: 'Plain text; line breaks preserved'}
+                client_ref: {type: string, description: 'Optional laundry client uid; surfaces in the message log per-client breakdown'}
+                tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
+                category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
+      responses:
+        '200':
+          description: Terminal outcome within 15s; includes selected session metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendResponse'}
+        '202':
+          description: Still queued after 15s; includes selected session metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendResponse'}
+        '400':
+          description: Validation (text required <=4096; phone rules).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: No connected session exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '429':
+          description: Selected session queue full.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/messages/group:
+    post:
+      summary: Send a plain-text message to a WhatsApp GROUP (automatic session routing)
+      description: |
+        Same status vocabulary as POST /api/v1/messages, deliberately: the alerter
+        chooses between the two at runtime and must not learn two error dialects.
+        The device must already be a member of the group. Discover group_jid with
+        GET /api/v1/sessions/{id}/groups — a group JID is not guessable and is not
+        shown anywhere in the WhatsApp UI.
+      operationId: sendGroupMessage
+      tags: [messages]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [group_jid, text]
+              properties:
+                group_jid: {type: string, description: 'Group JID, e.g. 120363021234567890@g.us (the bare id is accepted)'}
+                text: {type: string, maxLength: 4096, description: 'Plain text; line breaks preserved'}
+                client_ref: {type: string, description: 'Optional laundry client uid; surfaces in the message log per-client breakdown'}
+                tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
+                category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
+      responses:
+        '200':
+          description: Terminal outcome within 15s; includes selected session metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendResponse'}
+        '202':
+          description: Still queued after 15s; includes selected session metadata.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendResponse'}
+        '400':
+          description: |
+            Validation. Notably a USER JID (...@s.whatsapp.net) is refused here
+            rather than delivered to a private chat and reported as sent.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: No connected session exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '429':
+          description: Send queue full for the selected session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/sessions/{id}/groups:
+    get:
+      summary: List the groups this device belongs to
+      description: How WA_ALERT_GROUP_JID is discovered for the alerting path.
+      operationId: listSessionGroups
+      tags: [messages]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Groups the paired device is a member of.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    jid: {type: string, example: '120363021234567890@g.us'}
+                    name: {type: string, example: 'Clino Ops Alerts'}
+                    participants: {type: integer, example: 4}
+        '404':
+          description: Session not found.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Session not connected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/sessions/{id}/messages:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Send a plain-text message through this session
+      operationId: sendMessage
+      tags: [messages]
+      security: [{bearerAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, text]
+              properties:
+                to: {type: string, description: 'International format, e.g. +62 812-0000-0000'}
+                text: {type: string, maxLength: 4096, description: 'Plain text; line breaks preserved'}
+                client_ref: {type: string, description: 'Optional laundry client uid; surfaces in the message log per-client breakdown'}
+                tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
+                category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
+      responses:
+        '200':
+          description: Terminal outcome within 15s; status is sent or failed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendResponse'}
+        '202':
+          description: Still queued after 15s; poll GET .../messages.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendResponse'}
+        '400':
+          description: Validation (text required <=4096; phone rules).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Session not connected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '429':
+          description: Send queue full (backpressure; retry later).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      summary: Recent message audit log for this session
+      operationId: listMessages
+      tags: [messages]
+      security: [{bearerAuth: []}]
+      parameters:
+        - {name: limit, in: query, schema: {type: integer, default: 50, maximum: 500}}
+      responses:
+        '200':
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Message'
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+  schemas:
+    LoginRequest:
+      type: object
+      required: [login_id, secret]
+      properties:
+        login_id:
+          type: string
+        secret:
+          type: string
+    LoginResponse:
+      type: object
+      properties:
+        token:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+    Health:
+      type: object
+      properties:
+        status:
+          type: string
+        sessions:
+          type: integer
+        connected:
+          type: integer
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+    Session:
+      type: object
+      properties:
+        id: {type: string}
+        name: {type: string}
+        phone: {type: string, description: 'Normalized digits'}
+        jid: {type: string, description: 'Own WhatsApp JID; empty until paired'}
+        state: {type: string, enum: [new, pairing, connected, disconnected, logged_out]}
+        connected: {type: boolean, description: 'Live socket check, not just state'}
+        queue_len: {type: integer}
+    SendResponse:
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [queued, sent, failed]}
+        wa_message_id: {type: string}
+        error: {type: string}
+        session_id: {type: string}
+        session_name: {type: string}
+    Message:
+      type: object
+      properties:
+        id: {type: string}
+        to_phone: {type: string}
+        status: {type: string, enum: [queued, sent, failed]}
+        wa_message_id: {type: string}
+        error: {type: string}
+        attempts: {type: integer}
+        created_at: {type: string, format: date-time}
+        sent_at: {type: string, format: date-time, nullable: true}

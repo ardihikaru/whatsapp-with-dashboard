@@ -1,0 +1,137 @@
+{{define "content"}}
+<div class="page-heading">
+  <div>
+    <h4>Log Pesanan Keluar</h4>
+    <p class="page-subtitle">Total pesanan WhatsApp terkirim — keseluruhan dan per klien, tenant, konsumen, sesi</p>
+  </div>
+</div>
+
+<div class="widget-grid">
+  <div class="widget-card widget-primary">
+    <div class="widget-label">Total keluar</div>
+    <div class="widget-value">{{.Totals.Total}}</div>
+  </div>
+  <div class="widget-card widget-success">
+    <div class="widget-label">Terkirim</div>
+    <div class="widget-value">{{.Totals.Sent}}</div>
+  </div>
+  <div class="widget-card widget-error">
+    <div class="widget-label">Gagal</div>
+    <div class="widget-value">{{.Totals.Failed}}</div>
+  </div>
+  <div class="widget-card widget-warning">
+    <div class="widget-label">Antre</div>
+    <div class="widget-value">{{.Totals.Queued}}</div>
+  </div>
+</div>
+
+<div class="section-title">Filter</div>
+{{if .FilterError}}<div class="alert alert-error">{{.FilterError}}</div>{{end}}
+<div class="card">
+  <form method="get" action="{{u "/logs"}}" class="filter-form">
+    <label class="filter-field">
+      <span class="textfield-label">Status</span>
+      <select name="status">
+        <option value="">Semua</option>
+        <option value="queued"{{if eq .Filter.Status "queued"}} selected{{end}}>queued</option>
+        <option value="sent"{{if eq .Filter.Status "sent"}} selected{{end}}>sent</option>
+        <option value="failed"{{if eq .Filter.Status "failed"}} selected{{end}}>failed</option>
+      </select>
+    </label>
+    <label class="filter-field">
+      <span class="textfield-label">Kategori</span>
+      <select name="category">
+        <option value="">Semua</option>
+        {{range $c := .Filter.CategoryOpts}}
+        <option value="{{$c}}"{{if eq $.Filter.Category $c}} selected{{end}}>{{$c}}</option>
+        {{end}}
+      </select>
+    </label>
+    <label class="filter-field">
+      <span class="textfield-label">Sesi</span>
+      <select name="session_id">
+        <option value="">Semua</option>
+        {{range .Filter.SessionOpts}}
+        <option value="{{.Key}}"{{if eq $.Filter.SessionID .Key}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </label>
+    <label class="filter-field">
+      <span class="textfield-label">Konsumen API</span>
+      <select name="api_client_id">
+        <option value="">Semua</option>
+        {{range .Filter.ConsumerOpts}}
+        <option value="{{.Key}}"{{if eq $.Filter.APIClientID .Key}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </label>
+    <label class="filter-field">
+      <span class="textfield-label">Klien (uid)</span>
+      <input type="text" name="client_ref" value="{{.Filter.ClientRef}}" placeholder="client uid">
+    </label>
+    <label class="filter-field">
+      <span class="textfield-label">Tenant (uid)</span>
+      <input type="text" name="tenant_ref" value="{{.Filter.TenantRef}}" placeholder="tenant uid">
+    </label>
+    <label class="filter-field">
+      <span class="textfield-label">Dari</span>
+      <input type="date" name="from" value="{{.Filter.FromDay}}">
+    </label>
+    <label class="filter-field">
+      <span class="textfield-label">Sampai</span>
+      <input type="date" name="to" value="{{.Filter.ToDay}}">
+    </label>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">Terapkan</button>
+      <a class="btn btn-outline" href="{{u "/logs"}}">Reset</a>
+    </div>
+  </form>
+</div>
+
+<div class="section-title">Volume 30 hari</div>
+<div class="chart-card">
+  <script type="application/json" data-chart="logvolume">{{.Volume}}</script>
+  <div id="chart-logvolume" class="chart-canvas"></div>
+</div>
+
+<div class="section-title">Rincian</div>
+<div class="chart-grid">
+  {{range .Groups}}
+  <div class="chart-card">
+    <div class="chart-title">{{.Title}}</div>
+    <div class="table-scroll">
+      <table class="table">
+        <thead><tr><th>Nama</th><th>Total</th><th>Terkirim</th><th>Gagal</th></tr></thead>
+        <tbody>
+        {{range .Rows}}
+          <tr><td>{{.Label}}</td><td>{{.Total}}</td><td>{{.Sent}}</td><td>{{.Failed}}</td></tr>
+        {{else}}
+          <tr><td colspan="4" class="muted">Tidak ada data.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{if .Capped}}<div class="table-footer"><span>Menampilkan 20 teratas.</span></div>{{end}}
+  </div>
+  {{end}}
+</div>
+
+<div class="section-title">Pesan</div>
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Waktu</th><th>Status</th><th>Tujuan</th><th>Sesi</th><th>Konsumen</th>
+            <th>Klien</th><th>Tenant</th><th>Kategori</th><th>Pesan</th></tr>
+      </thead>
+      <tbody id="log-tbody">
+        {{template "log_rows" .Rows}}
+      </tbody>
+    </table>
+  </div>
+  <div class="table-footer">
+    <span>Total {{.Totals.Total}} pesan{{if .Rows.MoreURL}} — dimuat {{len .Rows.Rows}} per halaman{{end}}</span>
+    {{template "log_more" .Rows}}
+  </div>
+</div>
+{{end}}

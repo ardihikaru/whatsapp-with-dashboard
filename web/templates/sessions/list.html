@@ -1,0 +1,17 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>WhatsApp Sessions</h4>
+  <a class="btn btn-primary" href="{{u "/sessions/new"}}">New session</a>
+</div>
+<p>Automatic routing sends through the connected session with the lowest queue.</p>
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr><th>Name</th><th>Phone</th><th>JID</th><th>Status</th><th>Actions</th></tr>
+    </thead>
+    <tbody id="session-rows" hx-get="{{u "/sessions/rows"}}" hx-trigger="load, every 5s" hx-swap="innerHTML">
+      <tr><td colspan="5">Loading…</td></tr>
+    </tbody>
+  </table>
+</div>
+{{end}}
