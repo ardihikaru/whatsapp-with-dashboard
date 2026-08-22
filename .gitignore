@@ -5,6 +5,8 @@
 *.db-shm
 *.db-journal
 
+_data/*
+
 # Local env: MySQL and admin credentials.
 .env
 
