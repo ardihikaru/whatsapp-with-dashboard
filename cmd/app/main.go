@@ -77,12 +77,18 @@ func run() error {
 		return err
 	}
 
-	// MySQL store: the app's own tables (schema owned by goose migrations).
-	appDB, err := db.OpenApp(cfg.AppDSN)
+	// App store: MySQL in production (schema owned by goose migrations), or
+	// SQLite when WSM_APP_DSN carries the sqlite: prefix — a dev/e2e escape hatch
+	// so the binary boots with no MySQL reachable.
+	appDB, err := db.OpenAppStore(ctx, cfg.AppDSN)
 	if err != nil {
 		return err
 	}
 	defer appDB.Close()
+	if strings.HasPrefix(cfg.AppDSN, db.SQLiteAppPrefix) {
+		log.Printf("WARNING: app tables are in SQLite (%s) — dev/e2e only. "+
+			"Production runs them in MySQL, where goose owns the schema.", cfg.AppDSN)
+	}
 
 	// One message repo, shared by the send worker (write path) and the /logs +
 	// dashboard read path (its analytics methods).

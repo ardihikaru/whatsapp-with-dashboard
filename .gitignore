@@ -13,3 +13,16 @@ _data/*
 # Compiled binary / local bind-mount data.
 /wsm
 /data/
+
+# Playwright: the browser harness, its installs and its output. The specs in
+# e2e/ and the config ARE tracked; everything a run produces is not.
+/node_modules/
+/test-results/
+/playwright-report/
+/playwright/.cache/
+/e2e/.auth/
+
+# E2E screenshots: 8.6MB of regenerable binaries. The evidence LOG
+# (docs/e2e-evidence.md) is tracked; the images it describes are reproduced on
+# demand with `make e2e-evidence`, rather than living forever in git history.
+/docs/e2e-evidence/*.png

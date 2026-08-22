@@ -18,7 +18,12 @@
   <link rel="stylesheet" href="{{u "/static/css/charts.css"}}">
   <link rel="stylesheet" href="{{u "/static/css/forms.css"}}">
   <link rel="stylesheet" href="{{u "/static/css/datatable.css"}}">
+  <!-- NINTH, and deliberately after the eight above: it supersedes the phone
+       rules at the end of charts.css by cascade, which is what lets those eight
+       stay byte-for-byte identical to the old minimal.css. -->
+  <link rel="stylesheet" href="{{u "/static/css/responsive.css"}}">
   <script src="{{u "/static/js/htmx.min.js"}}" defer></script>
+  <script src="{{u "/static/js/nav-drawer.js"}}" defer></script>
   {{if .NeedECharts}}
   <script src="{{u "/static/js/echarts.min.js"}}" defer></script>
   <script src="{{u "/static/js/charts-init.js"}}" defer></script>
@@ -26,6 +31,8 @@
 </head>
 <body>
   <div class="app">
+    <!-- Unhidden by nav-drawer.js; without JS there is no drawer to dim. -->
+    <div class="nav-backdrop" hidden></div>
     {{template "sidebar" .}}
     <div class="main">
       {{template "header" .}}

@@ -26,7 +26,7 @@ IMAGE           ?= whatsapp-with-dashboard:local
 WA_DSN := $(WSM_MYSQL_USER):$(WSM_MYSQL_PASSWORD)@tcp($(WSM_MYSQL_HOST):$(WSM_MYSQL_PORT))/$(WSM_MYSQL_DATABASE)?parseTime=true&charset=utf8mb4&loc=UTC&multiStatements=true
 
 .PHONY: help build test vet hashpw db-bootstrap db-verify db-drop migrate-up migrate-status \
-        migrate-down-all run docker-build up down logs
+        migrate-down-all run docker-build up down logs e2e-install e2e e2e-headed e2e-report e2e-serve e2e-evidence e2e-reset
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -88,6 +88,45 @@ migrate-down-all: ## Roll every migration back (DESTRUCTIVE)
 # and is unaffected.
 run: ## Run on the HOST (needs db-bootstrap + migrate-up first)
 	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/app
+
+# ---------------------------------------------------------------- e2e (browser)
+#
+# The suite boots its OWN app on 127.0.0.1:8801 via scripts/e2e-env.sh, with the
+# app tables in a throwaway SQLite file. It NEVER touches MySQL: the only MySQL
+# a dev machine can reach is the shared production server, which holds other
+# products' data.
+#
+# The admin credential comes from _data/paswd (gitignored). The bcrypt-hash
+# mangling described above `run` is avoided the same way: scripts/e2e-env.sh
+# generates and exports the hash inside its OWN shell, so make never handles a
+# $$2a$$10$$... string and cannot expand $$2/$$1 out of it.
+
+e2e-install: ## Install Playwright + Chromium (first run; a few hundred MB)
+	npm install --no-audit --no-fund
+	npx playwright install chromium
+	@echo
+	@echo "If the browser fails to start with 'error while loading shared libraries',"
+	@echo "run 'npx playwright install-deps chromium' (needs root), or see the"
+	@echo "no-root fallback documented at the top of scripts/e2e-run.sh."
+
+e2e: ## Browser tests: phone portrait + desktop, signed in as the admin
+	./scripts/e2e-run.sh
+
+e2e-headed: ## Same, with a visible browser
+	./scripts/e2e-run.sh --headed
+
+e2e-reset: ## Delete the throwaway e2e SQLite state so the next run reseeds
+	rm -rf _data/e2e e2e/.auth
+	@echo "e2e state cleared (this NEVER touches MySQL)"
+
+e2e-evidence: ## Re-capture the screenshots in docs/e2e-evidence/ (opt-in; writes binaries)
+	WSM_E2E_EVIDENCE=1 ./scripts/e2e-run.sh e2e/screenshots.spec.ts
+
+e2e-report: ## Open the last HTML report
+	npx playwright show-report
+
+e2e-serve: ## Just run the app the way the e2e suite does (port 8801, SQLite)
+	./scripts/e2e-env.sh
 
 docker-build: ## Build the container image
 	docker build -t $(IMAGE) .

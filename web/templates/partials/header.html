@@ -1,6 +1,18 @@
 {{define "header"}}
 <header class="header">
-  <div class="header-title">{{.Title}}</div>
+  <div class="header-left">
+    <!-- Shown only below 900px, and only once nav-drawer.js has set
+         data-nav-js on <html>; without JS the sidebar renders in normal flow
+         and there is nothing for this button to toggle. -->
+    <button class="nav-toggle btn-icon" type="button"
+            aria-controls="app-sidebar" aria-expanded="false" aria-label="Buka menu">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round"/>
+      </svg>
+    </button>
+    <div class="header-title">{{.Title}}</div>
+  </div>
   <div class="header-actions">
     {{template "theme_toggle" .}}
     <span class="header-user">{{.Username}}</span>

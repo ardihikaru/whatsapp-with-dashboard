@@ -1,0 +1,13 @@
+{
+  "name": "whatsapp-with-dashboard-e2e",
+  "private": true,
+  "description": "Playwright browser tests for the Go+HTMX dashboard. The app itself is pure Go; this package exists only so `npx playwright` has somewhere to live.",
+  "scripts": {
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "e2e:report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1"
+  }
+}
