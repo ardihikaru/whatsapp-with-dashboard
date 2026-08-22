@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/netip"
 	"os"
 	"strconv"
 	"strings"
@@ -55,6 +56,9 @@ const (
 	// default is EMPTY, which platformLink() renders as "hide the link". Set
 	// WA_PLATFORM_URL to an ABSOLUTE url if this ever hangs off something.
 	DefaultPlatformURL = ""
+
+	// No proxy is trusted unless one is named. See TrustedProxies.
+	DefaultTrustedProxies = ""
 )
 
 // Config is the resolved application configuration.
@@ -96,6 +100,20 @@ type Config struct {
 
 	// PlatformURL is the backoffice link rendered in the sidebar footer ("" hides it).
 	PlatformURL string
+
+	// TrustedProxies are the peers whose X-Forwarded-For this service will
+	// believe, from WSM_TRUSTED_PROXIES. EMPTY BY DEFAULT, and that default is
+	// the safe one: with no proxy named, auth.ClientIP reads the connecting
+	// address and nothing else, so the throttle key cannot be spoofed.
+	//
+	// It matters because the throttles are keyed on that address. Behind a
+	// reverse proxy EVERY request arrives from the proxy, so one attacker's
+	// failures would spend the budget for every user at once. Naming the proxy
+	// here restores per-client keying. Name only proxies that OVERWRITE the
+	// header (nginx proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for
+	// does); trusting one that merely passes a client's header through is the
+	// same as having no throttle at all.
+	TrustedProxies []netip.Prefix
 }
 
 // Load resolves the configuration and fails fast on an invalid env value.
@@ -134,6 +152,13 @@ func Load() (*Config, error) {
 		}
 		cfg.CookieSecure = b
 	}
+	if raw := os.Getenv("WSM_TRUSTED_PROXIES"); raw != "" {
+		prefixes, err := parseTrustedProxies(raw)
+		if err != nil {
+			return nil, fmt.Errorf("invalid WSM_TRUSTED_PROXIES %q: %v", raw, err)
+		}
+		cfg.TrustedProxies = prefixes
+	}
 	if raw := os.Getenv("WSM_SESSION_TTL"); raw != "" {
 		d, err := time.ParseDuration(raw)
 		if err != nil || d <= 0 {
@@ -171,6 +196,44 @@ func Load() (*Config, error) {
 		cfg.DarkMode = b
 	}
 	return cfg, nil
+}
+
+// parseTrustedProxies reads a comma-separated list of CIDR blocks and bare IP
+// addresses into prefixes. A bare address becomes a single-host prefix, so
+// "10.10.0.1" and "10.10.0.1/32" mean the same thing and an operator does not
+// have to know which form this wants.
+//
+// A malformed entry is an error rather than a skip: silently dropping one from
+// a list would leave the service running with a narrower trust set than the
+// operator wrote, which shows up much later as a throttle that keys on the
+// proxy for some requests and not others.
+func parseTrustedProxies(raw string) ([]netip.Prefix, error) {
+	var prefixes []netip.Prefix
+	for _, field := range strings.Split(raw, ",") {
+		field = strings.TrimSpace(field)
+		if field == "" {
+			continue
+		}
+		if strings.Contains(field, "/") {
+			p, err := netip.ParsePrefix(field)
+			if err != nil {
+				return nil, fmt.Errorf("bad CIDR %q: %v", field, err)
+			}
+			// Masked(): 10.10.0.1/24 is a typo for 10.10.0.0/24, and an
+			// unmasked prefix makes Contains behave unpredictably.
+			prefixes = append(prefixes, p.Masked())
+			continue
+		}
+		addr, err := netip.ParseAddr(field)
+		if err != nil {
+			return nil, fmt.Errorf("bad address %q: %v", field, err)
+		}
+		prefixes = append(prefixes, netip.PrefixFrom(addr, addr.BitLen()))
+	}
+	if len(prefixes) == 0 {
+		return nil, errors.New("no usable entries")
+	}
+	return prefixes, nil
 }
 
 func envOr(key, fallback string) string {

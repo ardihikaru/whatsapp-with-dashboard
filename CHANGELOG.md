@@ -3,6 +3,21 @@
 ## [Unreleased]
 
 ### Added
+- **`WSM_TRUSTED_PROXIES`** — comma-separated CIDRs / bare IPs whose
+  `X-Forwarded-For` the app will believe. Empty by default, which keeps the
+  previous behaviour exactly: `auth.ClientIP` reads the connecting address and
+  nothing else. It matters behind a reverse proxy, where every request arrives
+  from the proxy and the login/API throttles therefore collapse onto one key —
+  five bad logins from any one attacker used to throttle every user at once.
+  The chain is walked right to left and the first untrusted hop wins, since a
+  client controls the leftmost entries and the proxy appends the real address to
+  their right.
+- **`WSM_BIND_ADDR`** — the host address `docker-compose.yml` publishes on,
+  defaulting to `127.0.0.1` as before. Previously hardcoded, which left no way
+  to reach the service from a reverse proxy on another host without editing a
+  tracked file.
+- A "Behind a TLS reverse proxy" section in the README covering both, plus
+  `WA_BASE_URL`, `WA_COOKIE_SECURE` and the do-not-strip-the-prefix rule.
 - **Multi-year token presets** on `/admin/api-clients`: "Masa berlaku access
   token" now offers 1 tahun, 3 tahun and 5 tahun alongside the existing 1/7/30
   hari, so a long-lived integration no longer has to be expressed in seconds.

@@ -4,8 +4,10 @@ import (
 	"context"
 	"net"
 	"net/http"
+	"net/netip"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -157,19 +159,109 @@ func (m *Middleware) RequireAPI(next http.Handler) http.Handler {
 	})
 }
 
-// ClientIP is the throttle key: the host half of RemoteAddr.
+// trustedProxies is the set configured by SetTrustedProxies, read on every
+// request by ClientIP. atomic.Pointer rather than a plain slice because main
+// writes it during boot while the server may already be accepting; the value is
+// never mutated in place, only replaced.
+var trustedProxies atomic.Pointer[[]netip.Prefix]
+
+// SetTrustedProxies names the peers whose X-Forwarded-For ClientIP will believe
+// (config.TrustedProxies, from WSM_TRUSTED_PROXIES). Call it once at boot,
+// before serving. Passing nil restores the default: trust nobody, read the
+// connecting address only.
+func SetTrustedProxies(prefixes []netip.Prefix) {
+	if len(prefixes) == 0 {
+		trustedProxies.Store(nil)
+		return
+	}
+	cp := append([]netip.Prefix(nil), prefixes...)
+	trustedProxies.Store(&cp)
+}
+
+// ClientIP is the throttle key.
 //
-// Deliberately NOT X-Forwarded-For — that header is attacker-controlled unless a
-// trusted proxy is known to overwrite it, and a spoofable key is a throttle that
-// does not exist. Behind a reverse proxy every attempt collapses onto the
-// proxy's address, which throttles the proxy; for a single-operator tool that is
-// the safer way to be wrong.
+// By default it is the host half of RemoteAddr and NOTHING ELSE: X-Forwarded-For
+// is attacker-controlled, and a spoofable key is a throttle that does not exist.
+// Behind a reverse proxy that default makes every attempt collapse onto the
+// proxy's address, so one attacker's failures spend the budget for every user.
+//
+// SetTrustedProxies is the way out. When the CONNECTING peer is one of the named
+// proxies, and only then, the header is consulted — because at that point the
+// proxy is known to have overwritten it, so its rightmost entries are ours and
+// not the caller's.
+//
+// The chain is walked RIGHT TO LEFT and the first untrusted hop wins. A client
+// can prepend anything it likes to X-Forwarded-For and the proxy will append the
+// real address to the right of it, so the LEFTMOST entry is exactly the part an
+// attacker controls; taking it would hand out an unlimited supply of throttle
+// keys. The rightmost untrusted hop is the last address vouched for by something
+// we trust.
 func ClientIP(r *http.Request) string {
+	peer := remoteHost(r)
+	trusted := trustedProxies.Load()
+	if trusted == nil {
+		return peer
+	}
+	peerAddr, err := netip.ParseAddr(peer)
+	if err != nil || !containsAddr(*trusted, peerAddr) {
+		return peer
+	}
+	for _, hop := range rightToLeft(r.Header.Values("X-Forwarded-For")) {
+		addr, err := netip.ParseAddr(hop)
+		if err != nil {
+			// A malformed hop means the chain is no longer trustworthy from
+			// here leftwards; stop rather than skip past it.
+			break
+		}
+		if !containsAddr(*trusted, addr) {
+			return addr.String()
+		}
+	}
+	// Every hop was a trusted proxy (or there was no header at all): the peer
+	// itself is the most specific address we can honestly attribute this to.
+	return peer
+}
+
+// remoteHost strips the port from RemoteAddr, tolerating an address that has
+// none — httptest and some listeners hand one over bare.
+func remoteHost(r *http.Request) string {
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr
 	}
 	return host
+}
+
+// rightToLeft flattens the X-Forwarded-For values into hops in reverse order.
+// The header may legally appear more than once, and the hops are then read as
+// one comma-separated chain across all of them in order, so the last entry of
+// the last value is the rightmost hop.
+func rightToLeft(values []string) []string {
+	var hops []string
+	for _, v := range values {
+		for _, part := range strings.Split(v, ",") {
+			part = strings.TrimSpace(part)
+			if part != "" {
+				hops = append(hops, part)
+			}
+		}
+	}
+	for i, j := 0, len(hops)-1; i < j; i, j = i+1, j-1 {
+		hops[i], hops[j] = hops[j], hops[i]
+	}
+	return hops
+}
+
+func containsAddr(prefixes []netip.Prefix, addr netip.Addr) bool {
+	// Unmap first: a proxy on a dual-stack listener reports 127.0.0.1 as
+	// ::ffff:127.0.0.1, which no IPv4 prefix would otherwise contain.
+	addr = addr.Unmap()
+	for _, p := range prefixes {
+		if p.Contains(addr) {
+			return true
+		}
+	}
+	return false
 }
 
 func withAPIPrincipal(ctx context.Context, principal APIPrincipal) context.Context {

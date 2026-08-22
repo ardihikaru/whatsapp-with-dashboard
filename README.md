@@ -199,6 +199,60 @@ The app image deliberately does **not** embed `migrations/` and never migrates
 on boot: a schema change is an operator action, not a start-up side effect of a
 hard singleton.
 
+## Behind a TLS reverse proxy
+
+The defaults assume nothing is in front of this service. Four settings change
+when something is, and leaving any of them out fails in a way that is hard to
+read from the symptom:
+
+| Set | To | Leaving it out looks like |
+|---|---|---|
+| `WA_BASE_URL` | the exact public URL, including any path prefix | login form posts to the wrong path |
+| `WA_COOKIE_SECURE` | `true` | the session cookie survives a downgrade to plaintext |
+| `WSM_BIND_ADDR` | the one interface the proxy reaches this host on | the proxy gets connection refused |
+| `WSM_TRUSTED_PROXIES` | that proxy's address or subnet | see below |
+
+**`WSM_TRUSTED_PROXIES` is not optional in this setup.** The login and API
+throttles key on the client address, and behind a proxy every request arrives
+from the proxy — so five bad logins from one attacker throttle *everyone* until
+they stop. Naming the proxy lets `auth.ClientIP` read `X-Forwarded-For` and key
+per client again. It reads the chain right to left and takes the first untrusted
+hop, because a client can prepend whatever it likes and the proxy appends the
+real address to the right of it. Name only a proxy that **overwrites** the
+header (nginx's `$proxy_add_x_forwarded_for` does); trusting one that forwards
+the client's own header lets the client pick its own throttle key.
+
+**Do not strip the path prefix.** This service owns its prefix end to end — the
+browser surface is mounted under `WA_BASE_URL`'s path and the JSON API stays at
+the root. A stripping proxy passes every `curl` check against the API and still
+breaks the login POST, because the login page renders its form action from
+`BasePath`. The symptom is "the form does nothing", which points nowhere near
+the proxy. See `internal/handler/routes.go`.
+
+nginx, terminating TLS and forwarding to a host that publishes with
+`WSM_BIND_ADDR=10.10.0.2` and `WSM_EXPOSED_PORT=18801`:
+
+```nginx
+map $http_upgrade $wsm_connection_upgrade { default upgrade; '' close; }
+
+location / {
+    proxy_pass http://10.10.0.2:18801;
+    proxy_http_version 1.1;
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header Upgrade           $http_upgrade;
+    proxy_set_header Connection        $wsm_connection_upgrade;
+    proxy_buffering off;
+}
+```
+
+with `WSM_TRUSTED_PROXIES` naming the address nginx connects from. The JSON API
+has no public route in that deployment: a `location ^~ /api/v1/ { return 404; }`
+ahead of `location /` keeps it to callers on the private network, which is where
+its consumers already live.
+
 ## Authentication
 
 Two independent doors that share nothing:

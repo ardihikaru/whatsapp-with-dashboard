@@ -108,6 +108,15 @@ func run() error {
 	defer sessions.Close()
 	apiClients := apiclient.NewRepository(appDB)
 
+	// Must precede the server: both throttles below key on auth.ClientIP, and
+	// until this is set that function ignores X-Forwarded-For entirely. Empty
+	// (the default) leaves it ignoring the header, which is the right answer
+	// for a direct listener.
+	auth.SetTrustedProxies(cfg.TrustedProxies)
+	if len(cfg.TrustedProxies) > 0 {
+		log.Printf("trusting X-Forwarded-For from %v", cfg.TrustedProxies)
+	}
+
 	server := &http.Server{
 		Addr: cfg.Addr,
 		Handler: handler.New(handler.Deps{

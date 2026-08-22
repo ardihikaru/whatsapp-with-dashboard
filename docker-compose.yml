@@ -63,9 +63,15 @@ services:
       - wsm-sqlite:/data
 
     ports:
-      # Loopback only. This is an admin surface with a WhatsApp identity behind
-      # it; do not publish it on the LAN without a reverse proxy and TLS.
-      - "127.0.0.1:${WSM_EXPOSED_PORT:-8800}:8800"
+      # LOOPBACK BY DEFAULT. This is an admin surface with a WhatsApp identity
+      # behind it; do not publish it on the LAN without a reverse proxy and TLS.
+      #
+      # WSM_BIND_ADDR is the deliberate opt-out for a host that DOES sit behind
+      # one. Set it to the single interface the proxy reaches this box on --
+      # a WireGuard address, say -- and never to 0.0.0.0, which would hand the
+      # dashboard to every network the host is attached to. Pair it with
+      # WA_COOKIE_SECURE=true and WSM_TRUSTED_PROXIES; see .env.example.
+      - "${WSM_BIND_ADDR:-127.0.0.1}:${WSM_EXPOSED_PORT:-8800}:8800"
 
     networks: [infra]
 
