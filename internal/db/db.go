@@ -3,12 +3,17 @@
 //     unit tests, the app tables via EnsureSchema);
 //   - OpenApp() → MySQL, drives the app's own tables in production. The app
 //     schema is created by goose migrations, NOT EnsureSchema, against MySQL.
+//
+// OpenAppStore() sits in front of OpenApp and lets a DEV/E2E run put the app
+// tables in SQLite instead ("sqlite:<path>"), so the binary boots with no MySQL
+// reachable at all. Production never takes that branch.
 package db
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/go-sql-driver/mysql" // MySQL app store
@@ -46,6 +51,42 @@ func OpenApp(dsn string) (*sql.DB, error) {
 	if err := pool.PingContext(ctx); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("ping mysql app store: %w", err)
+	}
+	return pool, nil
+}
+
+// SQLiteAppPrefix marks an app-store DSN as SQLite rather than MySQL.
+//
+// DEV AND E2E ONLY. In production the app tables live in MySQL and their schema
+// is owned by the goose migrations in migrations/; EnsureSchema is a second,
+// hand-maintained copy of that schema in SQLite dialect. Pointing a real
+// deployment at sqlite: would silently run it against a schema no migration has
+// ever touched, so OpenAppStore logs a warning every time it takes this branch.
+const SQLiteAppPrefix = "sqlite:"
+
+// OpenAppStore picks the app-table store from the DSN. "sqlite:<path>" opens the
+// pure-Go SQLite store and creates the schema in place; any other DSN is handed
+// to OpenApp as MySQL.
+//
+// The SQLite branch deliberately opens its OWN file, separate from WSM_DB_PATH:
+// Open pins MaxOpenConns(1) because whatsmeow's sqlstore demands a single
+// writer, and sharing that one connection with the app's own queries would
+// serialise every dashboard read behind the crypto store.
+func OpenAppStore(ctx context.Context, dsn string) (*sql.DB, error) {
+	path, ok := strings.CutPrefix(dsn, SQLiteAppPrefix)
+	if !ok {
+		return OpenApp(dsn)
+	}
+	if path == "" {
+		return nil, fmt.Errorf("open sqlite app store: %s needs a file path", SQLiteAppPrefix)
+	}
+	pool, err := Open(path, SQLiteDialect)
+	if err != nil {
+		return nil, err
+	}
+	if err := EnsureSchema(ctx, pool); err != nil {
+		pool.Close()
+		return nil, err
 	}
 	return pool, nil
 }

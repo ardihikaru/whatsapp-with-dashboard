@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go test:*)",
+      "Bash(go vet:*)",
+      "Bash(go run ./cmd/hashpw)",
+      "Bash(gofmt:*)",
+      "Bash(make test)",
+      "Bash(make vet)",
+      "Bash(make build)",
+      "Bash(make e2e)",
+      "Bash(make e2e-report)",
+      "Bash(npx playwright test:*)",
+      "Bash(npx playwright show-report:*)",
+      "Bash(./scripts/e2e-run.sh:*)"
+    ]
+  }
+}

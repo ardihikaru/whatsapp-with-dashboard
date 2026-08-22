@@ -1,5 +1,5 @@
 {{define "sidebar"}}
-<aside class="sidebar">
+<aside class="sidebar" id="app-sidebar" aria-label="Menu utama">
   <div class="sidebar-logo">
     <img src="{{u "/static/img/logo.svg"}}" alt="Clino WhatsApp" width="32" height="32">
     <span>Clino&nbsp;· WhatsApp</span>
@@ -14,6 +14,9 @@
     </a>
     {{end}}
   </nav>
+  {{end}}
+  {{if .Username}}
+  <div class="nav-user">Masuk sebagai <strong>{{.Username}}</strong></div>
   {{end}}
   {{if .PlatformLink.Path}}
   <nav class="nav nav-footer">

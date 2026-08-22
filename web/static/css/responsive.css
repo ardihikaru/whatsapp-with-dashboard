@@ -1,0 +1,196 @@
+/* ---------- responsive: phone portrait ---------- */
+/*
+ * NINTH stylesheet, loaded AFTER the eight base.html lists. That order is the
+ * whole design of this file: charts.css ends with
+ *   @media (max-width: 900px) { .sidebar { display: none } }
+ * which deleted the navigation on phones with nothing in its place. This file
+ * supersedes that rule by cascade instead of editing charts.css, so the
+ * byte-for-byte "concatenating the eight reproduces minimal.css" property
+ * recorded in base.html stays true.
+ *
+ * Tokens only — no new hex outside :root (forms.css:48). Every colour below is
+ * an existing token, so dark mode follows for free.
+ *
+ * TWO-STATE DESIGN. Without JavaScript, html has no [data-nav-js] and the phone
+ * layout renders the sidebar as an ordinary block above the content: the menu is
+ * always reachable. nav-drawer.js sets data-nav-js on load, which switches the
+ * same markup into an off-canvas drawer driven by [data-nav-open].
+ */
+
+/* Base rules for the three elements this change introduces live here too, not
+   in layout.css/components.css, for the same freeze-the-eight reason. */
+
+/* .header is justify-content: space-between; this keeps the toggle and the
+   title together as the left group, and min-width:0 is what lets the title
+   ellipsis instead of pushing the actions off-screen. */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* The hamburger only exists once JS can actually open the drawer. */
+.nav-toggle { display: none; }
+
+.nav-backdrop { display: none; }
+
+/* Who you are signed in as. Redundant on desktop, where .header-user shows it;
+   shown below 900px so hiding .header-user on a narrow phone loses nothing. */
+.nav-user {
+  display: none;
+  padding: 12px 8px 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 900px) {
+  /* --- no-JS fallback: sidebar in normal flow, full width, above content --- */
+  .app { display: block; }
+
+  .sidebar {
+    display: flex;
+    position: static;
+    width: auto;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px dashed var(--border-sidebar);
+  }
+
+  .sidebar-logo { padding: 8px 8px 16px; }
+
+  .nav-user { display: block; }
+
+  /* --- JS present: same markup becomes an off-canvas drawer --- */
+  /* visibility (not just transform) keeps the closed drawer out of the a11y
+     tree and off the tab order; it is delayed by the slide duration so the
+     close animation is still seen. nav-drawer.js also sets inert, which is what
+     browsers with no visibility-based exclusion honour. */
+  [data-nav-js] .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 40;
+    width: min(var(--nav-width), 86vw);
+    height: 100dvh;
+    overflow-y: auto;
+    border-right: 1px dashed var(--border-sidebar);
+    border-bottom: 0;
+    transform: translateX(-100%);
+    visibility: hidden;
+    box-shadow: 0 0 24px rgba(0, 0, 0, 0.18);
+  }
+
+  [data-nav-js][data-nav-open] .sidebar {
+    transform: translateX(0);
+    visibility: visible;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    [data-nav-js] .sidebar {
+      transition: transform 180ms ease, visibility 0s linear 180ms;
+    }
+    [data-nav-js][data-nav-open] .sidebar {
+      transition: transform 180ms ease, visibility 0s;
+    }
+  }
+
+  [data-nav-js] .nav-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-right: 4px;
+    color: var(--text-secondary);
+  }
+
+  [data-nav-js] .nav-backdrop {
+    display: block;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(22, 28, 36, 0.48);
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    [data-nav-js] .nav-backdrop { transition: opacity 180ms ease; }
+  }
+
+  [data-nav-js][data-nav-open] .nav-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* Background must not scroll under an open drawer. */
+  [data-nav-js][data-nav-open] body { overflow: hidden; }
+
+  /* --- header: room for the toggle, and a title that fits --- */
+  .header {
+    gap: 8px;
+    padding: 0 16px;
+  }
+
+  .header-title {
+    font-size: 16px;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .header-actions { gap: 8px; }
+
+  .content { padding: 8px 16px 48px; }
+
+  .page-heading {
+    flex-wrap: wrap;
+    gap: 12px;
+    margin: 16px 0 24px;
+  }
+
+  /* charts.css sets minmax(360px, 1fr): 360 + 2x16 padding overflows every
+     phone narrower than ~392px, which is most of them in portrait. The min()
+     lets a track shrink to the column instead of forcing a horizontal scroll. */
+  .chart-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(360px, 100%), 1fr));
+    gap: 16px;
+  }
+
+  .widget-grid { gap: 16px; }
+
+  .chart-canvas { height: 260px; }
+
+  /* Filters stack rather than squeezing to their 160px basis. */
+  .filter-field { flex: 1 1 100%; }
+
+  /* 320px of clipped cell is wider than the viewport itself. */
+  .cell-clip { max-width: 60vw; }
+}
+
+/* The username is the one header item with a home elsewhere: it is rendered in
+   the drawer footer too, so dropping it here loses nothing. */
+@media (max-width: 480px) {
+  .header-user { display: none; }
+  .header { padding: 0 12px; }
+  .content { padding: 8px 12px 48px; }
+}
+
+/* DELIBERATELY NOT HERE: `html, body { overflow-x: hidden }`.
+ *
+ * It was here as a belt-and-braces guard against sideways scroll, and it broke
+ * the phone layout completely. Setting overflow-x on BOTH html and body makes
+ * each its own scroll container: body grew to its real 11781px while
+ * documentElement.scrollHeight stayed clamped at the 844px viewport, so
+ * window.scrollTo() did nothing and every row below the fold was unreachable.
+ *
+ * It also disarmed the test that should have caught it, because the same
+ * clamping pins documentElement.scrollWidth to the viewport — the overflow
+ * assertion was reading the symptom as proof of health.
+ *
+ * Sideways scroll is prevented AT SOURCE instead (the chart-grid min(), stacked
+ * filter fields, .cell-clip, and .table-scroll owning every wide table), and
+ * e2e/overflow.spec.ts measures per element so no page-level rule can mask a
+ * regression again.
+ */

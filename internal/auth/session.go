@@ -1,7 +1,17 @@
-// Package auth implements the in-memory session store, cookie handling and
-// the page/API auth middleware. Login is fake by design (D8): any non-empty
-// username+password is accepted, so a Session only ever needs a token,
-// username and expiry — no user id, no upstream API token.
+// Package auth implements the in-memory session store, cookie handling and the
+// page/API auth middleware.
+//
+// Browser login is a real credential check. AdminCredential.Verify (admin.go)
+// compares the username with subtle.ConstantTimeCompare and the password with
+// bcrypt.CompareHashAndPassword, substituting a dummy hash when the username is
+// wrong so a bad username costs the same wall-clock time as a bad password.
+// PostLogin (internal/handler/auth.go) throttles failures per client IP.
+//
+// A Session carries only a token, username and expiry. There is one
+// env-supplied admin account and no users table, so there is no user id to
+// carry and no upstream API token to hold.
+//
+// Sessions live in memory: a restart signs the operator out, by design.
 package auth
 
 import (
