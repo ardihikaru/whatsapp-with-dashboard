@@ -219,3 +219,44 @@ Notes:
   They do not affect the pages under test.
 - `cmd/e2eseed` refuses any DSN without the `sqlite:` prefix, with no override
   flag, and redacts a rejected DSN's password. Four tests cover that guard.
+
+## 2026-08-23 production deploy verification
+
+Target: **https://wa.mfardiansyah.id** (live), and the private origin
+`http://10.10.0.2:18801` over WireGuard.
+
+Deployed commit: `1c535ac` (merge of `feat/mobile-portrait-nav`). Image rebuilt
+and container recreated with `docker compose up -d --build`; the named volume
+holding whatsmeow's crypto identity was preserved (no `down -v`).
+
+Browser user: admin `ardihikaru`. Secret handling unchanged — used only for the
+login request, never written here.
+
+| Check | Result |
+|---|---|
+| `/api/v1/health` (private) | `200`, `{"connected":1,"sessions":1,"status":"ok"}` |
+| WhatsApp session after restart | **reconnected** — `connected:1`, no re-pairing |
+| `/static/css/responsive.css` private / public | `404` → `200` / `404` → `200` |
+| `/static/js/nav-drawer.js` private / public | `404` → `200` / `404` → `200` |
+| Served `responsive.css` is the real file | contains the "DELIBERATELY NOT HERE" guard comment |
+| `/login` links `responsive.css` | yes (the duplicated-`<head>` trap holds in prod) |
+| `POST /login` as `ardihikaru` (public, HTTPS) | `303`, session cookie set |
+| `GET /dashboard` drawer markup | all 8 markers present |
+| Playwright vs LIVE production, 390×844 + 360×740 + 1280×800 | **53 passed, 0 failed** (1.4m) |
+
+Notes:
+
+- **A `git pull` on the VM is not a deploy.** Templates, CSS and JS are compiled
+  into the binary by `go:embed`, so the pulled source sat at `1c535ac` while the
+  running image was still the one built 2026-08-22 11:06 UTC and the new assets
+  returned 404. Only `docker compose up -d --build` changed that. Check
+  `docker images whatsapp-with-dashboard:local --format '{{.CreatedSince}}'`
+  against the commit, not `git log`, when confirming a release.
+- **Browser tests against production must use HTTPS.** Prod sets
+  `WA_COOKIE_SECURE=true`, so over plain `http://10.10.0.2:18801` a real browser
+  silently declines to store `wsm_session` and every test fails at login, while
+  curl (which does not enforce the Secure attribute the same way) succeeds. The
+  private port is fine for curl and for the health probe, not for a browser.
+- **The public readiness probe cannot be `/api/v1/health`**: the edge returns
+  404 for `/api/v1/*` by design. `WSM_E2E_NO_SERVER=1` skips Playwright's
+  `webServer` block so an already-deployed target can be tested directly.
