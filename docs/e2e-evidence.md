@@ -260,3 +260,53 @@ Notes:
 - **The public readiness probe cannot be `/api/v1/health`**: the edge returns
   404 for `/api/v1/*` by design. `WSM_E2E_NO_SERVER=1` skips Playwright's
   `webServer` block so an already-deployed target can be tested directly.
+
+## 2026-08-23 host migration 10.10.0.2 → 10.10.0.4
+
+The app tier moved to a second private VM. The MySQL schema did **not** move: it
+stays on the shared `master-compose-ai` stack at `10.10.0.2:5306`, which the app
+now reaches over WireGuard instead of by container DNS.
+
+Deployed commit: `40e5c24`, plus the `docker-compose.remote-db.yml` overlay and
+the `REMOTE_DB=1` Makefile wiring this migration required. Image built on the new
+host before any downtime began.
+
+Target: **https://wa.mfardiansyah.id** (live), private origin
+`http://10.10.0.4:18801`. Browser user: admin `ardihikaru`, credential read from
+`_data/paswd` by `e2e/auth.setup.ts` and never written here.
+
+Downtime **03:39:39Z → 03:41:54Z (2m15s)**, from stopping the old container to
+the first `200` through the edge.
+
+| Check | Result |
+|---|---|
+| Grants permit the new origin | user is `wa_dashboard@%` — host-agnostic, so a new origin needs no grant change |
+| `10.10.0.2:5306` reachable from the new host | TCP open |
+| Old container stopped cleanly (`stop`, never `down -v`) | WAL checkpointed: `wsm.db-wal`/`-shm` gone, `wsm.db` alone remains |
+| Identity volume copied byte for byte | `sha256 8fc776b2…f2e5` identical on both hosts, ownership `65532` preserved |
+| WhatsApp session on the new host | **`Successfully authenticated`** — no QR, no re-pairing |
+| `/api/v1/health` (private, `10.10.0.4:18801`) | `200`, `{"connected":1,"sessions":1,"status":"ok"}` |
+| `nginx -t` on the shared edge before reload | `syntax is ok` / `test is successful` |
+| `/login`, `/docs`, `/openapi.yaml` (public) | `200`, `200`, `200` |
+| `/api/v1/health` (public) | `404` — still no public API route |
+| `/` (public) | `302` to the login page |
+| Old origin `10.10.0.2:18801` | connection **refused** — nothing serving behind the switch |
+| Playwright vs LIVE production, 390×844 + 360×740 + 1280×800 | **53 passed, 0 failed** (1.8m) |
+
+Notes:
+
+- **Same 53 as the pre-migration run above**, so the move is a move: no test
+  changed its verdict crossing hosts.
+- **The app log is the proof that the edge switched**, not the `200`. The public
+  probes appear in the new container's log at `03:41:54`–`03:41:55` with the
+  paths and status codes that came back. A `200` alone cannot tell the two hosts
+  apart; a request that never reached the new app would still have served it
+  from the old one.
+- **Nothing was created on the shared MySQL.** The only statement issued against
+  it was `SHOW GRANTS`, read-only, and the app's own traffic.
+- **The old container is left `exited`, not removed, and its volume is intact.**
+  That is the rollback: start it there and point the edge's `map` back. Do not
+  reclaim either until this host has run long enough to trust.
+- `docker compose config` interpolates `env_file`, so its output carries the
+  admin bcrypt hash and the MySQL password in clear. Grep it for the keys you
+  want; never page the whole thing into a terminal or a log.

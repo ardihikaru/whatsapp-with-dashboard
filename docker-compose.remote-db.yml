@@ -1,0 +1,42 @@
+# whatsapp-with-dashboard — REMOTE-DB MODE. Overlay, never used alone:
+#
+#   docker compose -f docker-compose.yml -f docker-compose.remote-db.yml up -d
+#   make up-remote-db
+#
+# The base file assumes the app runs on the SAME host as the shared
+# master-compose-ai stack: it joins that stack's network and dials MySQL by its
+# container DNS name `mysqldb-master`. Neither exists on a host that runs only
+# the app, so compose there fails at `up` with "network declared as external,
+# but could not be found" — the network is not missing, it lives on another box.
+#
+# This overlay drops both assumptions. The app joins compose's own default
+# bridge and reaches MySQL over the private network at the address the .env
+# already names, so ONE .env keeps serving host mode, container mode and this.
+#
+# `!reset` (compose >= 2.24) deletes a key the base set rather than merging into
+# it. Plain `networks: []` would NOT do this: compose merges service networks,
+# so `infra` would survive and the external lookup would still run.
+
+name: whatsapp-with-dashboard
+
+networks:
+  # Undeclare the external network entirely. Leaving the declaration behind is
+  # not harmless: compose resolves every declared external network at `up`,
+  # whether or not a service still attaches to it.
+  infra: !reset null
+
+services:
+  app:
+    networks: !reset null
+    environment:
+      # These win over the base file's container-DNS values. `:?` fails loudly
+      # at `config` time instead of letting the app boot and hang on a dial to a
+      # name that does not resolve here.
+      WSM_MYSQL_HOST: ${WSM_MYSQL_HOST:?remote-db mode needs WSM_MYSQL_HOST in .env}
+      WSM_MYSQL_PORT: ${WSM_MYSQL_PORT:?remote-db mode needs WSM_MYSQL_PORT in .env}
+
+  migrate:
+    networks: !reset null
+    environment:
+      WSM_MYSQL_HOST: ${WSM_MYSQL_HOST:?remote-db mode needs WSM_MYSQL_HOST in .env}
+      WSM_MYSQL_PORT: ${WSM_MYSQL_PORT:?remote-db mode needs WSM_MYSQL_PORT in .env}
