@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+- **Remote-DB deployment mode.** `docker-compose.remote-db.yml` plus
+  `make up REMOTE_DB=1` run the app on a host that does **not** carry the shared
+  `master-compose-ai` stack: it undeclares that stack's external network and
+  points MySQL at the address `.env` already holds, instead of the container DNS
+  name `mysqldb-master` that resolves only on the stack's own host. Without it
+  `up` fails with `network declared as external, but could not be found`, which
+  reads as "the shared stack is down" and means the opposite. The overlay uses
+  `!reset` rather than `[]` because compose *merges* a service's networks, so
+  anything weaker leaves the network attached and the lookup still runs. All
+  container targets now go through one `$(COMPOSE)` variable so the mode cannot
+  be applied to `up` and forgotten on `logs`.
+
 ### Fixed
 - **`/sessions` scrolled the whole page sideways on a phone.** It held the only
   bare `<table class="table">` in the app; every other table page wraps in

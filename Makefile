@@ -19,6 +19,17 @@ MIGRATIONS_DIR  := migrations
 MYSQL_CONTAINER ?= master-compose-ai-mysqldb-master-1
 IMAGE           ?= whatsapp-with-dashboard:local
 
+# ONE compose invocation for every container target below, so a mode cannot be
+# applied to `up` and forgotten on `logs`. REMOTE_DB=1 adds the overlay for a
+# host that runs the app but NOT the shared master-compose-ai stack — the app
+# then reaches MySQL at WSM_MYSQL_HOST:WSM_MYSQL_PORT over the private network
+# instead of by the container DNS name that only resolves on that stack's host.
+# See the header of docker-compose.remote-db.yml.
+#
+#   make up                 # app and MySQL on the same host
+#   make up REMOTE_DB=1     # app here, MySQL over WireGuard
+COMPOSE := docker compose$(if $(REMOTE_DB), -f docker-compose.yml -f docker-compose.remote-db.yml,)
+
 # goose connects as the ordinary app user against the app database.
 # multiStatements=true is a GOOSE-ONLY flag: the app's own DSN (internal/config)
 # deliberately does not set it, because the app never sends multi-statement SQL
@@ -131,13 +142,13 @@ e2e-serve: ## Just run the app the way the e2e suite does (port 8801, SQLite)
 docker-build: ## Build the container image
 	docker build -t $(IMAGE) .
 
-up: ## Start the app container on master-compose-ai-net
-	docker compose up -d --build
+up: ## Start the app container (REMOTE_DB=1 for a host without the shared stack)
+	$(COMPOSE) up -d --build
 
 # NEVER run `docker compose down` inside master-compose-ai itself — that stack
 # holds other products' datastores. This target only stops OUR stack.
 down: ## Stop this stack (leaves the shared infra alone)
-	docker compose down
+	$(COMPOSE) down
 
 logs: ## Follow the container logs
-	docker compose logs -f app
+	$(COMPOSE) logs -f app

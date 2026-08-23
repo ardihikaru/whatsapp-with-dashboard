@@ -23,7 +23,7 @@ map $http_upgrade $wa_connection_upgrade { default upgrade; '' close; }
 # Prod only — there is no dev tier for this product, and 19801 is reserved for one.
 map $host $wa_backend {
     hostnames;
-    wa.mfardiansyah.id  10.10.0.2:18801;
+    wa.mfardiansyah.id  10.10.0.4:18801;
     default             "";
 }
 
@@ -57,7 +57,7 @@ server {
     if ($wa_backend = "") { return 444; }
 
     # THE JSON API HAS NO PUBLIC ROUTE. Its consumers dial the service directly
-    # over WireGuard at 10.10.0.2:18801, so publishing /api/v1 here would widen
+    # over WireGuard at 10.10.0.4:18801, so publishing /api/v1 here would widen
     # the attack surface of a WhatsApp identity to the whole internet and buy
     # nothing. `^~` beats the prefix match on `/` without needing a regex.
     #

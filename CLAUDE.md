@@ -68,6 +68,18 @@ override `layout.css`. `responsive.css` is a ninth file loaded last and
 overrides by cascade. Do not reorder, and prefer adding a later file to editing
 those eight.
 
+**The app and its MySQL no longer share a host.** The app runs on `10.10.0.4`;
+the schema stays on the shared MySQL at `10.10.0.2:5306`. So
+`docker-compose.yml`'s external `master-compose-ai-net` and its
+`WSM_MYSQL_HOST: mysqldb-master` are both wrong there, and `up` fails with
+`network declared as external, but could not be found` — which reads as "the
+shared stack is down" and is not. `docker-compose.remote-db.yml`
+(`make up REMOTE_DB=1`) undoes both. Note `!reset`, not `[]`: compose MERGES a
+service's networks, so anything weaker leaves `infra` attached and the lookup
+still runs. Every container target goes through `$(COMPOSE)` so the mode cannot
+be applied to `up` and forgotten on `logs`; `compose_remote_db_test.go` holds
+all of that, including a service added to the base file and forgotten here.
+
 **Two hand-maintained copies of one schema.** `migrations/*.sql` (goose, MySQL,
 owns production) and `internal/db.EnsureSchema` (SQLite, owns tests and the e2e
 run). A migration added to only one of them makes every SQLite-backed test pass

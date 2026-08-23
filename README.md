@@ -167,16 +167,18 @@ This is the single easiest thing to get wrong. `127.0.0.1` *inside* a container
 is that container's own loopback, not the host's, so the published port 5306 is
 unreachable from in there.
 
-| | host (`make run`) | container (`make up`) |
-|---|---|---|
-| MySQL address | `127.0.0.1:5306` (published port) | `mysqldb-master:3306` (container DNS) |
-| SQLite store | `./wsm-store.db` | `/data/wsm.db` on volume `whatsapp-with-dashboard-sqlite` |
-| UI | <http://localhost:8800> | <http://127.0.0.1:8800> |
-| Set by | `.env` | `docker-compose.yml` |
+| | host (`make run`) | container (`make up`) | remote DB (`make up REMOTE_DB=1`) |
+|---|---|---|---|
+| MySQL address | `127.0.0.1:5306` (published port) | `mysqldb-master:3306` (container DNS) | `$WSM_MYSQL_HOST:$WSM_MYSQL_PORT` (private network) |
+| SQLite store | `./wsm-store.db` | `/data/wsm.db` on volume `whatsapp-with-dashboard-sqlite` | same as container |
+| UI | <http://localhost:8800> | <http://127.0.0.1:8800> | same as container |
+| Set by | `.env` | `docker-compose.yml` | `docker-compose.remote-db.yml` |
 
-**One `.env` serves both.** It is written for host mode; `docker-compose.yml`
+**One `.env` serves all three.** It is written for host mode; `docker-compose.yml`
 overrides `WSM_MYSQL_HOST`, `WSM_MYSQL_PORT` and `WSM_DB_PATH` in-container,
-because compose gives `environment:` precedence over `env_file:`.
+because compose gives `environment:` precedence over `env_file:`. The remote-DB
+overlay hands `WSM_MYSQL_HOST`/`WSM_MYSQL_PORT` back to `.env` rather than
+naming an address of its own, so it is a mode and not one machine's file.
 
 ```sh
 make up      # docker compose up -d --build
@@ -187,6 +189,21 @@ make down    # stops THIS stack only
 The compose file joins `master-compose-ai-net` as an **external** network — it is
 owned by the other stack and must never be created here. If you get
 `network declared as external, but could not be found`, that stack is down.
+
+**Unless the app is not on that stack's host at all.** Then the network is not
+down, it is elsewhere, and the same message means something completely
+different. `REMOTE_DB=1` adds `docker-compose.remote-db.yml`, which undeclares
+the external network and points MySQL at the address `.env` already carries:
+
+```sh
+make up   REMOTE_DB=1   # app here, MySQL over the private network
+make logs REMOTE_DB=1   # the flag is not optional on the follow-up targets
+make down REMOTE_DB=1
+```
+
+Every container target goes through one `$(COMPOSE)` variable so the mode cannot
+be applied to `up` and forgotten on `logs`; `compose_remote_db_test.go` holds
+that line.
 
 Migrations can also run in a container, for hosts with no Go toolchain:
 
@@ -230,13 +247,13 @@ breaks the login POST, because the login page renders its form action from
 the proxy. See `internal/handler/routes.go`.
 
 nginx, terminating TLS and forwarding to a host that publishes with
-`WSM_BIND_ADDR=10.10.0.2` and `WSM_EXPOSED_PORT=18801`:
+`WSM_BIND_ADDR=10.10.0.4` and `WSM_EXPOSED_PORT=18801`:
 
 ```nginx
 map $http_upgrade $wsm_connection_upgrade { default upgrade; '' close; }
 
 location / {
-    proxy_pass http://10.10.0.2:18801;
+    proxy_pass http://10.10.0.4:18801;
     proxy_http_version 1.1;
     proxy_set_header Host              $host;
     proxy_set_header X-Real-IP         $remote_addr;
