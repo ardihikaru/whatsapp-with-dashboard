@@ -304,9 +304,38 @@ Notes:
   from the old one.
 - **Nothing was created on the shared MySQL.** The only statement issued against
   it was `SHOW GRANTS`, read-only, and the app's own traffic.
-- **The old container is left `exited`, not removed, and its volume is intact.**
-  That is the rollback: start it there and point the edge's `map` back. Do not
-  reclaim either until this host has run long enough to trust.
+- **The old container was left `exited`, not removed, and its volume intact.**
+  That was the rollback: start it there and point the edge's `map` back.
+  **Retired the same day** — see the follow-up below.
 - `docker compose config` interpolates `env_file`, so its output carries the
   admin bcrypt hash and the MySQL password in clear. Grep it for the keys you
   want; never page the whole thing into a terminal or a log.
+
+### Follow-up, same day: the rollback was retired
+
+After ~2h of live traffic on the new host (session re-authenticated at
+`04:54:17Z`, health still `{"connected":1,"sessions":1,"status":"ok"}`), the old
+container and the volume `whatsapp-with-dashboard-sqlite` on `10.10.0.2` were
+deleted on request.
+
+| Check | Result |
+|---|---|
+| Any other container referencing that volume | none — only the stopped `whatsapp-with-dashboard-app-1` |
+| Container removed | `docker compose down` in this repo's dir on .2; the external network and the shared stack untouched |
+| Volume removed | `docker volume rm whatsapp-with-dashboard-sqlite`, by name, not `down -v` |
+| Gone from the daemon | `docker volume inspect` → `no such volume` |
+| Gone from disk | no `whatsapp-*` directory under `/var/lib/docker/volumes` |
+| Shared MySQL after the deletion | `master-compose-ai-mysqldb-master-1  Up 8 days` |
+| Production after the deletion | `/login` `200`, `/docs` `200`, health `connected:1` |
+
+**The consequence, stated plainly: there is no rollback any more, and the volume
+on `10.10.0.4` is the only copy of the paired device identity that exists.** The
+standing "never `down -v`" rule was already a hard one; it is now the difference
+between a restart and re-pairing the handset by QR in person.
+
+One correction to the transcript of this run: a `sudo test -d` used to check the
+mountpoint on .2 failed for want of a password, so its `||` branch printed
+"directory removed" without having looked. The on-disk check in the table above
+reads `/var/lib/docker/volumes` through a container instead, which does run as
+root. A failed check that prints the reassuring branch is worth more suspicion
+than a check that errors out loudly.
