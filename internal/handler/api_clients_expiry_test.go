@@ -39,7 +39,9 @@ func TestExpiryDropdownOffersMultiYearPresets(t *testing.T) {
 	body := authedGet(t, srv, sessions, "/admin/api-clients").Body.String()
 	for _, want := range []string{
 		`value="31536000"`, `>1 tahun<`,
+		`value="63072000"`, `>2 tahun<`,
 		`value="94608000"`, `>3 tahun<`,
+		`value="126144000"`, `>4 tahun<`,
 		`value="157680000"`, `>5 tahun<`,
 	} {
 		if !strings.Contains(body, want) {

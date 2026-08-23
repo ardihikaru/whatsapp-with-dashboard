@@ -34,7 +34,9 @@ var presetTTLs = map[int]string{
 	604800:             "7 hari",
 	2592000:            "30 hari",
 	secondsPerYear:     "1 tahun",
+	2 * secondsPerYear: "2 tahun",
 	3 * secondsPerYear: "3 tahun",
+	4 * secondsPerYear: "4 tahun",
 	5 * secondsPerYear: "5 tahun",
 }
 
