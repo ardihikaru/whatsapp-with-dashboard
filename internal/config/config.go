@@ -67,6 +67,23 @@ const (
 	DefaultMinioTempBucket    = "temp"
 	DefaultMinioTimeout       = 30 * time.Second
 	DefaultMinioShareDuration = 7 * 24 * time.Hour
+
+	// WA backend selection (see internal/wa/backend.go and
+	// internal/wa/backend_waxum.go). Both "whatsmeow" and "waxum" are fully
+	// wired (cmd/app/main.go's newBackend). waxum is now the default:
+	// docker-compose.yml ships a waxum service on the compose network, so
+	// every environment that flips this on also gets WSM_WAXUM_URL/TOKEN set
+	// for it (container mode via docker-compose.yml, e2e via
+	// scripts/e2e-env.sh overriding back to whatsmeow, since the browser
+	// suite never pairs and stays hermetic). WSM_WA_BACKEND=whatsmeow remains
+	// a rollback switch — see CLAUDE.md's hazards section for why it is only
+	// a full rollback BEFORE a device has paired through waxum.
+	DefaultWABackend = "waxum"
+
+	DefaultWaxumTimeout        = 30 * time.Second
+	DefaultWaxumQRPollInterval = 2 * time.Second
+	DefaultWaxumPollInterval   = 15 * time.Second
+	DefaultWaxumPairTimeout    = 180 * time.Second
 )
 
 // Config is the resolved application configuration.
@@ -136,6 +153,24 @@ type Config struct {
 	MinioTempBucket    string
 	MinioTimeout       time.Duration
 	MinioShareDuration time.Duration
+
+	// WABackend selects the WhatsApp transport: "whatsmeow" (default, the
+	// in-process whatsmeow library) or "waxum" (a REST client to a separate
+	// waxum process, wa.NewWaxumBackend — see cmd/app/main.go's boot-order
+	// comment for why the whatsmeow sqlite store is never opened in this
+	// mode).
+	WABackend string
+
+	// Waxum* configure the internal/waxum HTTP client. URL/Token are
+	// required only when WABackend == "waxum"; the interval/timeout knobs
+	// always resolve to a default so they can be read regardless of which
+	// backend is selected.
+	WaxumURL            string // validated absolute http(s)://host[:port], no trailing slash
+	WaxumToken          string
+	WaxumTimeout        time.Duration // per-request HTTP timeout
+	WaxumQRPollInterval time.Duration
+	WaxumPollInterval   time.Duration
+	WaxumPairTimeout    time.Duration // hard deadline for the pairing pump
 }
 
 // Load resolves the configuration and fails fast on an invalid env value.
@@ -218,6 +253,9 @@ func Load() (*Config, error) {
 		cfg.DarkMode = b
 	}
 	if err := loadMinio(cfg); err != nil {
+		return nil, err
+	}
+	if err := loadWaxum(cfg); err != nil {
 		return nil, err
 	}
 	return cfg, nil

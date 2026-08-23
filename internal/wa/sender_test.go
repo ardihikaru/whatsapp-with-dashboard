@@ -3,8 +3,6 @@ package wa
 import (
 	"context"
 	"testing"
-
-	"go.mau.fi/whatsmeow"
 )
 
 func testSession(mgr *Manager, state State) *ManagedSession {
@@ -19,11 +17,44 @@ func TestEnqueueNotConnected(t *testing.T) {
 	}
 }
 
+// TestEnqueueAdmitsAConnectedSessionWithNoWhatsmeowClientAttached is the
+// regression test for the waxum backend's send path: s.client (a
+// *whatsmeow.Client) is never set by backend_waxum.go, so admission must
+// gate on s.state alone. Before this phase, Enqueue also required
+// s.client != nil, which made every session using the waxum backend
+// permanently un-sendable regardless of its real connection state.
+func TestEnqueueAdmitsAConnectedSessionWithNoWhatsmeowClientAttached(t *testing.T) {
+	s := testSession(newTestManager(newStubSessions(), newStubMsgs()), StateConnected)
+	s.sendQ = make(chan sendJob, 1) // s.client left nil — no whatsmeow client
+	if _, err := s.Enqueue("m1", ToJID("628120001"), "hi"); err != nil {
+		t.Fatalf("Enqueue with no whatsmeow client: err = %v, want nil", err)
+	}
+}
+
+// TestTrySendRoutesThroughTheBackendWithoutRequiringAWhatsmeowClient is
+// trySend's half of the same regression: the send attempt itself must not
+// require s.client either, since the waxum backend's SendText never reads
+// it — the connected check is s.state, and the transport call goes through
+// Backend.SendText regardless of which backend answers.
+func TestTrySendRoutesThroughTheBackendWithoutRequiringAWhatsmeowClient(t *testing.T) {
+	fake := &fakeBackend{name: "fake-for-test", sendTextID: "wamid.fake"}
+	mgr := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(),
+		Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
+	s := testSession(mgr, StateConnected) // s.client left nil
+
+	res := s.trySend(context.Background(), sendJob{msgID: "m1", to: ToJID("628120001"), text: "hi"})
+	if res.Err != nil {
+		t.Fatalf("trySend with no whatsmeow client: err = %v, want nil", res.Err)
+	}
+	if res.WAMessageID != "wamid.fake" {
+		t.Fatalf("WAMessageID = %q, want %q (proves the call reached Backend.SendText)", res.WAMessageID, "wamid.fake")
+	}
+}
+
 // TestEnqueueQueueFullAdmission fills the bounded queue without a running
 // worker: admission is non-blocking and the overflow caller gets ErrQueueFull.
 func TestEnqueueQueueFullAdmission(t *testing.T) {
 	s := testSession(newTestManager(newStubSessions(), newStubMsgs()), StateConnected)
-	s.client = &whatsmeow.Client{} // Enqueue only checks presence, not liveness
 	s.sendQ = make(chan sendJob, 2)
 	for i := 0; i < 2; i++ {
 		if _, err := s.Enqueue("m", ToJID("628120001"), "hi"); err != nil {

@@ -2,7 +2,6 @@ package wa
 
 import (
 	"context"
-	"log/slog"
 	"strings"
 	"time"
 
@@ -37,7 +36,7 @@ func (m *Manager) Create(ctx context.Context, name, phone string) (*ManagedSessi
 
 // Delete is the full teardown: map removal FIRST (no new HTTP work can reach
 // the session), then sender stop + ctx cancel, then unlink from the phone
-// (Logout deletes the whatsmeow store rows but emits no events.LoggedOut),
+// (backend.Logout deletes the credentials but emits no events.LoggedOut),
 // and finally the app row — wa_messages cascade via FK.
 func (m *Manager) Delete(ctx context.Context, id string) error {
 	m.mu.Lock()
@@ -53,23 +52,12 @@ func (m *Manager) Delete(ctx context.Context, id string) error {
 	if s.cancel != nil {
 		s.cancel() // ends pairing pump / pending I/O
 	}
-	cli := s.client
-	s.client = nil
-	paired := cli != nil && cli.Store.ID != nil
 	s.mu.Unlock()
 
-	if cli != nil {
-		if paired {
-			if err := cli.Logout(ctx); err != nil {
-				slog.Warn("logout failed; forcing local cleanup", "session", id, "err", err)
-				cli.Disconnect()
-				if err := m.container.DeleteDevice(ctx, cli.Store); err != nil {
-					slog.Warn("device purge failed", "session", id, "err", err)
-				}
-			}
-		} else {
-			cli.Disconnect()
-		}
+	// backend is nil only in tests that never pair/attach a session (see
+	// NewManager's doc comment); nothing for Logout to do in that case.
+	if m.backend != nil {
+		_ = m.backend.Logout(ctx, s) // errors are logged inside; delete proceeds regardless
 	}
 	return m.repo.Delete(ctx, id)
 }

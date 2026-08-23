@@ -12,8 +12,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"go.mau.fi/whatsmeow/store/sqlstore"
-
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 )
@@ -32,10 +30,10 @@ type Manager struct {
 	mu       sync.RWMutex
 	sessions map[string]*ManagedSession
 
-	container *sqlstore.Container
-	repo      wasession.Repository
-	msgs      message.Repository
-	cfg       Config
+	backend Backend
+	repo    wasession.Repository
+	msgs    message.Repository
+	cfg     Config
 
 	rootCtx    context.Context // signal ctx from main; parent of every session ctx
 	persistCtx context.Context // rootCtx without cancelation: repo writes must land during teardown
@@ -45,11 +43,13 @@ type Manager struct {
 
 // NewManager wires the supervisor. Call StartAll afterwards to reconcile
 // persisted sessions, and Close (after http.Server.Shutdown) to tear down.
-func NewManager(rootCtx context.Context, container *sqlstore.Container,
+// backend may be nil in tests that never activate a session (see Snapshot's
+// nil guard); production always passes one (wa.NewWhatsmeowBackend today).
+func NewManager(rootCtx context.Context, backend Backend,
 	repo wasession.Repository, msgs message.Repository, cfg Config) *Manager {
 	return &Manager{
 		sessions:   make(map[string]*ManagedSession),
-		container:  container,
+		backend:    backend,
 		repo:       repo,
 		msgs:       msgs,
 		cfg:        cfg,

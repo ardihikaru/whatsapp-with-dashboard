@@ -109,3 +109,12 @@ func (s *ManagedSession) PairingSnapshot() (PairingSnapshot, bool) {
 	}
 	return ps.Snapshot(), true
 }
+
+// StartPairing provisions and starts pairing through the session's backend
+// (see backend_meow.go for the whatsmeow implementation, moved unchanged
+// from what used to be this method's entire body). rootCtx (not a per-call
+// ctx) matches every other backend-driven background loop this package
+// starts — StartAll's boot reconnects use the same context.
+func (s *ManagedSession) StartPairing(mode PairMode) error {
+	return s.mgr.backend.StartPairing(s.mgr.rootCtx, s, mode)
+}

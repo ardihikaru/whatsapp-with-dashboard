@@ -3,10 +3,6 @@ package wa
 import (
 	"context"
 	"time"
-
-	"go.mau.fi/whatsmeow/proto/waE2E"
-	"go.mau.fi/whatsmeow/types"
-	"google.golang.org/protobuf/proto"
 )
 
 const (
@@ -23,7 +19,7 @@ type SendResult struct {
 
 type sendJob struct {
 	msgID string // wa_messages.id (row already inserted, status=queued)
-	to    types.JID
+	to    JID
 	text  string
 	done  chan SendResult // buffered(1): worker never blocks delivering the result
 }
@@ -31,10 +27,20 @@ type sendJob struct {
 // Enqueue admits a message to the per-session queue (non-blocking). The
 // returned channel yields the terminal result; callers may abandon it (202
 // path) — the worker persists the outcome regardless.
-func (s *ManagedSession) Enqueue(msgID string, to types.JID, text string) (<-chan SendResult, error) {
+//
+// Admission is s.state alone, NOT s.client != nil. It used to also require a
+// whatsmeow client, but that check is backend-specific — s.client stays nil
+// forever under the waxum backend (backend_waxum.go's header comment), which
+// would make every session using it permanently un-sendable. Both backends
+// only ever move a session INTO StateConnected once their own transport is
+// actually up (backend_meow.go's onPaired/handleEvent,
+// backend_waxum.go's finishPairingSuccess/applyStatus), so state alone is
+// already the backend-agnostic signal this check needs. See
+// TestEnqueueAdmitsAConnectedSessionWithNoWhatsmeowClientAttached.
+func (s *ManagedSession) Enqueue(msgID string, to JID, text string) (<-chan SendResult, error) {
 	s.mu.Lock()
 	q := s.sendQ
-	connected := s.state == StateConnected && s.client != nil
+	connected := s.state == StateConnected
 	s.mu.Unlock()
 	if !connected || q == nil {
 		return nil, ErrNotConnected
@@ -114,24 +120,27 @@ func (s *ManagedSession) waitToken(ctx context.Context, b *bucket) bool {
 	}
 }
 
-// trySend performs one SendMessage attempt with a hard 30s deadline.
+// trySend performs one send attempt with a hard 30s deadline. The transport
+// call itself (whatsmeow's cli.SendMessage, or waxum's HTTP POST) lives in
+// the backend — this stays the transport-agnostic half: the connected
+// admission check and the timeout are the same regardless of which backend
+// answers. Like Enqueue, this reads s.state only, not s.client — see
+// Enqueue's doc comment for why a whatsmeow-only field cannot gate a
+// transport-agnostic check.
 func (s *ManagedSession) trySend(ctx context.Context, job sendJob) SendResult {
 	s.mu.Lock()
-	cli := s.client
 	connected := s.state == StateConnected
 	s.mu.Unlock()
-	if cli == nil || !connected {
+	if !connected {
 		return SendResult{Err: ErrNotConnected}
 	}
 	sctx, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
-	resp, err := cli.SendMessage(sctx, job.to, &waE2E.Message{
-		Conversation: proto.String(job.text), // plain text, \n preserved — MVP message shape
-	})
+	waID, err := s.mgr.backend.SendText(sctx, s, job.to, job.text)
 	if err != nil {
 		return SendResult{Err: err}
 	}
-	return SendResult{WAMessageID: string(resp.ID)}
+	return SendResult{WAMessageID: waID}
 }
 
 // finishJob persists the terminal outcome (via persistCtx: must land during

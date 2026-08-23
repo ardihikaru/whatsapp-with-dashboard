@@ -6,8 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"go.mau.fi/whatsmeow/types"
-
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
@@ -105,8 +103,8 @@ func (h *handlers) sendThroughSession(r *http.Request, s *wa.ManagedSession, dig
 // destination. It took bare phone digits until Fase 9 and built the JID itself,
 // which is what kept group sends out.
 //
-// Nothing below the queue needed changing: sendJob.to has always been a types.JID
-// and trySend hands it straight to cli.SendMessage, so the token bucket, the retry
+// Nothing below the queue needed changing: sendJob.to has always been a wa.JID
+// and trySend hands it straight to the backend, so the token bucket, the retry
 // loop and MarkSent are destination-agnostic already. That is why kb-30 is a
 // validator plus a handler and touches no crypto.
 //
@@ -115,7 +113,7 @@ func (h *handlers) sendThroughSession(r *http.Request, s *wa.ManagedSession, dig
 // a better trade than a second audit table: GET /sessions/{id}/messages shows
 // group sends for free, with no new code.
 func (h *handlers) sendThroughJID(
-	r *http.Request, s *wa.ManagedSession, to types.JID, toDisplay, text string, attr message.Attribution,
+	r *http.Request, s *wa.ManagedSession, to wa.JID, toDisplay, text string, attr message.Attribution,
 ) (sendOutcome, int) {
 	msg := &message.Message{ID: wa.NewID(), SessionID: s.ID, ToPhone: toDisplay,
 		Body: text, Status: message.StatusQueued, CreatedAt: time.Now().UTC(),

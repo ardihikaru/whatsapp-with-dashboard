@@ -8,8 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"go.mau.fi/whatsmeow/types"
-
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
@@ -77,10 +75,10 @@ func decodeSendRequest(w http.ResponseWriter, r *http.Request) (string, string, 
 }
 
 // postAPISendThrough is the shared JSON tail of every machine send path — phone
-// or group. It takes a resolved types.JID rather than digits so the group handler
+// or group. It takes a resolved wa.JID rather than digits so the group handler
 // reuses it verbatim (see sendThroughJID).
 func (h *handlers) postAPISendThrough(
-	w http.ResponseWriter, r *http.Request, s *wa.ManagedSession, to types.JID, toDisplay, text string, attr message.Attribution,
+	w http.ResponseWriter, r *http.Request, s *wa.ManagedSession, to wa.JID, toDisplay, text string, attr message.Attribution,
 ) {
 	outcome, status := h.sendThroughJID(r, s, to, toDisplay, text, attr)
 	if status >= 400 {

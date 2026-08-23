@@ -1,15 +1,20 @@
 // WhatsApp Session Management (WSM) — Go + HTMX gateway app for pairing
 // WhatsApp device sessions and sending plain-text messages through them.
-// Boot order (docs/03): config → MinIO connectivity check → SQLite (app
-// schema + whatsmeow sqlstore) → repos → wa.Manager + boot reconciliation →
-// HTTP. Shutdown order is a hard requirement: server.Shutdown →
-// manager.Close → pool.Close.
+// Boot order (docs/03): config → MinIO connectivity check → WA backend
+// (newBackend: whatsmeow's SQLite crypto store + schema upgrade via
+// wa.NewWhatsmeowBackend, OR — when WSM_WA_BACKEND=waxum — a waxum HTTP
+// client via wa.NewWaxumBackend with NO SQLite store opened at all; see
+// newBackend's doc comment for why that matters) → app store (MySQL/SQLite)
+// → repos → wa.Manager + boot reconciliation → HTTP. Shutdown order is a
+// hard requirement: server.Shutdown → manager.Close (which now also closes
+// the backend) → the WA backend's own store, if it opened one → pool.Close.
 package main
 
 import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"log"
 	"net/http"
@@ -18,9 +23,6 @@ import (
 	"strings"
 	"syscall"
 	"time"
-
-	"go.mau.fi/whatsmeow/store/sqlstore"
-	waLog "go.mau.fi/whatsmeow/util/log"
 
 	wsm "github.com/ardihikaru/whatsapp-with-dashboard"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
@@ -33,6 +35,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/storage"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/waxum"
 )
 
 const shutdownTimeout = 5 * time.Second
@@ -53,6 +56,47 @@ func displayURL(addr string) string {
 func main() {
 	if err := run(); err != nil {
 		log.Fatalf("whatsapp-with-dashboard: %v", err)
+	}
+}
+
+// newBackend builds the wa.Backend for cfg.WABackend, hoisted out of run so
+// the whatsmeow/waxum branch is a unit-testable seam (main_test.go) rather
+// than only reachable by booting the whole app.
+//
+// The two branches are NOT symmetric, and that asymmetry is the reason this
+// exists as its own function rather than an inline switch: the whatsmeow
+// branch opens db.Open(cfg.DBPath, ...) — a real SQLite file, MaxOpenConns
+// pinned to 1, taking the WAL lock — and hands it to the returned
+// io.Closer so run can defer its Close at the position db.Open used to
+// occupy (boot order is documented above and is a hard requirement). The
+// waxum branch opens NOTHING: waxum's Rust process, not this one, owns
+// whatever store backs its sessions. Calling db.Open in that branch anyway
+// would, on a fresh host, CREATE cfg.DBPath and write 20 empty crypto
+// tables into it — an initialised-but-deviceless store that looks exactly
+// like "every session's device went missing" to a later rollback onto
+// whatsmeow (markDeviceGone, session.go). See
+// TestNewBackendNeverOpensTheWhatsmeowStoreUnderWaxum.
+func newBackend(ctx context.Context, cfg *config.Config) (wa.Backend, io.Closer, error) {
+	switch cfg.WABackend {
+	case "waxum":
+		client := waxum.New(cfg.WaxumURL, cfg.WaxumToken, cfg.WaxumTimeout)
+		backend := wa.NewWaxumBackend(client, wa.WaxumConfig{
+			QRPollInterval: cfg.WaxumQRPollInterval,
+			PollInterval:   cfg.WaxumPollInterval,
+			PairTimeout:    cfg.WaxumPairTimeout,
+		})
+		return backend, nil, nil
+	default: // "whatsmeow" — config.Load already rejects any other value
+		store, err := db.Open(cfg.DBPath, cfg.SQLiteDialect)
+		if err != nil {
+			return nil, nil, err
+		}
+		backend, err := wa.NewWhatsmeowBackend(ctx, store, cfg.SQLiteDialect)
+		if err != nil {
+			store.Close()
+			return nil, nil, err
+		}
+		return backend, store, nil
 	}
 }
 
@@ -85,15 +129,15 @@ func run() error {
 	log.Printf("minio: connected to %s (bucket=%s, temp bucket=%s)",
 		cfg.MinioEndpoint, cfg.MinioBucket, cfg.MinioTempBucket)
 
-	// SQLite store: whatsmeow crypto tables only (single writer).
-	store, err := db.Open(cfg.DBPath, cfg.SQLiteDialect)
+	// WA backend: whatsmeow's SQLite crypto store (single writer), or a
+	// waxum HTTP client that opens no local store at all — see newBackend's
+	// doc comment for why that split matters.
+	backend, waStore, err := newBackend(ctx, cfg)
 	if err != nil {
 		return err
 	}
-	defer store.Close() // runs LAST: after server drain and manager join
-	container := sqlstore.NewWithDB(store, cfg.SQLiteDialect, waLog.Stdout("sqlstore", "INFO", true))
-	if err := container.Upgrade(ctx); err != nil { // NewWithDB does NOT auto-upgrade
-		return err
+	if waStore != nil {
+		defer waStore.Close() // runs LAST: after server drain and manager join
 	}
 
 	// App store: MySQL in production (schema owned by goose migrations), or
@@ -113,7 +157,7 @@ func run() error {
 	// dashboard read path (its analytics methods).
 	msgRepo := message.NewRepository(appDB)
 
-	manager := wa.NewManager(ctx, container, wasession.NewRepository(appDB),
+	manager := wa.NewManager(ctx, backend, wasession.NewRepository(appDB),
 		msgRepo, wa.Config{
 			SendRate: cfg.SendRate, SendBurst: cfg.SendBurst, ReconcilePar: cfg.ReconcilePar,
 		})

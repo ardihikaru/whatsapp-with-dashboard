@@ -4,8 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
-
-	"go.mau.fi/whatsmeow/types"
 )
 
 // GroupInfo is marshalled straight into the API response, so its json tags ARE the
@@ -71,8 +69,8 @@ func TestParseGroupJID(t *testing.T) {
 			if got.String() != tc.want {
 				t.Fatalf("ParseGroupJID(%q) = %q, want %q", tc.in, got.String(), tc.want)
 			}
-			if got.Server != types.GroupServer {
-				t.Fatalf("ParseGroupJID(%q) server = %q, want %q", tc.in, got.Server, types.GroupServer)
+			if got.Server != groupServer {
+				t.Fatalf("ParseGroupJID(%q) server = %q, want %q", tc.in, got.Server, groupServer)
 			}
 		})
 	}
@@ -91,7 +89,7 @@ func TestParseGroupJIDAndToJIDDisagree(t *testing.T) {
 	if user.String() == group.String() {
 		t.Fatalf("ToJID and ParseGroupJID both produced %q", user.String())
 	}
-	if user.Server != types.DefaultUserServer || group.Server != types.GroupServer {
+	if user.Server != userServer || group.Server != groupServer {
 		t.Fatalf("servers wrong: user=%q group=%q", user.Server, group.Server)
 	}
 }

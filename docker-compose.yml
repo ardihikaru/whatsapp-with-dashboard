@@ -34,6 +34,15 @@ volumes:
     # losing it means re-pairing the handset by QR, in person. Treat it like a
     # credential and never `docker compose down -v` this stack casually.
     name: whatsapp-with-dashboard-sqlite
+  waxum-sessions:
+    # waxum's registry lives in MySQL, but under WHATSAPP_STORAGE_PATH it also
+    # keeps a per-session SQLite whatsapp.db plus an instance-lock file — the
+    # SAME class of cryptographic identity material as wsm-sqlite above. Never
+    # `docker compose down -v` this stack casually. And unlike the app, waxum
+    # cannot be replicated even READ-only: the instance lock forbids two
+    # processes pointed at one storage dir, so there is no rolling-restart or
+    # scale-out story here either.
+    name: whatsapp-with-dashboard-waxum
 
 services:
   app:
@@ -58,6 +67,10 @@ services:
       # The SQLite store on the named volume, not the repo working directory.
       WSM_DB_PATH: /data/wsm.db
       WSM_ADDR: ":8800"
+      # waxum is reachable only from inside this compose network — see the
+      # waxum service below for why it publishes no host port.
+      WSM_WAXUM_URL: http://waxum:3451
+      WSM_WAXUM_TOKEN: ${WAXUM_TOKEN}
 
     volumes:
       - wsm-sqlite:/data
@@ -75,6 +88,15 @@ services:
 
     networks: [infra]
 
+    # PLAIN depends_on, not `condition: service_healthy`. The app must be able
+    # to boot with waxum down or still starting — internal/wa's status poller
+    # (manager_boot.go) converges once waxum answers, the same way it already
+    # tolerates whatsmeow reconnecting in the background. Gating startup on
+    # waxum's health would make one container's boot order dictate the
+    # other's, which is exactly the coupling the two-process split was meant
+    # to avoid.
+    depends_on: [waxum]
+
     # whatsmeow needs time to disconnect its websockets cleanly on SIGTERM.
     # cmd/app tears down as server.Shutdown(5s) -> manager.Close() (joins every
     # send pump) -> appDB.Close() -> the SQLite store LAST. 15s leaves headroom
@@ -84,6 +106,42 @@ services:
     # No healthcheck: distroless/static has nothing to exec. GET /api/v1/health
     # is public — probe it from the host or a reverse proxy:
     #   curl -sf http://127.0.0.1:8800/api/v1/health
+
+  # waxum: the Rust REST gateway that WSM_WA_BACKEND=waxum drives instead of
+  # the in-process whatsmeow library (internal/wa/backend_waxum.go). Reachable
+  # ONLY at http://waxum:3451 on this compose network — see the deliberate
+  # absence of a `ports:` block below.
+  waxum:
+    image: fdciabdul/waxum:${WAXUM_TAG}
+    # Pinned via .env.example's WAXUM_TAG=0.12.2 (current as of this writing,
+    # matches waxum's own Cargo.toml, multi-arch amd64/arm64), and never
+    # `latest`: this is a third-party image, and an unpinned tag is an
+    # unreviewed upgrade landing on every `docker compose pull`. Bump
+    # WAXUM_TAG deliberately when there is a reason to.
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: mysql://${WAXUM_MYSQL_USER}:${WAXUM_MYSQL_PASSWORD}@mysqldb-master:3306/${WAXUM_MYSQL_DATABASE}
+      SUPERADMIN_TOKEN: ${WAXUM_TOKEN:?waxum needs WAXUM_TOKEN in .env}
+      WHATSAPP_STORAGE_PATH: /data/whatsapp_sessions
+    volumes:
+      - waxum-sessions:/data
+
+    # NO ports: block, deliberately. The app reaches waxum at
+    # http://waxum:3451 over the compose network above; nothing else may
+    # reach it. waxum's SUPERADMIN_TOKEN is a root credential for every
+    # WhatsApp session it holds, and publishing this on the host or the LAN
+    # would put that credential's blast radius one network hop away instead
+    # of zero.
+
+    networks: [infra]
+
+    healthcheck:
+      # The image ships curl.
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:3451/health"]
+
+    stop_grace_period: 15s
 
   # One-shot goose runner, ON the shared network so it resolves mysqldb-master
   # the same way the app does. Opt-in: the normal path is `make migrate-up` on

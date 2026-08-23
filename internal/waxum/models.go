@@ -1,0 +1,91 @@
+package waxum
+
+// MediaKind selects which of waxum's four media-message endpoints
+// SendMedia hits, and doubles as the JSON body key its payload nests under
+// (see SendMedia's doc comment). There is deliberately no "ring" kind — see
+// TestNoRingCallMethodExists.
+type MediaKind string
+
+const (
+	MediaImage    MediaKind = "image"
+	MediaVideo    MediaKind = "video"
+	MediaAudio    MediaKind = "audio"
+	MediaDocument MediaKind = "document"
+)
+
+// DefaultTTSVoice is used by CallTTS when the caller passes an empty voice.
+const DefaultTTSVoice = "id-ID-ArdiNeural"
+
+// Status is GET /sessions/{id}/status, decoded verbatim. Status.Status is
+// one of: disconnected|connecting|waiting_for_qr|waiting_for_pair_code|
+// connected|logged_in (waxum's own enum spelling, snake_case).
+type Status struct {
+	Status       string `json:"status"`
+	IsLoggedIn   bool   `json:"is_logged_in"`
+	SocketAlive  bool   `json:"socket_alive"`
+	Paused       bool   `json:"paused"`
+	PhoneNumber  string `json:"phone_number"`
+	PushName     string `json:"push_name"`
+	Reachability string `json:"reachability"`
+}
+
+// QRResult is GET /sessions/{id}/qr. QRCodes holds RAW payload strings
+// ("2@…"), not PNGs — rendering them into a scannable code is the caller's
+// job.
+type QRResult struct {
+	QRCodes        []string `json:"qr_codes"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+	Status         string   `json:"status"`
+}
+
+// PairCodeResult is POST /sessions/{id}/pair.
+type PairCodeResult struct {
+	Code           string `json:"code"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+}
+
+// MessageResult is the response shape shared by SendText and SendMedia:
+// {"message_id":…,"timestamp":…,"to":…}.
+type MessageResult struct {
+	MessageID string `json:"message_id"`
+	Timestamp int64  `json:"timestamp"`
+	To        string `json:"to"`
+}
+
+// Group is JoinedGroups' mapped, caller-facing shape. It is deliberately NOT
+// the raw waxum wire shape — see Groups' doc comment for why Name comes from
+// "subject" and Count comes from len(participants), not from a "name" or
+// "participant_count" field neither of which waxum sends.
+type Group struct {
+	JID              string
+	Name             string
+	ParticipantCount int
+	AddressingMode   string
+}
+
+// groupsResponse is the raw wire shape of GET /sessions/{id}/groups.
+// Unexported: Groups() maps it to []Group before returning, so a caller can
+// never accidentally read the (nonexistent) "name" field or treat
+// "participants" as anything but "the array whose length is the count".
+type groupsResponse struct {
+	Groups []struct {
+		JID            string           `json:"jid"`
+		Subject        string           `json:"subject"`
+		Participants   []rawParticipant `json:"participants"`
+		AddressingMode string           `json:"addressing_mode"`
+	} `json:"groups"`
+	Total int `json:"total"`
+}
+
+// rawParticipant is intentionally shapeless (an empty struct decodes any
+// JSON object without caring what's inside it) — Groups only ever needs
+// len(Participants), never a participant's own fields.
+type rawParticipant struct{}
+
+// CallResult is the response shape shared by CallTTS and CallPlay:
+// {"call_id":…,"to":…,"recording_url":…}.
+type CallResult struct {
+	CallID       string `json:"call_id"`
+	To           string `json:"to"`
+	RecordingURL string `json:"recording_url"`
+}

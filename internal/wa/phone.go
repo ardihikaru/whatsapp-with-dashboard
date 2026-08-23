@@ -3,8 +3,6 @@ package wa
 import (
 	"errors"
 	"regexp"
-
-	"go.mau.fi/whatsmeow/types"
 )
 
 var nonDigits = regexp.MustCompile(`\D`)
@@ -25,6 +23,6 @@ func NormalizePhone(raw string) (string, error) {
 }
 
 // ToJID turns normalized digits into "<digits>@s.whatsapp.net".
-func ToJID(digits string) types.JID {
-	return types.NewJID(digits, types.DefaultUserServer)
+func ToJID(digits string) JID {
+	return JID{User: digits, Server: userServer}
 }

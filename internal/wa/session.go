@@ -2,13 +2,11 @@ package wa
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"go.mau.fi/whatsmeow"
-	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 )
 
@@ -24,9 +22,23 @@ const (
 	StateLoggedOut    State = "logged_out"
 )
 
-// ManagedSession pairs one wa_sessions row with at most one whatsmeow client.
-// s.mu guards the mutable fields; hold it for state reads/writes and cheap
-// calls only — never across Connect/SendMessage/Logout/PairPhone (docs/04 §2).
+// ManagedSession pairs one wa_sessions row with at most one live backend
+// connection. s.mu guards the mutable fields; hold it for state reads/writes
+// and cheap calls only — never across Connect/SendMessage/Logout/PairPhone
+// (docs/04 §2).
+//
+// client/jid stay whatsmeow's own types rather than this package's JID (see
+// jid.go): jid is the session's OWN paired identity, which can carry a
+// nonzero whatsmeow Device (a linked companion device address) that round-
+// trips through wa_sessions.jid on every reconnect via GetDevice — dropping
+// it would pick the wrong device row. client is whatsmeow-specific full
+// stop. Both are read directly by backend_meow.go (same package) under s.mu;
+// keeping them here (rather than behind an opaque `any` slot) is what lets
+// transport-agnostic code — Enqueue's admission check, trySend's connected
+// check, Snapshot — stay simple, single-package, lock-scoped reads instead of
+// routing every field access through the Backend interface. The trade a
+// second backend pays for that is backend_meow.go reaching into fields it
+// doesn't "own" in a strict sense; see backend.go for the fuller rationale.
 type ManagedSession struct {
 	ID, Name, Phone string    // immutable after construction
 	CreatedAt       time.Time // immutable; drives stable snapshot ordering
@@ -36,9 +48,9 @@ type ManagedSession struct {
 
 	mu      sync.Mutex
 	state   State
-	jid     types.JID          // zero until paired
-	client  *whatsmeow.Client  // nil unless attached
-	cancel  context.CancelFunc // per-session ctx (child of mgr.rootCtx)
+	jid     types.JID          // zero until paired; whatsmeow AD-JID, see comment above
+	client  *whatsmeow.Client  // nil unless attached (backend_meow.go owns creation)
+	cancel  context.CancelFunc // per-session ctx (child of mgr.rootCtx); see ensureCtxLocked
 	ctx     context.Context
 	pairing *PairingState // non-nil once pairing starts; replaced on restart
 	sendQ   chan sendJob  // non-nil only while the sender runs
@@ -58,8 +70,11 @@ type Snapshot struct {
 	LastEvents      []Event
 }
 
-// Snapshot copies the live status. Connected cross-checks IsConnected so a
-// half-dead socket shows as its real state on the next poll.
+// Snapshot copies the live status. Connected asks the backend's Live (a
+// cheap, non-I/O check — see Backend.Live) so a half-dead socket shows as its
+// real state on the next poll. This runs on every 2s HTMX row poll AND on
+// every send's load-balancing pick (load_balance.go), so it must stay O(1)
+// no matter which backend answers.
 func (s *ManagedSession) Snapshot() Snapshot {
 	s.mu.Lock()
 	snap := Snapshot{
@@ -71,7 +86,9 @@ func (s *ManagedSession) Snapshot() Snapshot {
 	if !s.jid.IsEmpty() {
 		snap.JID = s.jid.String()
 	}
-	snap.Connected = s.client != nil && s.client.IsConnected() && s.state == StateConnected
+	// mgr.backend is nil only in tests that never activate a session; guard
+	// rather than require every stub to provide one.
+	snap.Connected = s.state == StateConnected && s.mgr.backend != nil && s.mgr.backend.Live(s)
 	s.mu.Unlock()
 	snap.LastEvents = s.events.Snapshot()
 	return snap
@@ -100,36 +117,24 @@ func (s *ManagedSession) setState(st State) {
 	}
 }
 
-// attachClientLocked enforces the one-Client-per-Device invariant (hard rule
-// 3). Called under s.mu; dev comes from container.GetDevice or NewDevice.
-func (s *ManagedSession) attachClientLocked(dev *store.Device) (*whatsmeow.Client, error) {
-	if s.client != nil {
-		return nil, fmt.Errorf("session %s already has a client", s.ID)
+// ensureCtxLocked lazily establishes the per-session ctx (child of
+// mgr.rootCtx) the first time it's needed. Transport-agnostic: both backends
+// share one cancellation lifecycle per session — startSenderLocked and the
+// pairing pump both depend on s.ctx existing — independent of whether or how
+// a backend represents a "client". Only client CREATION is backend-owned
+// (attachClientLocked in backend_meow.go); this is not. Called under s.mu.
+func (s *ManagedSession) ensureCtxLocked() context.Context {
+	if s.ctx == nil {
+		s.ctx, s.cancel = context.WithCancel(s.mgr.rootCtx)
 	}
-	cli := whatsmeow.NewClient(dev, newWhatsAppLogger(s.ID))
-	cli.AddEventHandler(s.handleEvent) // registered once, never removed
-	cli.AutoReconnectHook = func(error) bool {
-		s.mu.Lock()
-		dead := s.state == StateLoggedOut || s.client != cli
-		s.mu.Unlock()
-		return !dead // stop retrying once this client is discarded or logged out
-	}
-	ctx, cancel := context.WithCancel(s.mgr.rootCtx)
-	s.client, s.ctx, s.cancel = cli, ctx, cancel
-	return cli, nil
-}
-
-// detachClientLocked discards the client whole (the handler stays registered
-// on the dead client — we never call RemoveEventHandler). Called under s.mu.
-func (s *ManagedSession) detachClientLocked() {
-	if s.cancel != nil {
-		s.cancel()
-	}
-	s.client, s.ctx, s.cancel = nil, nil, nil
+	return s.ctx
 }
 
 // Activate (re)connects an inactive-but-paired session and records the user
-// intent (active=1). Idempotent while connected or pairing.
+// intent (active=1). Idempotent while connected or pairing. The transport
+// work (attach/reuse a client, dial) is Backend.Connect; this is the
+// transport-agnostic policy around it: the state-machine guard and the
+// active=1 persist stay here so a second backend gets them for free.
 func (s *ManagedSession) Activate(ctx context.Context) error {
 	s.mu.Lock()
 	if s.state == StateConnected || s.state == StatePairing {
@@ -140,25 +145,9 @@ func (s *ManagedSession) Activate(ctx context.Context) error {
 		s.mu.Unlock()
 		return ErrNotPaired
 	}
-	cli := s.client
-	if cli == nil {
-		dev, err := s.mgr.container.GetDevice(ctx, s.jid)
-		if err != nil || dev == nil {
-			s.mu.Unlock()
-			s.markDeviceGone()
-			return ErrDeviceGone
-		}
-		if cli, err = s.attachClientLocked(dev); err != nil {
-			s.mu.Unlock()
-			return err
-		}
-	}
-	s.startSenderLocked()
-	sctx := s.ctx
 	s.mu.Unlock()
 
-	if err := cli.ConnectContext(sctx); err != nil { // I/O unlocked; Connected event → setState
-		s.setState(StateDisconnected) // whatsmeow auto-reconnect keeps trying
+	if err := s.mgr.backend.Connect(ctx, s); err != nil {
 		return err
 	}
 	_ = s.mgr.repo.SetActive(s.mgr.persistCtx, s.ID, true)
@@ -166,7 +155,9 @@ func (s *ManagedSession) Activate(ctx context.Context) error {
 }
 
 // Deactivate drops the socket and keeps credentials. Self-disconnect emits no
-// whatsmeow event, so the transition happens here.
+// backend event, so the transition happens here. The socket teardown itself
+// is Backend.Disconnect; the sender stop, state transition and persistence
+// are transport-agnostic and stay here.
 func (s *ManagedSession) Deactivate(ctx context.Context) error {
 	s.mu.Lock()
 	if s.jid.IsEmpty() && s.state != StateConnected {
@@ -174,20 +165,18 @@ func (s *ManagedSession) Deactivate(ctx context.Context) error {
 		return ErrNotPaired
 	}
 	s.stopSenderLocked() // close(sendQ): worker drains, fails leftovers, exits
-	cli := s.client
 	s.state = StateDisconnected
 	s.mu.Unlock()
 
-	if cli != nil {
-		cli.Disconnect()
-	}
+	_ = s.mgr.backend.Disconnect(ctx, s)
 	_ = s.mgr.repo.SetActive(s.mgr.persistCtx, s.ID, false)
 	_ = s.mgr.repo.UpdateStatus(s.mgr.persistCtx, s.ID, string(StateDisconnected))
 	return nil
 }
 
 // markDeviceGone handles E8: paired row without a whatsmeow device (DB file
-// swapped/pruned). Terminal until the operator re-pairs.
+// swapped/pruned). Terminal until the operator re-pairs. Called by the
+// backend when its Connect finds no device for a paired jid.
 func (s *ManagedSession) markDeviceGone() {
 	s.setState(StateLoggedOut)
 	_ = s.mgr.repo.SetActive(s.mgr.persistCtx, s.ID, false)

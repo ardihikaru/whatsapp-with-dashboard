@@ -141,6 +141,14 @@ func TestRemoteDBOverlayUndeclaresTheSharedNetworkItself(t *testing.T) {
 // that only runs the app that name does not resolve, and the failure is a dial
 // timeout at boot rather than anything that names the cause. `:?` turns it into
 // a `config`-time error instead.
+//
+// The claim here is "every service that dials the shared MySQL is repointed in
+// remote-db mode", not "every service spells WSM_MYSQL_HOST as its own env
+// key" — a service can just as well consume it inside a DSN (waxum's
+// DATABASE_URL does: it has no WSM_MYSQL_* env vars of its own). So the check
+// is generalised to "the required-substitution form appears somewhere in the
+// service's overlay block", which still catches "forgot to override" for `app`
+// and `migrate` and now also covers a DSN-shaped consumer.
 func TestRemoteDBOverlayRepointsMySQLForEveryServiceThatJoinsTheSharedNetwork(t *testing.T) {
 	if base := composeSource(t, baseCompose); !strings.Contains(base, "WSM_MYSQL_HOST: mysqldb-master") {
 		t.Fatalf("%s no longer pins WSM_MYSQL_HOST to the shared stack's container DNS — "+
@@ -150,11 +158,11 @@ func TestRemoteDBOverlayRepointsMySQLForEveryServiceThatJoinsTheSharedNetwork(t 
 	for _, name := range infraServices(t) {
 		t.Run(name, func(t *testing.T) {
 			for _, key := range []string{"WSM_MYSQL_HOST", "WSM_MYSQL_PORT"} {
-				want := key + ": ${" + key + ":?"
+				want := "${" + key + ":?"
 				if !strings.Contains(overlay[name], want) {
-					t.Errorf("service %q in %s does not override %s as %s...} — "+
+					t.Errorf("service %q in %s does not require %s...} anywhere in its overlay block — "+
 						"it would dial mysqldb-master, which resolves only on the shared stack's host",
-						name, remoteDBCompose, key, want)
+						name, remoteDBCompose, want)
 				}
 			}
 		})
@@ -202,5 +210,47 @@ func TestMakefileComposeVariableAddsTheOverlayUnderRemoteDB(t *testing.T) {
 		t.Errorf("the Makefile's COMPOSE variable does not add %s when REMOTE_DB is set — "+
 			"`make up REMOTE_DB=1` would silently start the shared-stack configuration",
 			remoteDBCompose)
+	}
+}
+
+// waxum's SUPERADMIN_TOKEN is a root credential for every WhatsApp session it
+// holds. The app reaches it at http://waxum:3451 over the compose network;
+// nothing else may. A `ports:` block added here "just to debug" and left in
+// place would put that credential's blast radius one network hop away instead
+// of zero — this is the guard against forgetting to remove it.
+func TestWaxumPublishesNoHostPort(t *testing.T) {
+	services := composeServices(t, composeSource(t, baseCompose))
+	block, ok := services["waxum"]
+	if !ok {
+		t.Fatal(`no "waxum" service found in ` + baseCompose)
+	}
+	for i, line := range strings.Split(block, "\n") {
+		code, _, _ := strings.Cut(line, "#")
+		if regexp.MustCompile(`^\s*ports:\s*$`).MatchString(code) ||
+			regexp.MustCompile(`^\s*-\s*["']?\d+:\d+`).MatchString(code) {
+			t.Errorf("%s waxum service line %d publishes a host port: %q — "+
+				"waxum is reachable ONLY at http://waxum:3451 on the compose network; "+
+				"nothing else may reach it", baseCompose, i+1, strings.TrimSpace(line))
+		}
+	}
+}
+
+// A third-party image on an unpinned tag is an unreviewed upgrade landing on
+// every `docker compose pull`. Same reasoning as everything else this repo
+// pins deliberately.
+func TestWaxumImageTagIsPinned(t *testing.T) {
+	services := composeServices(t, composeSource(t, baseCompose))
+	block, ok := services["waxum"]
+	if !ok {
+		t.Fatal(`no "waxum" service found in ` + baseCompose)
+	}
+	m := regexp.MustCompile(`image:\s*fdciabdul/waxum:(\S+)`).FindStringSubmatch(block)
+	if m == nil {
+		t.Fatalf("%s waxum service has no fdciabdul/waxum image line", baseCompose)
+	}
+	tag := m[1]
+	if tag == "" || tag == "latest" || strings.Contains(tag, "${WAXUM_TAG:-latest}") {
+		t.Errorf("waxum image tag = %q, want a pinned version — never `latest`, "+
+			"an unpinned tag is an unreviewed upgrade on every pull", tag)
 	}
 }

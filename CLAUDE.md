@@ -122,6 +122,57 @@ If you ever need to move it again, stop the container FIRST — a clean stop
 checkpoints the WAL, and a live `wsm.db` copied alongside its `-wal` is a
 gamble with that identity — then `sha256sum` both ends before deleting anything.
 
+**waxum's volume is identity material too, and waxum cannot be replicated at
+all.** `WSM_WA_BACKEND=waxum` (the default) keeps no whatsmeow SQLite store,
+but waxum's own registry sits partly in MySQL and partly under
+`WHATSAPP_STORAGE_PATH` on the `waxum-sessions` volume — a per-session SQLite
+`whatsapp.db` plus an instance-lock file. Same rule as `wsm-sqlite`: never
+`docker compose down -v`. Unlike the app, waxum can't even be scaled or rolled
+read-only — the instance lock forbids a second process pointed at one storage
+dir, so there is no rolling-restart story for it either.
+
+**Rollback from waxum to whatsmeow is asymmetric.** Setting
+`WSM_WA_BACKEND=whatsmeow` restores the old in-process transport at the next
+boot, but a device paired *through waxum* has its credentials in waxum's
+volume, not whatsmeow's — flipping the flag back does not bring them with it.
+The flag buys a clean rollback for a session that hasn't paired under waxum
+yet; after it has, rolling back means re-pairing that handset by QR, the same
+as losing the volume outright.
+
+**`WAXUM_TOKEN` / `SUPERADMIN_TOKEN` is a root credential for every session on
+that waxum instance**, compared in constant time and bypassing JWT entirely.
+Treat it exactly like the `_data/` secrets above: never echo it, never write
+it into a file, a log, a test fixture, or a commit. `.env.example` documents
+the variable but ships no value.
+
+**`docker compose config` without `--quiet` prints every secret in `.env`,
+for every service.** Every service in `docker-compose.yml` uses `env_file:
+[.env]`, and compose renders that file inline into each service's output —
+not just the one you meant to inspect. That has already put
+`MYSQL_ROOT_PASSWORD` (root on the same shared production MySQL as the
+`_data/` entry above), `WSM_MYSQL_PASSWORD`, `WSM_MINIO_ACCESS_KEY`, and
+`WSM_MINIO_SECRET_KEY` into a plaintext log, more than once before anyone
+noticed. Only `docker compose config --quiet` is safe to run here — it
+validates parsing and prints nothing, and it's the only form that belongs in
+a command, a recipe, or an evidence note. If you genuinely need one rendered
+value, filter for that single key on a service that carries no secrets;
+never dump the whole document. Same rule as the `_data/` entry above,
+tripped through a different door: read it programmatically, let the value
+die with the process.
+
+**The `db-*` Makefile recipes reach MySQL over TCP, never `docker exec`.**
+`db-bootstrap`, `db-verify`, `db-drop`, `db-bootstrap-waxum`, and
+`db-verify-waxum` dial `mysql --protocol=TCP` at
+`WSM_MYSQL_HOST:WSM_MYSQL_PORT` — the same address the app itself uses — and
+never `docker exec` into a MySQL container. This follows directly from the
+"app and its MySQL no longer share a host" entry above: the app runs on
+`10.10.0.4`, MySQL's container lives on `10.10.0.2`, so `docker exec -i
+master-compose-ai-mysqldb-master-1 …` from the app host has no container to
+find. "Fixing" it back to `docker exec` breaks it on every host except the
+database server itself, and the failure reads as a docker-permissions problem
+(no access to `/var/run/docker.sock`, or "No such container" once that's
+fixed) rather than the topology problem it actually is.
+
 ---
 
 ## Layout

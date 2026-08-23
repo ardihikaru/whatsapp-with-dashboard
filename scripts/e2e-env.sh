@@ -48,6 +48,11 @@ export WA_BASE_URL="${WA_BASE_URL:-http://127.0.0.1:8801}"
 export WA_COOKIE_SECURE="${WA_COOKIE_SECURE:-false}"
 export WSM_DARK_MODE="${WSM_DARK_MODE:-true}"
 export WSM_SESSION_TTL="${WSM_SESSION_TTL:-2h}"
+# WSM_WA_BACKEND now defaults to "waxum" (internal/config.DefaultWABackend),
+# which needs WSM_WAXUM_URL/TOKEN pointed at a running waxum process. This
+# suite never pairs a device, so it stays on the in-process whatsmeow backend
+# instead — hermetic, no second process to boot, and no coverage lost.
+export WSM_WA_BACKEND="${WSM_WA_BACKEND:-whatsmeow}"
 
 # Seed realistic content. An empty database makes the layout assertions
 # meaningless — "no page scrolls horizontally" is trivially true with zero rows,

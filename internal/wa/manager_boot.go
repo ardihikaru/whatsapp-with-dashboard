@@ -67,8 +67,10 @@ func (m *Manager) StartAll(ctx context.Context) error {
 }
 
 // Close tears everything down after http.Server.Shutdown: stop senders,
-// cancel session contexts (ends pairing pumps), disconnect clients, then join
-// every tracked goroutine so main may close the DB safely afterwards.
+// cancel session contexts (ends pairing pumps), disconnect the backend's
+// transport for each session, then join every tracked goroutine so main may
+// close the DB safely afterwards. Finally releases backend-level resources
+// (e.g. whatsmeow's sqlite container).
 func (m *Manager) Close() {
 	if !m.closed.CompareAndSwap(false, true) {
 		return
@@ -86,11 +88,13 @@ func (m *Manager) Close() {
 		if s.cancel != nil {
 			s.cancel()
 		}
-		cli := s.client
 		s.mu.Unlock()
-		if cli != nil {
-			cli.Disconnect()
+		if m.backend != nil {
+			_ = m.backend.Disconnect(m.persistCtx, s)
 		}
 	}
 	m.wg.Wait()
+	if m.backend != nil {
+		m.backend.Close()
+	}
 }

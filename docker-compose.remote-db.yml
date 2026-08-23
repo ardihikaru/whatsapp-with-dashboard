@@ -40,3 +40,10 @@ services:
     environment:
       WSM_MYSQL_HOST: ${WSM_MYSQL_HOST:?remote-db mode needs WSM_MYSQL_HOST in .env}
       WSM_MYSQL_PORT: ${WSM_MYSQL_PORT:?remote-db mode needs WSM_MYSQL_PORT in .env}
+
+  # waxum doesn't read WSM_MYSQL_*; it takes one DSN in DATABASE_URL. Same
+  # repoint, spelled the way waxum actually consumes it.
+  waxum:
+    networks: !reset null
+    environment:
+      DATABASE_URL: mysql://${WAXUM_MYSQL_USER}:${WAXUM_MYSQL_PASSWORD}@${WSM_MYSQL_HOST:?remote-db mode needs WSM_MYSQL_HOST in .env}:${WSM_MYSQL_PORT:?remote-db mode needs WSM_MYSQL_PORT in .env}/${WAXUM_MYSQL_DATABASE}
