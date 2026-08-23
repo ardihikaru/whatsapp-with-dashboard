@@ -115,7 +115,12 @@ until it did.
 **The WhatsApp session is a hard singleton.** One device websocket, one SQLite
 crypto store. No replicas, no rolling restarts, and never
 `docker compose down -v` — the volume is the paired device's identity, and
-losing it means re-pairing the handset by QR.
+losing it means re-pairing the handset by QR. Since 2026-08-23 there is no
+second copy anywhere: the old host's volume was deleted after the move, so
+`whatsapp-with-dashboard-sqlite` on the app host is the only one that exists.
+If you ever need to move it again, stop the container FIRST — a clean stop
+checkpoints the WAL, and a live `wsm.db` copied alongside its `-wal` is a
+gamble with that identity — then `sha256sum` both ends before deleting anything.
 
 ---
 
