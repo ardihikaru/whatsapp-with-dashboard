@@ -1,13 +1,15 @@
 // WhatsApp Session Management (WSM) — Go + HTMX gateway app for pairing
 // WhatsApp device sessions and sending plain-text messages through them.
-// Boot order (docs/03): config → SQLite (app schema + whatsmeow sqlstore) →
-// repos → wa.Manager + boot reconciliation → HTTP. Shutdown order is a hard
-// requirement: server.Shutdown → manager.Close → pool.Close.
+// Boot order (docs/03): config → MinIO connectivity check → SQLite (app
+// schema + whatsmeow sqlstore) → repos → wa.Manager + boot reconciliation →
+// HTTP. Shutdown order is a hard requirement: server.Shutdown →
+// manager.Close → pool.Close.
 package main
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log"
 	"net/http"
@@ -29,6 +31,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/handler"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/storage"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
 
@@ -65,6 +68,22 @@ func run() error {
 		log.Print("WARNING: WSM_ADMIN_PASSWORD is plaintext in the environment; " +
 			"prefer WSM_ADMIN_PASSWORD_HASH (generate one with `make hashpw`)")
 	}
+
+	// MinIO: required at boot. No feature consumes it yet, but a
+	// misconfigured connection should fail loudly here rather than the first
+	// time something tries to use it.
+	minioClient, err := storage.New(cfg)
+	if err != nil {
+		return fmt.Errorf("minio: %w", err)
+	}
+	minioCtx, minioCancel := context.WithTimeout(ctx, cfg.MinioTimeout)
+	err = storage.EnsureBuckets(minioCtx, minioClient, cfg)
+	minioCancel()
+	if err != nil {
+		return fmt.Errorf("minio: %w", err)
+	}
+	log.Printf("minio: connected to %s (bucket=%s, temp bucket=%s)",
+		cfg.MinioEndpoint, cfg.MinioBucket, cfg.MinioTempBucket)
 
 	// SQLite store: whatsmeow crypto tables only (single writer).
 	store, err := db.Open(cfg.DBPath, cfg.SQLiteDialect)

@@ -159,3 +159,8 @@ gamble with that identity — then `sha256sum` both ends before deleting anythin
   rather than mocked globally.
 - **Auth surfaces do not mix.** A browser cookie is rejected on `/api/v1` and a
   bearer token is rejected on pages. That is deliberate and tested.
+- **Code changes go through the `senior-fullstack-htmx-go` agent, on Sonnet
+  5.** It carries this repo's hard rules, house patterns, and (since
+  2026-08-23) Emil Kowalski's design/animation skill set for UI and CSS
+  work — model pinned in its own frontmatter. Don't use a generic agent or a
+  different model for code changes here.

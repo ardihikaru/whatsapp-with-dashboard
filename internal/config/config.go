@@ -59,6 +59,14 @@ const (
 
 	// No proxy is trusted unless one is named. See TrustedProxies.
 	DefaultTrustedProxies = ""
+
+	// MinIO: DefaultMinioTempBucket/Timeout/ShareDuration have sensible
+	// fallbacks; endpoint/keys/bucket do not (see minioConfig) — a wrong
+	// object-storage target should fail loudly, same reasoning as
+	// DefaultMySQLPass.
+	DefaultMinioTempBucket    = "temp"
+	DefaultMinioTimeout       = 30 * time.Second
+	DefaultMinioShareDuration = 7 * 24 * time.Hour
 )
 
 // Config is the resolved application configuration.
@@ -114,6 +122,20 @@ type Config struct {
 	// does); trusting one that merely passes a client's header through is the
 	// same as having no throttle at all.
 	TrustedProxies []netip.Prefix
+
+	// MinIO object storage. All required (see minioConfig) — the app fails
+	// to boot without a working connection, deliberately: there is no
+	// consuming feature yet, but a silently-misconfigured connection would
+	// only surface the first time something tries to use it.
+	MinioEndpoint      string // raw WSM_MINIO_ENDPOINT, kept for logging
+	MinioHost          string // host[:port] derived from MinioEndpoint
+	MinioSecure        bool   // derived from MinioEndpoint's scheme
+	MinioAccessKey     string
+	MinioSecretKey     string
+	MinioBucket        string
+	MinioTempBucket    string
+	MinioTimeout       time.Duration
+	MinioShareDuration time.Duration
 }
 
 // Load resolves the configuration and fails fast on an invalid env value.
@@ -195,7 +217,57 @@ func Load() (*Config, error) {
 		}
 		cfg.DarkMode = b
 	}
+	if err := loadMinio(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// loadMinio resolves the MinIO object-storage config. Endpoint/keys/bucket
+// have no defaults and are boot failures when unset — see DefaultMinioTempBucket
+// for why the other three do.
+func loadMinio(cfg *Config) error {
+	cfg.MinioEndpoint = os.Getenv("WSM_MINIO_ENDPOINT")
+	if cfg.MinioEndpoint == "" {
+		return errors.New("WSM_MINIO_ENDPOINT is required")
+	}
+	host, secure, err := parseMinioEndpoint(cfg.MinioEndpoint)
+	if err != nil {
+		return err
+	}
+	cfg.MinioHost, cfg.MinioSecure = host, secure
+
+	cfg.MinioAccessKey = os.Getenv("WSM_MINIO_ACCESS_KEY")
+	if cfg.MinioAccessKey == "" {
+		return errors.New("WSM_MINIO_ACCESS_KEY is required")
+	}
+	cfg.MinioSecretKey = os.Getenv("WSM_MINIO_SECRET_KEY")
+	if cfg.MinioSecretKey == "" {
+		return errors.New("WSM_MINIO_SECRET_KEY is required")
+	}
+	cfg.MinioBucket = os.Getenv("WSM_MINIO_BUCKET")
+	if cfg.MinioBucket == "" {
+		return errors.New("WSM_MINIO_BUCKET is required")
+	}
+	cfg.MinioTempBucket = envOr("WSM_MINIO_TEMP_BUCKET", DefaultMinioTempBucket)
+
+	cfg.MinioTimeout = DefaultMinioTimeout
+	if raw := os.Getenv("WSM_MINIO_TIMEOUT"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("invalid WSM_MINIO_TIMEOUT %q: %v", raw, err)
+		}
+		cfg.MinioTimeout = d
+	}
+	cfg.MinioShareDuration = DefaultMinioShareDuration
+	if raw := os.Getenv("WSM_MINIO_SHARE_DURATION"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("invalid WSM_MINIO_SHARE_DURATION %q: %v", raw, err)
+		}
+		cfg.MinioShareDuration = d
+	}
+	return nil
 }
 
 // parseTrustedProxies reads a comma-separated list of CIDR blocks and bare IP
