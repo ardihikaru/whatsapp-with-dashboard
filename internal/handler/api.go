@@ -35,6 +35,28 @@ func writeError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"error": message})
 }
 
+// backendBusyRetryAfterSeconds is the Retry-After hint sent alongside
+// wa.ErrBackendBusy (see writeBackendBusy). It is a fixed, conservative
+// value rather than something derived from waxum's own Retry-After header:
+// by the time a handler sees ErrBackendBusy, internal/waxum.Client.do has
+// already retried the underlying 429 with backoff (honouring any
+// Retry-After waxum sent) and given up — this is what a CALLER of WSM's own
+// API should wait before trying again, a separate question from what WSM
+// itself waited internally.
+const backendBusyRetryAfterSeconds = "5"
+
+// writeBackendBusy answers wa.ErrBackendBusy: 503, not 429. 429 already
+// means something else in this API (wa.ErrQueueFull — THIS session's own
+// send queue is full, see errors.go); reusing it here would tell an API
+// consumer it is the one being throttled, when the actual cause is the
+// WhatsApp backend (waxum) rate-limiting WSM itself. 503 + Retry-After is
+// the more honest signal: temporarily unavailable, retry shortly, not "you
+// are sending too fast".
+func writeBackendBusy(w http.ResponseWriter, message string) {
+	w.Header().Set("Retry-After", backendBusyRetryAfterSeconds)
+	writeError(w, http.StatusServiceUnavailable, message)
+}
+
 // PostAPILogin authenticates an API client and returns a bearer access token.
 func (h *handlers) PostAPILogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest

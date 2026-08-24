@@ -5,7 +5,8 @@
   <td class="mono">{{.Phone}}</td>
   <td class="mono">{{.JID}}</td>
   <td><span class="badge badge-{{.State}}">{{.State}}</span>
-      {{if gt .QueueLen 0}}<small>({{.QueueLen}} queued)</small>{{end}}</td>
+      {{if gt .QueueLen 0}}<small>({{.QueueLen}} queued)</small>{{end}}
+      {{if .Stalled}}<br><small class="muted" title="{{.StalledReason}}">needs attention — automatic reconnect stopped, see title / Activate to retry</small>{{end}}</td>
   <td class="row-actions">
     {{if eq .State "connected"}}
       <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.ID}}/deactivate"

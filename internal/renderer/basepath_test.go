@@ -36,12 +36,14 @@ func renderPartial(t *testing.T, basePath, name string, data any) string {
 // assertion phrased as "does not contain X" would happily call a PASS — so
 // every check below also asserts on something that must be PRESENT.
 type rowSession struct {
-	ID       string
-	Name     string
-	Phone    string
-	JID      string
-	State    string
-	QueueLen int
+	ID            string
+	Name          string
+	Phone         string
+	JID           string
+	State         string
+	QueueLen      int
+	Stalled       bool
+	StalledReason string
 }
 
 type rowsData struct{ Sessions []rowSession }

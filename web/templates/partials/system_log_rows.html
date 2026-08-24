@@ -1,0 +1,12 @@
+{{define "system_log_rows"}}
+{{range .Rows}}
+<tr>
+  <td class="mono">{{.At}}</td>
+  <td class="mono">{{.Level}}</td>
+  <td>{{.Session}}</td>
+  <td>{{.Note}}</td>
+</tr>
+{{else}}
+<tr><td colspan="4" class="muted">No events yet — this process just started, or nothing has happened.</td></tr>
+{{end}}
+{{end}}

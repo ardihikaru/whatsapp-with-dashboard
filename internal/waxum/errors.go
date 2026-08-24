@@ -11,13 +11,21 @@ import (
 // These stay waxum-flavoured on purpose: internal/wa's waxumBackend
 // (internal/wa/backend_waxum.go's mapErr) is the layer that knows what
 // ErrNotFound etc. mean in terms of
-// wa.ErrNotFound/wa.ErrNotConnected/wa.ErrQueueFull. Doing that translation
-// here would make this package depend on internal/wa's vocabulary for no
-// reason a plain HTTP client needs.
+// wa.ErrNotFound/wa.ErrNotConnected/wa.ErrBackendBusy. Doing that
+// translation here would make this package depend on internal/wa's
+// vocabulary for no reason a plain HTTP client needs.
 var (
-	ErrNotFound    = errors.New("waxum: not found")
-	ErrConflict    = errors.New("waxum: conflict")
-	ErrRateLimited = errors.New("waxum: rate limited")
+	ErrNotFound = errors.New("waxum: not found")
+	ErrConflict = errors.New("waxum: conflict")
+	// ErrClientNotConnected is waxum's 503, matched by status code alone
+	// (like every sentinel in this file — none of them parse the body).
+	// Observed live as {"success":false,"error":{"code":503,"message":
+	// "Client not connected"}} from POST /messages/text on a session whose
+	// is_logged_in had just gone true but whose websocket was still
+	// dialing — see internal/wa/backend_waxum.go's finishPairingSuccess
+	// (point 8) for the pairing-side half of that race.
+	ErrClientNotConnected = errors.New("waxum: client not connected")
+	ErrRateLimited        = errors.New("waxum: rate limited")
 )
 
 // APIError is returned for any non-2xx response that isn't one of the typed
@@ -43,6 +51,8 @@ func errorFromStatus(statusCode int, body []byte) error {
 		return ErrConflict
 	case 429:
 		return ErrRateLimited
+	case 503:
+		return ErrClientNotConnected
 	default:
 		return &APIError{StatusCode: statusCode, Body: string(body)}
 	}

@@ -24,8 +24,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/backoff"
 )
 
 // maxResponseBytes caps how much of a waxum response body this client will
@@ -34,72 +37,213 @@ import (
 // memory.
 const maxResponseBytes = 4 << 20 // 4 MiB
 
+// defaultMaxRateLimitRetries bounds how many times do() retries a 429
+// before giving up and returning ErrRateLimited to the caller (production
+// default; see WithRetryPolicy for why tests override it). This is
+// defense-in-depth, not the primary fix — docker-compose.yml raises
+// waxum's own tower_governor RATE_LIMIT_BURST well above what this app's
+// pollers need, so retrying here should rarely fire in practice. It exists
+// for the gap between "the operator has applied that compose change" and
+// "every waxum instance this client ever talks to has generous limits",
+// and to smooth over the normal jitter of concurrent pumps sharing one
+// IP-keyed bucket.
+const defaultMaxRateLimitRetries = 5
+
 // Client is a waxum API client bound to one base URL and one bearer token.
 // It is safe for concurrent use (http.Client is).
 type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
+
+	maxRateLimitRetries int
+	// retryDelay computes how long to wait before retrying a 429. attempt
+	// is 0-based (0 = wait before the first retry); retryAfterHeader is
+	// waxum's own Retry-After value, honoured verbatim when present and
+	// parseable (RFC 9110 allows either delta-seconds or an HTTP-date).
+	retryDelay func(attempt int, retryAfterHeader string) time.Duration
+
+	// limiter is this Client's own outgoing-request throttle — see
+	// ratelimit.go's doc comment for why it exists and how it is sized.
+	limiter *clientBucket
+}
+
+// Option configures optional Client behaviour beyond New's required
+// baseURL/token/timeout. Additive and variadic so New's existing call
+// sites (cmd/app/main.go, and every test that doesn't care about retry
+// timing) need no change.
+type Option func(*Client)
+
+// WithRetryPolicy overrides do()'s default 429 retry policy. maxRetries is
+// the number of retries AFTER the first attempt (so maxRetries+1 total
+// tries before do() gives up and returns ErrRateLimited); delay computes
+// the wait before each retry. Production code never calls this — New's
+// default (defaultMaxRateLimitRetries, defaultRetryDelay) is what ships.
+// Tests use it to replace real wall-clock backoff with a millisecond-scale
+// delay, the same way waxumFakeOpts/WaxumConfig already shrink poll
+// intervals for tests rather than sleeping seconds per test — see
+// TestPairingSurvivesATransientRateLimit.
+func WithRetryPolicy(maxRetries int, delay func(attempt int, retryAfterHeader string) time.Duration) Option {
+	return func(c *Client) {
+		c.maxRateLimitRetries = maxRetries
+		c.retryDelay = delay
+	}
+}
+
+// WithClientRateLimit overrides do()'s default outgoing-request throttle
+// (ratelimit.go's defaultClientRate/defaultClientBurst). Production code
+// never calls this. Tests use it to raise the limit far above anything a
+// test could plausibly burst — the throttle's OWN correctness has a
+// dedicated test (TestClientThrottlesRequestsAcrossASharedBucket); every
+// other test in this package and internal/wa is exercising unrelated
+// behaviour and would otherwise be slowed (or made flaky under `go test
+// -race`'s extra scheduling latency) by a limit sized for production
+// traffic, not a tight polling loop with a 2ms interval.
+func WithClientRateLimit(rate float64, burst int) Option {
+	return func(c *Client) {
+		c.limiter = newClientBucket(rate, burst)
+	}
 }
 
 // New builds a Client. baseURL is the scheme+host waxum listens on (e.g.
 // "http://127.0.0.1:9000") with any trailing slash trimmed; every method
 // below appends its own "/api/v1/..." path (Health is the one exception —
 // see its doc comment).
-func New(baseURL, token string, timeout time.Duration) *Client {
-	return &Client{
-		baseURL: strings.TrimSuffix(baseURL, "/"),
-		token:   token,
-		http:    &http.Client{Timeout: timeout},
+func New(baseURL, token string, timeout time.Duration, opts ...Option) *Client {
+	c := &Client{
+		baseURL:             strings.TrimSuffix(baseURL, "/"),
+		token:               token,
+		http:                &http.Client{Timeout: timeout},
+		maxRateLimitRetries: defaultMaxRateLimitRetries,
+		retryDelay:          defaultRetryDelay,
+		limiter:             newClientBucket(defaultClientRate, defaultClientBurst),
 	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c
 }
 
-// do sends one request and, on a 2xx response, decodes the body into out
+// defaultRetryDelay honours waxum's Retry-After header when it sends one
+// (delta-seconds per RFC 9110 §10.2.3 — the only form waxum is expected to
+// send, but an HTTP-date is accepted too since the RFC allows both);
+// otherwise it falls back to the shared backoff+jitter schedule (see
+// internal/backoff's doc comment for why this and
+// internal/wa/sender_limits.go's send-retry loop share one schedule
+// instead of two).
+func defaultRetryDelay(attempt int, retryAfterHeader string) time.Duration {
+	if d, ok := parseRetryAfter(retryAfterHeader); ok {
+		return d
+	}
+	return backoff.Delay(attempt) + backoff.Jitter()
+}
+
+// parseRetryAfter parses an HTTP Retry-After header value. ok is false for
+// an empty, malformed, or negative value — callers fall back to their own
+// schedule in that case.
+func parseRetryAfter(header string) (time.Duration, bool) {
+	if header == "" {
+		return 0, false
+	}
+	if secs, err := strconv.Atoi(header); err == nil {
+		if secs < 0 {
+			return 0, false
+		}
+		return time.Duration(secs) * time.Second, true
+	}
+	if when, err := http.ParseTime(header); err == nil {
+		if d := time.Until(when); d > 0 {
+			return d, true
+		}
+	}
+	return 0, false
+}
+
+// do sends a request and, on a 2xx response, decodes the body into out
 // (skipped when out is nil or the body is empty). authenticate controls
 // whether the Authorization header is sent — false only for Health, which
 // waxum does not require (or accept as a signal of anything) a token for.
+//
+// A 429 is retried in place, up to c.maxRateLimitRetries times, with
+// c.retryDelay between attempts — see backend_waxum.go's mapErr and
+// pairPump doc comments for why: waxum's tower_governor rate limiter
+// defaults to a burst of ~3 per peer IP, this app's pairing pollers alone
+// can burst past that on a single tick, and a bare 429 used to be mapped
+// straight onto ErrQueueFull (a wholly different, misleading condition)
+// and aborted pairing outright. Retrying here means most callers never see
+// a 429 at all; the caller's own context (a deadline for the pairing pump,
+// none for a one-shot send) is still what bounds the total wait — see the
+// ctx.Done() case below, which returns immediately rather than sleeping
+// past a caller-imposed deadline.
 func (c *Client) do(ctx context.Context, method, path string, reqBody, out any, authenticate bool) error {
-	var body io.Reader
+	var encoded []byte
 	if reqBody != nil {
-		encoded, err := json.Marshal(reqBody)
+		var err error
+		encoded, err = json.Marshal(reqBody)
 		if err != nil {
 			return fmt.Errorf("waxum: encoding request body for %s %s: %w", method, path, err)
 		}
-		body = bytes.NewReader(encoded)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
-	if err != nil {
-		return fmt.Errorf("waxum: building request for %s %s: %w", method, path, err)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	if authenticate {
-		req.Header.Set("Authorization", "Bearer "+c.token)
-	}
+	var lastErr error
+	for attempt := 0; ; attempt++ {
+		// Client-wide throttle (ratelimit.go) — applies to every attempt,
+		// including retries, since each is a real outgoing request. A
+		// cancelled/expired ctx here returns immediately rather than
+		// waiting out the limiter, same reasoning as the 429-retry
+		// ctx.Done() case below.
+		if err := c.limiter.wait(ctx); err != nil {
+			return fmt.Errorf("waxum: %s %s: %w", method, path, err)
+		}
 
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return fmt.Errorf("waxum: %s %s: %w", method, path, err)
-	}
-	defer resp.Body.Close()
+		var body io.Reader
+		if encoded != nil {
+			body = bytes.NewReader(encoded) // fresh reader per attempt — a *bytes.Reader is spent after one read
+		}
 
-	respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-	if err != nil {
-		return fmt.Errorf("waxum: reading response body for %s %s: %w", method, path, err)
-	}
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+		if err != nil {
+			return fmt.Errorf("waxum: building request for %s %s: %w", method, path, err)
+		}
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if authenticate {
+			req.Header.Set("Authorization", "Bearer "+c.token)
+		}
 
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return errorFromStatus(resp.StatusCode, respBody)
-	}
-	if out == nil || len(respBody) == 0 {
+		resp, err := c.http.Do(req)
+		if err != nil {
+			return fmt.Errorf("waxum: %s %s: %w", method, path, err)
+		}
+		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
+		retryAfterHeader := resp.Header.Get("Retry-After")
+		_ = resp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("waxum: reading response body for %s %s: %w", method, path, err)
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests && attempt < c.maxRateLimitRetries {
+			lastErr = errorFromStatus(resp.StatusCode, respBody)
+			select {
+			case <-time.After(c.retryDelay(attempt, retryAfterHeader)):
+				continue
+			case <-ctx.Done():
+				return lastErr
+			}
+		}
+
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			return errorFromStatus(resp.StatusCode, respBody)
+		}
+		if out == nil || len(respBody) == 0 {
+			return nil
+		}
+		if err := json.Unmarshal(respBody, out); err != nil {
+			return fmt.Errorf("waxum: decoding response body for %s %s: %w", method, path, err)
+		}
 		return nil
 	}
-	if err := json.Unmarshal(respBody, out); err != nil {
-		return fmt.Errorf("waxum: decoding response body for %s %s: %w", method, path, err)
-	}
-	return nil
 }
 
 func sessionPath(id string, suffix string) string {

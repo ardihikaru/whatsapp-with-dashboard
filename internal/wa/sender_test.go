@@ -2,6 +2,8 @@ package wa
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 )
 
@@ -97,5 +99,44 @@ func TestSenderDrainOnClose(t *testing.T) {
 		default:
 			t.Fatalf("job %d: no result delivered", i)
 		}
+	}
+}
+
+// TestASendFailureIsRecordedInBothEventRings is the "send failures" item on
+// the list of places reconnect.go/manager.go's app-wide diagnostic ring is
+// fed from (see ManagedSession.ringLevel's doc comment, backend_meow.go):
+// finishJob (sender.go) had no ring call at all before this — a repeated
+// send failure was visible only via wa_messages (the durable per-message
+// audit log, a different thing — see Manager.RecentEvents' doc comment) and
+// slog, never in the operator-facing event log this session already keeps
+// for everything else (pairing, state transitions, reconnects). This proves
+// a failed send reaches BOTH the session's own ring (Snapshot.LastEvents)
+// and the manager-wide one (Manager.RecentEvents) at "warn" level.
+func TestASendFailureIsRecordedInBothEventRings(t *testing.T) {
+	msgs := newStubMsgs()
+	mgr := newTestManager(newStubSessions(), msgs)
+	s := testSession(mgr, StateConnected)
+
+	job := sendJob{msgID: NewID(), to: ToJID("628120001"), text: "hi", done: make(chan SendResult, 1)}
+	s.finishJob(job, SendResult{Err: errors.New("boom"), Attempts: 2})
+
+	events := s.Snapshot().LastEvents
+	if len(events) == 0 {
+		t.Fatal("send failure recorded no event in the session's own ring")
+	}
+	last := events[len(events)-1]
+	if last.Level != "warn" || !strings.Contains(last.Note, "boom") {
+		t.Fatalf("session ring's last event = %+v, want Level=warn and Note containing the send error", last)
+	}
+
+	sysEvents := mgr.RecentEvents(1)
+	if len(sysEvents) != 1 {
+		t.Fatal("send failure did not reach the manager-wide diagnostic ring (Manager.RecentEvents)")
+	}
+	if sysEvents[0].Level != "warn" || !strings.Contains(sysEvents[0].Note, "boom") {
+		t.Fatalf("manager-wide event = %+v, want Level=warn and Note containing the send error", sysEvents[0])
+	}
+	if sysEvents[0].SessionID != s.ID {
+		t.Fatalf("manager-wide event SessionID = %q, want %q", sysEvents[0].SessionID, s.ID)
 	}
 }

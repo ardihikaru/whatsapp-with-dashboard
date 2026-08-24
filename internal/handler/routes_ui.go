@@ -43,6 +43,12 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	// Outbound message log.
 	mux.Handle("GET "+bp+"/logs", page(http.HandlerFunc(h.GetLogs)))
 	mux.Handle("GET "+bp+"/logs/rows", page(http.HandlerFunc(h.GetLogRows)))
+
+	// System log: in-memory diagnostic events (internal/wa's Manager.RecentEvents),
+	// NOT the same thing as the outbound message log above — see system_log.go's
+	// doc comment.
+	mux.Handle("GET "+bp+"/system-log", page(http.HandlerFunc(h.GetSystemLog)))
+	mux.Handle("GET "+bp+"/system-log/rows", page(http.HandlerFunc(h.GetSystemLogRows)))
 	if h.DarkMode {
 		mux.HandleFunc("POST "+bp+"/theme/toggle", h.PostThemeToggle)
 	}

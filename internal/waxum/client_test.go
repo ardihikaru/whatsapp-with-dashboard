@@ -16,11 +16,25 @@ const testToken = "test-token-xyz"
 
 // newFakeServer wires up an httptest server whose handler is exactly what
 // the caller passes, plus newTestClient bound to it with testToken.
+//
+// Both overrides below replace a PRODUCTION-scale schedule with a
+// millisecond one: WithClientRateLimit is set far above anything a test
+// here could plausibly burst (the limiter's own behaviour has a dedicated
+// test, TestClientThrottlesRequestsAcrossASharedBucket), and WithRetryPolicy
+// replaces do()'s real 429 backoff (up to ~31s across 5 retries) with a
+// 1ms one — TestNotFoundAndConflictAndRateLimitedBecomeTypedErrors'
+// "Too_Many_Requests" case took over 30s before this override was added,
+// because every OTHER test in this file also goes through newFakeServer
+// and must not pay a production-scale retry schedule for request/response
+// shapes that have nothing to do with rate limiting.
 func newFakeServer(t *testing.T, handler http.HandlerFunc) (*Client, *httptest.Server) {
 	t.Helper()
 	srv := httptest.NewServer(handler)
 	t.Cleanup(srv.Close)
-	return New(srv.URL, testToken, 5*time.Second), srv
+	return New(srv.URL, testToken, 5*time.Second,
+		WithClientRateLimit(1e6, 1e6),
+		WithRetryPolicy(2, func(int, string) time.Duration { return time.Millisecond }),
+	), srv
 }
 
 func decodeJSONBody(t *testing.T, r *http.Request) map[string]any {
@@ -396,5 +410,84 @@ func TestNoRingCallMethodExists(t *testing.T) {
 		t.Fatalf("package waxum references %q in %v — waxum's ring endpoint transmits "+
 			"silence; only tts and play push real audio, so no Ring method may exist here",
 			forbidden, offenders)
+	}
+}
+
+// TestClientThrottlesRequestsAcrossASharedBucket is the direct test for
+// ratelimit.go's clientBucket: with a burst of 1 and a fast-but-nonzero
+// refill rate, the first request is admitted immediately and every request
+// after it must wait roughly 1/rate — proving Client actually enforces a
+// process-wide cap on outgoing requests, not just that WithClientRateLimit
+// compiles. This is the regression test for the token-bucket half of
+// CLAUDE.md's waxum rate-limit hazard note: a burst of pumps sharing one
+// *Client must not be able to send them all at once regardless of how many
+// pumps exist.
+func TestClientThrottlesRequestsAcrossASharedBucket(t *testing.T) {
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	// burst=1, rate=10/s -> the 2nd and 3rd calls each wait ~100ms.
+	client := New(srv.URL, testToken, 5*time.Second, WithClientRateLimit(10, 1))
+
+	start := time.Now()
+	for i := 0; i < 3; i++ {
+		if err := client.Health(context.Background()); err != nil {
+			t.Fatalf("Health call %d: %v", i, err)
+		}
+	}
+	elapsed := time.Since(start)
+
+	// 2 waits of ~100ms each; allow generous slack for scheduling but this
+	// MUST be well above "3 calls with no throttling at all" (a few ms).
+	if elapsed < 150*time.Millisecond {
+		t.Fatalf("3 calls against burst=1/rate=10 took %v, want >= ~150ms — "+
+			"the client-wide rate limiter does not appear to be throttling requests", elapsed)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("3 calls took %v, want well under 2s — the limiter is stalling far more than its own schedule implies", elapsed)
+	}
+	if hits != 3 {
+		t.Fatalf("server saw %d requests, want 3 (throttling must delay requests, not drop them)", hits)
+	}
+}
+
+// TestClientRateLimiterReturnsPromptlyWhenTheContextIsCancelled proves the
+// limiter's wait() is itself bounded by the caller's context, the same
+// hazard Manager.Close's prompt-return guarantee depends on elsewhere in
+// this codebase (TestManagerCloseReturnsPromptlyWithAPairingPumpRunning) —
+// an exhausted bucket with a slow refill rate must not make a request hang
+// past a cancelled ctx.
+func TestClientRateLimiterReturnsPromptlyWhenTheContextIsCancelled(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	// burst=1, rate effectively never refills within this test's lifetime.
+	client := New(srv.URL, testToken, 5*time.Second, WithClientRateLimit(0.0001, 1))
+
+	// Spend the single token.
+	if err := client.Health(context.Background()); err != nil {
+		t.Fatalf("first Health call: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- client.Health(ctx) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("second Health call succeeded despite an exhausted bucket and a near-never refill rate")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("second Health call did not return promptly after its context expired — " +
+			"the rate limiter must not be able to hang a caller past its own ctx")
 	}
 }

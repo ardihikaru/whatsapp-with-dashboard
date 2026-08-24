@@ -4,10 +4,11 @@ import (
 	"context"
 	"errors"
 	"math"
-	"math/rand/v2"
 	"time"
 
 	"go.mau.fi/whatsmeow"
+
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/backoff"
 )
 
 // bucket is the pure token-bucket core (docs/10): tokens = min(burst,
@@ -43,14 +44,18 @@ func (b *bucket) take(now time.Time) time.Duration {
 }
 
 // backoffDelay is the deterministic part of the retry schedule:
-// min(30s, 1s·2ⁿ) for attempt n = 0,1,2… (jitter added separately).
+// min(30s, 1s·2ⁿ) for attempt n = 0,1,2… (jitter added separately). Kept as
+// a thin wrapper around internal/backoff (the shared schedule — see that
+// package's doc comment for why it exists) so every existing call site and
+// test in this file needs no change.
 func backoffDelay(attempt int) time.Duration {
-	return time.Duration(math.Min(30, math.Exp2(float64(attempt)))) * time.Second
+	return backoff.Delay(attempt)
 }
 
-// jitter decorrelates retries across sessions: U(0, 500ms).
+// jitter decorrelates retries across sessions: U(0, 500ms). See
+// backoffDelay's comment.
 func jitter() time.Duration {
-	return time.Duration(rand.Int64N(int64(500 * time.Millisecond)))
+	return backoff.Jitter()
 }
 
 // isRetryable classifies send errors. Timeouts retry (at-least-once — the

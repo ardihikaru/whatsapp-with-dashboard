@@ -2,6 +2,7 @@ package wa
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 
 	"go.mau.fi/whatsmeow/types"
@@ -23,6 +24,16 @@ func (m *Manager) StartAll(ctx context.Context) error {
 			ID: row.ID, Name: row.Name, Phone: row.Phone, CreatedAt: row.CreatedAt,
 			LastSelectedAt: row.LastSelectedAt,
 			mgr:            m, state: StateDisconnected, events: NewRing(ringSize),
+			// active hydrates from the persisted intent regardless of whether
+			// the boot-time reconnect below (toConnect) actually succeeds —
+			// see reconnect.go's eligibility check. If it does not (e.g. the
+			// backend errors on this very first Connect attempt), the
+			// reconnect supervisor still needs to see this session as
+			// eligible on its own next scan tick; gating this on the boot
+			// Activate call's own success (which only flips it true itself)
+			// would otherwise strand a row.Active==true session that failed
+			// to reconnect at boot exactly the way it stranded post-boot.
+			active: row.Active,
 		}
 		switch {
 		case row.JID == "":
@@ -52,6 +63,12 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		}
 	}
 
+	// Manager-level event, not tied to any one session — the boot
+	// reconciliation itself is what the system log page (RecordEvent's own
+	// doc comment) exists to show alongside every session's own events.
+	m.RecordEvent("info", fmt.Sprintf("boot reconciliation: %d session(s) loaded, %d queued for reconnect (parallelism %d)",
+		len(rows), len(toConnect), m.cfg.ReconcilePar))
+
 	sem := make(chan struct{}, m.cfg.ReconcilePar)
 	for _, s := range toConnect {
 		s := s
@@ -75,6 +92,10 @@ func (m *Manager) Close() {
 	if !m.closed.CompareAndSwap(false, true) {
 		return
 	}
+	m.supCancel() // stop the reconnect supervisor (reconnect.go) FIRST — it is not keyed to
+	// any one session's ctx (it is manager-wide, on purpose — see its doc
+	// comment), so nothing below would otherwise ever tell its scan loop to
+	// stop, and m.wg.Wait() below would hang forever on it.
 	m.mu.Lock()
 	all := make([]*ManagedSession, 0, len(m.sessions))
 	for _, s := range m.sessions {

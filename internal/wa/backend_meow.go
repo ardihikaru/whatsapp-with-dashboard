@@ -316,6 +316,7 @@ func (s *ManagedSession) onPaired(cli *whatsmeow.Client) {
 		s.pairing = nil // status partial derives success from state==connected
 	}
 	s.startSenderLocked()
+	s.active = true // mirrors SetPaired's active=1 below — see reconnect.go's eligibility check
 	s.mu.Unlock()
 	_ = s.mgr.repo.SetPaired(s.mgr.persistCtx, s.ID, jid.String())
 	s.setState(StateConnected)
@@ -338,7 +339,7 @@ func (s *ManagedSession) onPairFailed(cli *whatsmeow.Client, cause error) {
 	s.mu.Unlock()
 	cli.Disconnect()
 	_ = s.mgr.repo.UpdateStatus(s.mgr.persistCtx, s.ID, string(StateNew))
-	s.ring("pairing failed: " + cause.Error())
+	s.ringLevel("warn", "pairing failed: "+cause.Error())
 }
 
 // handleEvent is the single event handler per client (docs/04 §5). whatsmeow
@@ -356,7 +357,7 @@ func (s *ManagedSession) handleEvent(raw any) {
 	case *events.Disconnected:
 		s.setState(StateDisconnected) // transient — whatsmeow auto-reconnect owns recovery
 	case *events.KeepAliveTimeout:
-		s.ring(fmt.Sprintf("keepalive timeout #%d (last success %s ago)",
+		s.ringLevel("warn", fmt.Sprintf("keepalive timeout #%d (last success %s ago)",
 			evt.ErrorCount, time.Since(evt.LastSuccess).Round(time.Second)))
 		s.setState(StateDisconnected) // conservative: hold sends until ping/reconnect succeeds
 	case *events.KeepAliveRestored:
@@ -371,7 +372,7 @@ func (s *ManagedSession) handleEvent(raw any) {
 			s.ring(fmt.Sprintf("undecryptable message from %s in %s", evt.Info.Sender, evt.Info.Chat))
 		}
 	case *events.TemporaryBan:
-		s.ring(fmt.Sprintf("TEMPORARY BAN: %s (expires in %s)", evt.Code, evt.Expire))
+		s.ringLevel("warn", fmt.Sprintf("TEMPORARY BAN: %s (expires in %s)", evt.Code, evt.Expire))
 		s.permanentDown("temporary ban")
 	case *events.StreamReplaced:
 		s.permanentDown("stream replaced (another process using this session?)")
@@ -392,8 +393,9 @@ func (s *ManagedSession) handleEvent(raw any) {
 func (s *ManagedSession) permanentDown(note string) {
 	s.mu.Lock()
 	s.stopSenderLocked()
+	s.active = false // terminal: never auto-reconnected — see reconnect.go's eligibility check
 	s.mu.Unlock()
-	s.ring("permanent disconnect: " + note)
+	s.ringLevel("warn", "permanent disconnect: "+note)
 	s.setState(StateLoggedOut)
 	_ = s.mgr.repo.SetActive(s.mgr.persistCtx, s.ID, false)
 }
@@ -413,8 +415,30 @@ func (s *ManagedSession) sendPresence() {
 	}
 }
 
+// ring records note at level "info" — see ringLevel.
 func (s *ManagedSession) ring(note string) {
-	s.events.Append(Event{At: time.Now(), Note: note})
+	s.ringLevel("info", note)
+}
+
+// ringLevel is the one choke point every session-scoped diagnostic event
+// goes through: it appends to s's OWN per-session ring (Snapshot.LastEvents
+// — unchanged behaviour) AND, in the same call, to Manager's app-wide ring
+// (Manager.RecentEvents, internal/handler's system log page — see
+// manager.go's sysRing doc comment). This is deliberately the ONLY place
+// that fans an event out to both, so every existing s.ring(...) call site
+// (state transitions in setState, pairing outcomes in
+// onPaired/onPairFailed/backend_waxum.go's finishPairingSuccess, status-poll
+// failures in statusPump, reconnect attempts and the stalled decision in
+// reconnect.go, send failures in sender.go's finishJob) reaches the system
+// log automatically, with no per-call-site wiring to forget. Both Appends
+// share one Event value (and so one timestamp) rather than being
+// constructed twice.
+func (s *ManagedSession) ringLevel(level, note string) {
+	e := Event{At: time.Now(), Note: note, SessionID: s.ID, SessionName: s.Name, Level: level}
+	s.events.Append(e)
+	if s.mgr != nil { // mgr is always set in production; guarded for any hand-built test session
+		s.mgr.sysRing.Append(e)
+	}
 }
 
 // sessionLogger keeps whatsmeow's operational logs visible while demoting

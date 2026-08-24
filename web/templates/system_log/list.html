@@ -1,0 +1,24 @@
+{{define "content"}}
+<div class="page-heading">
+  <div>
+    <h4>System Log</h4>
+    <p class="page-subtitle">State transitions, reconnect attempts, pairing outcomes, status-poll and send
+      failures — across every session and the app itself.</p>
+  </div>
+</div>
+<p class="muted">In-memory only — up to the last 500 events since this process last started. Lost on
+  restart. This is a diagnostic trail, not an audit log — see <a href="{{u "/logs"}}">Message Log</a> for the
+  durable record of every sent message.</p>
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Time</th><th>Level</th><th>Session</th><th>Note</th></tr>
+      </thead>
+      <tbody id="system-log-rows" hx-get="{{u "/system-log/rows"}}" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <tr><td colspan="4">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

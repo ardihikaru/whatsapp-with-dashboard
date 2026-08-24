@@ -3,6 +3,7 @@ package wa
 import (
 	"context"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
@@ -78,13 +79,29 @@ type fakeBackend struct {
 	// instead of the default ErrUnsupported — used by trySend/sender tests
 	// that need a Backend.SendText call to actually succeed.
 	sendTextID string
+
+	// connectFn, when set, overrides Connect's default ErrUnsupported —
+	// used by the reconnect supervisor tests (reconnect_test.go), which
+	// need Connect to either succeed (proving a reconnect attempt actually
+	// reached the backend) or block on ctx (proving Manager.Close's
+	// cancellation reaches an in-flight auto-reconnect attempt). Every
+	// call is counted in connectCalls regardless of connectFn, so a test
+	// can assert "attempted N times" without racing on a bespoke counter.
+	connectFn    func(ctx context.Context, s *ManagedSession) error
+	connectCalls atomic.Int32
 }
 
 func (f *fakeBackend) Name() string { return f.name }
 func (f *fakeBackend) StartPairing(context.Context, *ManagedSession, PairMode) error {
 	return ErrUnsupported
 }
-func (f *fakeBackend) Connect(context.Context, *ManagedSession) error    { return ErrUnsupported }
+func (f *fakeBackend) Connect(ctx context.Context, s *ManagedSession) error {
+	f.connectCalls.Add(1)
+	if f.connectFn != nil {
+		return f.connectFn(ctx, s)
+	}
+	return ErrUnsupported
+}
 func (f *fakeBackend) Disconnect(context.Context, *ManagedSession) error { return nil }
 func (f *fakeBackend) Logout(_ context.Context, _ *ManagedSession) error {
 	f.logoutCalled = true

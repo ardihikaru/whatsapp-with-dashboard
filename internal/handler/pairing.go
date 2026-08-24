@@ -77,8 +77,23 @@ func (h *handlers) PostPairStart(w http.ResponseWriter, r *http.Request) {
 		mode = wa.PairModeQR
 	}
 	if err := s.StartPairing(mode); err != nil {
-		if errors.Is(err, wa.ErrWrongState) {
+		switch {
+		case errors.Is(err, wa.ErrWrongState):
 			http.Error(w, "session is already pairing or connected", http.StatusConflict)
+			return
+		case errors.Is(err, wa.ErrBackendBusy):
+			// This IS the root cause of the production "send queue full" ->
+			// 500 misdiagnosis (CLAUDE.md's waxum rate-limit hazard note):
+			// a bare 429 from waxum's CreateSession/Connect call used to be
+			// mislabeled ErrQueueFull and shown to the operator as a fatal
+			// 500. Most 429s never even reach here now — internal/waxum's
+			// client retries them with backoff first (client.go's do) —
+			// this is only what a caller sees once those retries are
+			// exhausted. 503, not 500: this is a transient, worth-retrying
+			// condition, not a server bug.
+			w.Header().Set("Retry-After", backendBusyRetryAfterSeconds)
+			http.Error(w, "whatsapp backend is rate limiting requests — try again in a few seconds",
+				http.StatusServiceUnavailable)
 			return
 		}
 		slog.Error("start pairing", "session", s.ID, "err", err)

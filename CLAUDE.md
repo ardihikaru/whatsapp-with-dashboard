@@ -173,6 +173,41 @@ database server itself, and the failure reads as a docker-permissions problem
 (no access to `/var/run/docker.sock`, or "No such container" once that's
 fixed) rather than the topology problem it actually is.
 
+**waxum rate-limits per peer IP with a very small default burst, and a 429 is
+invisible in its own logs.** waxum's tower_governor middleware defaults to a
+burst of only ~3 requests before answering 429 — live measurement, FROM THE
+APP CONTAINER'S OWN NETWORK NAMESPACE: 60 rapid `GET /api/v1/sessions` got 57
+x HTTP 429 and 3 x HTTP 200. `docker-compose.yml`'s `waxum` service now sets
+`RATE_LIMIT_PER_SECOND`/`RATE_LIMIT_BURST` generously (waxum is reachable only
+on the compose network, so there's no reason to keep its public-internet
+defaults), and `internal/wa`'s pairing/status pollers were restructured to
+poll far less aggressively (`backend_waxum.go`'s `pairPump`, point 7) — but if
+either regresses, five things about this hazard are easy to get wrong:
+  - **`RATE_LIMIT_PER_SECOND` is not a rate.** tower_governor's
+    `GovernorConfigBuilder::per_second()` sets the REPLENISH INTERVAL, in
+    seconds, for one token, not requests-per-second — waxum's own default of
+    20 means one token every 20 seconds. A bigger number is TIGHTER, not
+    looser; "raising" it toward 50 makes pairing fail faster, exactly
+    backwards from the intent. Keep it small (near 1) and tune generosity
+    through `RATE_LIMIT_BURST` instead.
+  - **429s never show up in waxum's own logs.** tower_http's trace layer only
+    classifies 5xx as a failure; a 429 logs like a normal request. The only
+    way to see them is to measure the response codes yourself.
+  - **A single 429 must never be fatal.** It used to be mapped to
+    `wa.ErrQueueFull` ("send queue full") — a completely different condition
+    (sender.go's per-session send channel being full) — and aborted pairing
+    outright with a misleading log line. See `wa.ErrBackendBusy` and
+    `internal/waxum.Client`'s retry-with-backoff in `do()`.
+  - **Measure the limit from the SAME network namespace the real traffic
+    comes from.** Testing from a different container (or the host) gives the
+    bucket a fresh IP and therefore a fresh token count — that reads as "the
+    limit is fine" and is not; it is the exact false confidence that let this
+    incident go undiagnosed for a while.
+  - **Measuring right after restarting waxum is misleading too.** The bucket
+    starts full, so a burst right after a restart succeeds regardless of the
+    configured rate and proves nothing. A valid measurement drains the burst
+    first, then waits a known idle period and counts successes against that.
+
 ---
 
 ## Layout

@@ -26,6 +26,47 @@ func TestRingWraparound(t *testing.T) {
 	}
 }
 
+// TestTheEventRingKeepsOnlyTheMostRecentEntries extends the coverage above
+// (TestRingWraparound already pins Ring's own drop-oldest/fixed-capacity
+// behaviour) to the app-wide diagnostic ring the system log page reads —
+// Manager.RecentEvents, backed by manager.go's sysRing (same Ring type,
+// sized sysRingSize instead of one session's ringSize). It reuses Ring
+// unchanged; what's new here is RecentEvents' own contract: capped at
+// sysRingSize AND returned NEWEST first (Ring.Snapshot itself stays
+// oldest-first, unchanged — see TestRingWraparound).
+func TestTheEventRingKeepsOnlyTheMostRecentEntries(t *testing.T) {
+	m := newTestManager(newStubSessions(), newStubMsgs())
+	total := sysRingSize + 50
+	for i := 0; i < total; i++ {
+		m.RecordEvent("info", fmt.Sprintf("e%d", i))
+	}
+
+	all := m.RecentEvents(0)
+	if len(all) != sysRingSize {
+		t.Fatalf("RecentEvents(0) len = %d, want %d (sysRingSize)", len(all), sysRingSize)
+	}
+	if want := fmt.Sprintf("e%d", total-1); all[0].Note != want {
+		t.Fatalf("RecentEvents[0].Note = %q, want %q — RecentEvents must return the newest entry first", all[0].Note, want)
+	}
+	if want := fmt.Sprintf("e%d", total-sysRingSize); all[len(all)-1].Note != want {
+		t.Fatalf("RecentEvents[last].Note = %q, want %q (the oldest entry still inside the window after the older ones dropped)", all[len(all)-1].Note, want)
+	}
+
+	limited := m.RecentEvents(3)
+	if len(limited) != 3 {
+		t.Fatalf("RecentEvents(3) len = %d, want 3", len(limited))
+	}
+	for i, want := range []string{
+		fmt.Sprintf("e%d", total-1),
+		fmt.Sprintf("e%d", total-2),
+		fmt.Sprintf("e%d", total-3),
+	} {
+		if limited[i].Note != want {
+			t.Fatalf("RecentEvents(3)[%d].Note = %q, want %q", i, limited[i].Note, want)
+		}
+	}
+}
+
 func TestRingConcurrent(t *testing.T) {
 	r := NewRing(256)
 	var wg sync.WaitGroup

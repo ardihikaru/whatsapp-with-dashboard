@@ -107,11 +107,14 @@ func (h *handlers) apiToggle(w http.ResponseWriter, r *http.Request, op func(*wa
 		return
 	}
 	if err := op(s); err != nil {
-		status := http.StatusInternalServerError
-		if errors.Is(err, wa.ErrNotPaired) || errors.Is(err, wa.ErrDeviceGone) {
-			status = http.StatusConflict
+		switch {
+		case errors.Is(err, wa.ErrNotPaired), errors.Is(err, wa.ErrDeviceGone):
+			writeError(w, http.StatusConflict, err.Error())
+		case errors.Is(err, wa.ErrBackendBusy):
+			writeBackendBusy(w, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
 		}
-		writeError(w, status, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, apiFromSnapshot(s.Snapshot()))

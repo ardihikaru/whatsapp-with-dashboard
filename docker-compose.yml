@@ -125,6 +125,28 @@ services:
       DATABASE_URL: mysql://${WAXUM_MYSQL_USER}:${WAXUM_MYSQL_PASSWORD}@mysqldb-master:3306/${WAXUM_MYSQL_DATABASE}
       SUPERADMIN_TOKEN: ${WAXUM_TOKEN:?waxum needs WAXUM_TOKEN in .env}
       WHATSAPP_STORAGE_PATH: /data/whatsapp_sessions
+      # waxum's tower_governor rate limiter defaults to a burst of only ~3
+      # requests per peer IP. Live incident: WSM's own pairing/status
+      # pollers (internal/wa's statusPump + pairPump, one process, one
+      # source IP on this network) alone burst straight through that —
+      # 60 rapid GET /api/v1/sessions measured 57 x HTTP 429 to 3 x HTTP
+      # 200, from the app container's OWN network namespace (see
+      # CLAUDE.md's waxum rate-limit hazard note for why that measurement
+      # location matters).
+      #
+      # RATE_LIMIT_PER_SECOND is NOT a requests-per-second rate, despite the
+      # name: tower_governor's `per_second()` sets the REPLENISH INTERVAL, in
+      # seconds, for ONE token — waxum's own default of 20 means one token
+      # every 20 seconds. A BIGGER number here makes the limiter TIGHTER, not
+      # looser; a value near 1 (one token/sec) is the generous setting.
+      # waxum is reachable ONLY on this compose network (no `ports:` block
+      # above) and only WSM talks to it, so a generous, bounded allowance is
+      # safe. WSM's own client (internal/waxum) also carries a process-wide
+      # token bucket and retries a 429 with backoff as defense-in-depth, but
+      # that is a second line of defense, not a substitute for waxum itself
+      # having room to serve this app's normal traffic without throttling it.
+      RATE_LIMIT_PER_SECOND: "1"     # replenish interval in SECONDS -> 1 token/sec
+      RATE_LIMIT_BURST: "200"
     volumes:
       - waxum-sessions:/data
 

@@ -10,9 +10,23 @@ const ringSize = 256
 
 // Event is one ring entry: a timestamped note about a whatsmeow event or a
 // lifecycle transition.
+//
+// SessionID/SessionName/Level are additive (Manager.RecentEvents /
+// internal/handler's system log page — see reconnect.go and manager.go):
+// every per-session ring still holds exactly what it always held (a plain
+// Note against a session it's already scoped to, so those two fields are
+// "" there), and TestRingWraparound/TestRingConcurrent (ring_test.go)
+// construct Event with named fields and keep passing unchanged. Level is a
+// plain string ("info"/"warn" today, see ManagedSession.ring/ringLevel) —
+// not its own type — because the ONLY consumer is the system log page
+// rendering it as text; a closed enum would buy nothing over that and
+// would need touching every call site that logs today.
 type Event struct {
-	At   time.Time
-	Note string
+	At          time.Time
+	Note        string
+	SessionID   string // "" for a manager-level event with no single session in scope
+	SessionName string // "" alongside SessionID; kept alongside it so the page never needs a live lookup for a session that may since have been deleted
+	Level       string // "info" (default) or "warn" — see ManagedSession.ringLevel
 }
 
 // Ring is a fixed-capacity, drop-oldest event log. Append is O(1) and both

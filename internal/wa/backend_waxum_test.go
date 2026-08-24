@@ -17,15 +17,17 @@ import (
 )
 
 // waxumFakeCalls counts, per-endpoint, how many times the fake waxum server
-// in this file has answered GET /status, GET /qr, POST /pair and POST
-// /connect — enough for tests to wait for "N polls have happened", or
-// assert a call count stayed exactly N (the connect-nudge idempotency
-// tests), without sleeping a fixed, flaky amount.
+// in this file has answered POST /sessions, GET /status, GET /qr, POST
+// /pair, POST /connect and DELETE /sessions/{id} — enough for tests to wait
+// for "N polls have happened", or assert a call count stayed exactly N (the
+// connect-nudge idempotency tests), without sleeping a fixed, flaky amount.
 type waxumFakeCalls struct {
+	create  atomic.Int32
 	status  atomic.Int32
 	qr      atomic.Int32
 	pair    atomic.Int32
 	connect atomic.Int32
+	delete_ atomic.Int32
 }
 
 // waxumFakeOpts configures newWaxumFakeServer. Zero value is a server that
@@ -33,9 +35,14 @@ type waxumFakeCalls struct {
 // hard-deadline and context-cancellation tests need (nothing about it ever
 // makes the pump exit on its own).
 type waxumFakeOpts struct {
-	createStatus int                      // HTTP status for POST /api/v1/sessions; 0 => 200
-	statusFn     func(n int) waxum.Status // n is the 1-based call number
-	qrFn         func(n int) []string
+	createStatus int // HTTP status for POST /api/v1/sessions; 0 => 200. Ignored if createFn is set.
+	// createFn, when set, determines the HTTP status for POST
+	// /api/v1/sessions per call (n is 1-based) — used to simulate a
+	// TRANSIENT 429 (a few calls, then success) or a permanent one,
+	// unlike createStatus's single fixed value.
+	createFn func(n int) int
+	statusFn func(n int) waxum.Status // n is the 1-based call number
+	qrFn     func(n int) []string
 	// pairFn answers POST /pair. n is the 1-based call number. status==0
 	// (or http.StatusOK) succeeds with code; any other status responds with
 	// that code and a body shaped like waxum's real error (see
@@ -44,14 +51,36 @@ type waxumFakeOpts struct {
 	// succeeds with a fixed code — not exercised by a test that never
 	// pairs in phone mode.
 	pairFn func(n int) (status int, code string)
+	// deleteFn, when set, determines the HTTP status for DELETE
+	// /api/v1/sessions/{id} per call (n is 1-based). Nil means every call
+	// succeeds with 200.
+	deleteFn func(n int) int
+	// alwaysRateLimited, when true, makes EVERY request under
+	// /api/v1/sessions/ (status, qr, pair, connect, delete — NOT the bare
+	// POST /api/v1/sessions create path) answer 429 forever, regardless of
+	// any other opt above. Used to prove a pump's own DEADLINE — not the
+	// client's bounded per-call retry count — is what stops a genuinely
+	// permanent rate limit from hanging.
+	alwaysRateLimited bool
 }
 
 // newWaxumFakeServer builds an httptest server covering exactly the waxum
 // endpoints this phase's backend calls (CreateSession, Connect, Disconnect,
-// Status, QR, PairCode — see internal/waxum/client.go), routed the same way
-// waxum.Client itself builds paths. Every path this backend does not care
-// about for a given test answers a bare 200, matching the client's own
-// "empty body on out==nil" no-op case.
+// Status, QR, PairCode, DeleteSession — see internal/waxum/client.go),
+// routed the same way waxum.Client itself builds paths. Every path this
+// backend does not care about for a given test answers a bare 200, matching
+// the client's own "empty body on out==nil" no-op case.
+//
+// The Client returned is built with two overrides, both replacing a
+// PRODUCTION-scale schedule with a millisecond one — see
+// internal/waxum/client_test.go's newFakeServer, which does the same for
+// the same reason: WithClientRateLimit(1e6, 1e6) so this package's OWN
+// polling loops (2ms poll intervals are common in this file) never trip the
+// client-wide throttle meant for real traffic, and WithRetryPolicy(5, …)
+// so a test that simulates a 429 does not pay do()'s real backoff schedule
+// (up to ~31s across 5 retries) — see TestPairingSurvivesATransientRateLimit
+// and TestPairingStillGivesUpAtTheDeadlineWhenRateLimitedForever, both of
+// which rely on retries actually happening within a fast test.
 func newWaxumFakeServer(t *testing.T, opts waxumFakeOpts) (*waxum.Client, *waxumFakeCalls) {
 	t.Helper()
 	calls := &waxumFakeCalls{}
@@ -66,9 +95,27 @@ func newWaxumFakeServer(t *testing.T, opts waxumFakeOpts) (*waxum.Client, *waxum
 	// NOT match this (no trailing slash on the request), so it needs its
 	// own exact registration.
 	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(createStatus)
+		n := int(calls.create.Add(1))
+		status := createStatus
+		if opts.createFn != nil {
+			status = opts.createFn(n)
+		}
+		w.WriteHeader(status)
 	})
 	mux.HandleFunc("/api/v1/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		if opts.alwaysRateLimited {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		if r.Method == http.MethodDelete {
+			n := int(calls.delete_.Add(1))
+			status := http.StatusOK
+			if opts.deleteFn != nil {
+				status = opts.deleteFn(n)
+			}
+			w.WriteHeader(status)
+			return
+		}
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			n := int(calls.status.Add(1))
@@ -112,7 +159,11 @@ func newWaxumFakeServer(t *testing.T, opts waxumFakeOpts) (*waxum.Client, *waxum
 
 	srv := httptest.NewServer(mux)
 	t.Cleanup(srv.Close)
-	return waxum.New(srv.URL, "test-token", 5*time.Second), calls
+	client := waxum.New(srv.URL, "test-token", 5*time.Second,
+		waxum.WithClientRateLimit(1e6, 1e6),
+		waxum.WithRetryPolicy(5, func(int, string) time.Duration { return time.Millisecond }),
+	)
+	return client, calls
 }
 
 // newWaxumTestManager wires a Manager around backend for these tests, with
@@ -138,6 +189,25 @@ func waitForCondition(t *testing.T, what string, cond func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 	t.Fatalf("timed out waiting for: %s", what)
+}
+
+// pairedJIDFromHistory scans repo's full status history for id (not just
+// the latest entry — stubSessions.lastStatus is the wrong tool here) for a
+// SetPaired call ("paired:<jid>", stubs_test.go), returning the jid string
+// and true if one was ever recorded. finishPairingSuccess calls SetPaired
+// BEFORE applyStatus's own setState (which writes "connected"/"disconnected"
+// right after, into the SAME history), so the "paired:" entry is not
+// necessarily the last one.
+func pairedJIDFromHistory(repo *stubSessions, id string) (string, bool) {
+	repo.mu.Lock()
+	defer repo.mu.Unlock()
+	const prefix = "paired:"
+	for i := len(repo.statuses[id]) - 1; i >= 0; i-- {
+		if entry := repo.statuses[id][i]; strings.HasPrefix(entry, prefix) {
+			return entry[len(prefix):], true
+		}
+	}
+	return "", false
 }
 
 // TestWaxumPairingPumpOnlyBumpsTheQRGenerationWhenThePayloadChanges is
@@ -252,7 +322,7 @@ func TestWaxumPairingPumpFinishesWhenTheSessionReachesConnected(t *testing.T) {
 	const phone = "6281200001111"
 	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
 		statusFn: func(int) waxum.Status {
-			return waxum.Status{Status: "connected", IsLoggedIn: true, PhoneNumber: phone}
+			return waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true, PhoneNumber: phone} // SocketAlive: true — point 8 (backend_waxum.go) now derives State from BOTH, not is_logged_in alone
 		},
 	})
 	b := &waxumBackend{client: client}
@@ -320,8 +390,13 @@ func TestWaxumBackendLiveDoesNoIO(t *testing.T) {
 }
 
 // TestWaxumBackendMapsClientErrorsOntoTheWAErrSentinels drives SendText
-// against fake servers returning waxum's three typed-error statuses and
-// checks the wa-package sentinel each maps to.
+// against fake servers returning waxum's typed-error statuses and checks
+// the wa-package sentinel each maps to. Every case shares a fast retry
+// policy (WithRetryPolicy(1, 1ms)) — the 429/503 cases would otherwise
+// retry against do()'s real backoff schedule (up to ~31s) before this test
+// could observe the final sentinel; see
+// TestRateLimitedBackendErrorIsNotReportedAsAFullSendQueue below for the
+// dedicated regression test this table's 429 case corroborates.
 func TestWaxumBackendMapsClientErrorsOntoTheWAErrSentinels(t *testing.T) {
 	cases := []struct {
 		name string
@@ -330,7 +405,8 @@ func TestWaxumBackendMapsClientErrorsOntoTheWAErrSentinels(t *testing.T) {
 	}{
 		{"404 maps to ErrNotFound", http.StatusNotFound, ErrNotFound},
 		{"409 maps to ErrNotConnected", http.StatusConflict, ErrNotConnected},
-		{"429 maps to ErrQueueFull", http.StatusTooManyRequests, ErrQueueFull},
+		{"429 maps to ErrBackendBusy, NOT ErrQueueFull", http.StatusTooManyRequests, ErrBackendBusy},
+		{"503 maps to ErrNotConnected (transient — socket still dialing)", http.StatusServiceUnavailable, ErrNotConnected},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -338,7 +414,9 @@ func TestWaxumBackendMapsClientErrorsOntoTheWAErrSentinels(t *testing.T) {
 				w.WriteHeader(c.code)
 			}))
 			t.Cleanup(srv.Close)
-			b := &waxumBackend{client: waxum.New(srv.URL, "test-token", time.Second)}
+			client := waxum.New(srv.URL, "test-token", time.Second,
+				waxum.WithRetryPolicy(1, func(int, string) time.Duration { return time.Millisecond }))
+			b := &waxumBackend{client: client}
 			s := testSession(newWaxumTestManager(t, b), StateConnected)
 
 			_, err := b.SendText(context.Background(), s, ToJID("628120001"), "hi")
@@ -346,6 +424,34 @@ func TestWaxumBackendMapsClientErrorsOntoTheWAErrSentinels(t *testing.T) {
 				t.Fatalf("SendText err = %v, want %v", err, c.want)
 			}
 		})
+	}
+}
+
+// TestRateLimitedBackendErrorIsNotReportedAsAFullSendQueue is the dedicated
+// regression test for the live misdiagnosis: mapErr used to translate
+// waxum's 429 onto ErrQueueFull, whose "send queue full" message describes
+// a completely different condition (sender.go's per-session send channel
+// being full) and sent a production debugging session looking at the wrong
+// subsystem. It must never be ErrQueueFull, and must be the new
+// ErrBackendBusy sentinel instead.
+func TestRateLimitedBackendErrorIsNotReportedAsAFullSendQueue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(srv.Close)
+	client := waxum.New(srv.URL, "test-token", time.Second,
+		waxum.WithRetryPolicy(1, func(int, string) time.Duration { return time.Millisecond }))
+	b := &waxumBackend{client: client}
+	s := testSession(newWaxumTestManager(t, b), StateConnected)
+
+	_, err := b.SendText(context.Background(), s, ToJID("628120001"), "hi")
+	if errors.Is(err, ErrQueueFull) {
+		t.Fatalf("a rate-limited (429) send was reported as ErrQueueFull (%q) — "+
+			"this is the exact mislabeling that cost a live production debugging session; "+
+			"a backend rate limit and a full per-session send queue are unrelated conditions", err)
+	}
+	if !errors.Is(err, ErrBackendBusy) {
+		t.Fatalf("SendText err = %v, want errors.Is(err, ErrBackendBusy)", err)
 	}
 }
 
@@ -424,7 +530,7 @@ func TestPairingSucceedsWhenWaxumReportsLoggedInEvenWhileStatusIsStillConnecting
 	const phone = "6285132148259"
 	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
 		statusFn: func(int) waxum.Status {
-			return waxum.Status{Status: "connecting", IsLoggedIn: true, PhoneNumber: phone}
+			return waxum.Status{Status: "connecting", IsLoggedIn: true, SocketAlive: true, PhoneNumber: phone} // SocketAlive: true — this test is about the STATUS TEXT lagging reality, not about the socket itself being down; see TestPairingSuccessDoesNotReportConnectedWhileTheSocketIsDown for that axis
 		},
 	})
 	b := &waxumBackend{client: client}
@@ -652,4 +758,742 @@ func TestPairingPumpNudgesConnectOnceAfterAQRScanLeavesTheSessionDisconnected(t 
 		t.Fatalf("POST /connect nudges after 10 disconnected polls = %d, want exactly 1 "+
 			"(must nudge once, not spam every poll and fight waxum's own reconnect watchdog)", got)
 	}
+}
+
+// TestPairingSurvivesATransientRateLimit is the direct regression test for
+// the production failure this whole change addresses: waxum answering 429
+// to StartPairing's CreateSession call used to abort pairing outright via
+// rollbackPairing (mapped to the misleading "send queue full"). With
+// internal/waxum.Client.do now retrying a 429 with backoff before StartPairing
+// ever sees an error, a transient rate limit must be invisible to the
+// caller — StartPairing returns nil and pairing completes normally.
+func TestPairingSurvivesATransientRateLimit(t *testing.T) {
+	const phone = "6281200002222"
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{
+		createFn: func(n int) int {
+			if n <= 3 {
+				return http.StatusTooManyRequests
+			}
+			return http.StatusOK
+		},
+		statusFn: func(int) waxum.Status {
+			return waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true, PhoneNumber: phone}
+		},
+	})
+	b := &waxumBackend{client: client, qrPollInterval: 2 * time.Millisecond, pollInterval: time.Hour, pairTimeout: 2 * time.Second}
+	mgr := newWaxumTestManager(t, b)
+	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-2222")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.StartPairing(PairModeQR); err != nil {
+		t.Fatalf("StartPairing with a transient rate limit on CreateSession: err = %v, want nil — "+
+			"a transient 429 must be retried by the client, not roll the pairing back", err)
+	}
+
+	// finishPairingSuccess clears s.pairing on success (pairPump's doc
+	// comment), so PairingSnapshot's ok flips back to false once pairing
+	// has actually finished — StateConnected is the durable signal to wait
+	// on here, matching pairStatus's own "no pairing box + connected means
+	// success" rule (internal/handler/pairing.go).
+	waitForCondition(t, "pairing to finish successfully despite the transient 429s", func() bool {
+		return s.Snapshot().State == StateConnected
+	})
+	if got := calls.create.Load(); got < 4 {
+		t.Fatalf("POST /api/v1/sessions calls = %d, want >= 4 (3 rate-limited + at least 1 success)", got)
+	}
+	if got := calls.create.Load(); got < 4 {
+		t.Fatalf("POST /api/v1/sessions calls = %d, want >= 4 (3 rate-limited + at least 1 success)", got)
+	}
+}
+
+// TestPairingStillGivesUpAtTheDeadlineWhenRateLimitedForever proves a
+// PERMANENT rate limit — every single call under /api/v1/sessions/ answering
+// 429 forever — still cannot hang pairPump past its deadline. This is
+// distinct from do()'s own bounded per-call retry count: even though each
+// individual Status()/QR() call eventually gives up and returns
+// ErrRateLimited on its own, the pump's outer loop must still respect
+// deadline regardless of how many individual calls that takes.
+func TestPairingStillGivesUpAtTheDeadlineWhenRateLimitedForever(t *testing.T) {
+	client, _ := newWaxumFakeServer(t, waxumFakeOpts{alwaysRateLimited: true})
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StatePairing)
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(context.Background(), s, ps, 2*time.Millisecond, time.Now().Add(50*time.Millisecond))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pairPump did not return at its deadline even though waxum rate-limits every call — " +
+			"a permanently rate-limited backend must not hang pairing forever")
+	}
+	if snap := ps.Snapshot(); !snap.Done || snap.Err == "" {
+		t.Fatalf("PairingState after deadline = %+v, want Done with a non-empty Err", snap)
+	}
+}
+
+// TestTheQREndpointIsNotPolledWhenTheSessionIsNotPairing is the regression
+// test for point 7's QR-polling gate: once a QR payload has been seen and
+// the status has moved out of a QR-wanting state (waiting_for_qr/
+// waiting_for_pair_code), further ticks must not call GET /qr at all —
+// before this fix, every tick of every pairing session cost a QR request
+// unconditionally, which was a major contributor to the 429 storm this
+// change addresses (CLAUDE.md's waxum rate-limit hazard note).
+func TestTheQREndpointIsNotPolledWhenTheSessionIsNotPairing(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(n int) waxum.Status {
+			if n <= 2 {
+				return waxum.Status{Status: "waiting_for_qr"}
+			}
+			return waxum.Status{Status: "connecting"} // left the QR-wanting state; still not logged in
+		},
+		qrFn: func(int) []string { return []string{"code-A"} },
+	})
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StatePairing)
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(ctx, s, ps, 2*time.Millisecond, time.Now().Add(time.Minute))
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	waitForCondition(t, "status to move past waiting_for_qr", func() bool { return calls.status.Load() >= 5 })
+	qrCallsAtTransition := calls.qr.Load()
+	if qrCallsAtTransition == 0 {
+		t.Fatal("GET /qr was never polled while the session WAS waiting_for_qr — test setup is broken")
+	}
+
+	waitForCondition(t, "several more status polls after leaving the QR-wanting state", func() bool {
+		return calls.status.Load() >= 20
+	})
+	if got := calls.qr.Load(); got != qrCallsAtTransition {
+		t.Fatalf("GET /qr was polled %d more times (from %d to %d) after the session left waiting_for_qr "+
+			"with a code already seen — it must not be polled once neither condition holds",
+			got-qrCallsAtTransition, qrCallsAtTransition, got)
+	}
+}
+
+// TestPairingNeverPersistsAJIDWithAnEmptyUser is the regression test for the
+// live bug documented in pairPump's point 6 and finishPairingSuccess's
+// doc comment: waxum flips is_logged_in to true BEFORE phone_number is
+// populated. The fake here reproduces exactly that — is_logged_in:true with
+// an empty phone_number on the very first successful poll, then the real
+// number on the next. The persisted jid must be the REAL number and must
+// NEVER be built from an empty user (which would render as bare
+// "s.whatsapp.net", not "@s.whatsapp.net" — see types.JID.String()).
+func TestPairingNeverPersistsAJIDWithAnEmptyUser(t *testing.T) {
+	const realPhone = "6285132148259"
+	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(n int) waxum.Status {
+			if n == 1 {
+				return waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true} // phone_number still empty
+			}
+			return waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true, PhoneNumber: realPhone}
+		},
+	})
+	b := &waxumBackend{client: client}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repo := newStubSessions()
+	mgr := NewManager(ctx, b, repo, newStubMsgs(), Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
+	s := testSession(mgr, StatePairing)
+	s.Phone = "6280000000000" // deliberately different from realPhone, so the assertion below can tell which source won
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(context.Background(), s, ps, 2*time.Millisecond, time.Now().Add(2*time.Second))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pairPump did not finish")
+	}
+
+	wantJID := types.NewJID(realPhone, types.DefaultUserServer)
+	if s.jid != wantJID {
+		t.Fatalf("s.jid = %v, want %v (the real phone_number, reported one tick later)", s.jid, wantJID)
+	}
+	// SetPaired's "paired:<jid>" entry is not necessarily the LAST status
+	// recorded — applyStatus's own setState("connected") writes again right
+	// after it (both land in the same stub history) — so scan the whole
+	// history for the "paired:" entry rather than trusting lastStatus.
+	persistedJID, ok := pairedJIDFromHistory(repo, s.ID)
+	if !ok {
+		t.Fatalf("no SetPaired call recorded in history for %s", s.ID)
+	}
+	if persistedJID == "s.whatsapp.net" || persistedJID == "@s.whatsapp.net" {
+		t.Fatalf("persisted jid = %q — an empty-user jid was written to wa_sessions, "+
+			"exactly the live bug this test guards against", persistedJID)
+	}
+	if persistedJID != wantJID.String() {
+		t.Fatalf("persisted jid = %q, want %q", persistedJID, wantJID.String())
+	}
+}
+
+// TestPairingFallsBackToTheConfiguredPhoneWhenWaxumNeverReportsOne covers
+// pairPump's point 6 fallback: is_logged_in stays true but phone_number
+// stays empty for the whole grace window (maxPendingLoginTicks), so
+// finishPairingSuccess must fall back to s.Phone — the operator-supplied,
+// NormalizePhone-validated number — rather than hang forever waiting for a
+// value waxum is never going to send, and never build an empty-user jid.
+func TestPairingFallsBackToTheConfiguredPhoneWhenWaxumNeverReportsOne(t *testing.T) {
+	const configuredPhone = "6280000009999"
+	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(int) waxum.Status {
+			return waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true} // phone_number NEVER populated
+		},
+	})
+	b := &waxumBackend{client: client}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	repo := newStubSessions()
+	mgr := NewManager(ctx, b, repo, newStubMsgs(), Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
+	s := testSession(mgr, StatePairing)
+	s.Phone = configuredPhone
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(context.Background(), s, ps, 2*time.Millisecond, time.Now().Add(2*time.Second))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pairPump did not finish — the grace window must bound the wait, not the outer 2s deadline")
+	}
+
+	wantJID := types.NewJID(configuredPhone, types.DefaultUserServer)
+	if s.jid != wantJID {
+		t.Fatalf("s.jid = %v, want %v (fallback to s.Phone)", s.jid, wantJID)
+	}
+	if snap := ps.Snapshot(); !snap.Done || snap.Err != "" {
+		t.Fatalf("PairingState = %+v, want Done with no error — the device DID log in", snap)
+	}
+}
+
+// TestPairingSuccessDoesNotReportConnectedWhileTheSocketIsDown is the
+// regression test for the live 503: finishPairingSuccess used to force
+// StateConnected/Live=true unconditionally on is_logged_in alone, so
+// Enqueue admitted a send before waxum's socket was actually usable and
+// SendText failed with 503 "Client not connected". is_logged_in:true with
+// socket_alive:false must land the session in StateDisconnected (NOT
+// StateConnected, NOT StateLoggedOut — see mapWaxumStatus) and Live() false,
+// so Enqueue correctly refuses instead of admitting a doomed send.
+func TestPairingSuccessDoesNotReportConnectedWhileTheSocketIsDown(t *testing.T) {
+	const phone = "6281299990000"
+	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(int) waxum.Status {
+			return waxum.Status{Status: "connecting", IsLoggedIn: true, SocketAlive: false, PhoneNumber: phone}
+		},
+	})
+	b := &waxumBackend{client: client, pollInterval: time.Hour}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StatePairing)
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(context.Background(), s, ps, time.Hour, time.Now().Add(time.Hour))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pairPump did not finish promptly on the very first is_logged_in:true poll")
+	}
+
+	if got := s.Snapshot().State; got == StateConnected {
+		t.Fatalf("state = %v after a pairing success with socket_alive:false, want NOT connected "+
+			"(this is the exact production 503 \"Client not connected\" this test guards against)", got)
+	}
+	if b.Live(s) {
+		t.Fatal("Live(s) = true with socket_alive:false, want false")
+	}
+	if _, err := s.Enqueue("m1", ToJID("628120001"), "hi"); !errors.Is(err, ErrNotConnected) {
+		t.Fatalf("Enqueue on a logged-in-but-not-socket-alive session: err = %v, want ErrNotConnected "+
+			"(must refuse rather than admit a send waxum will 503)", err)
+	}
+}
+
+// TestTheStatusPumpPromotesToConnectedOnceTheSocketComesAlive is the other
+// half of the fix above: once socket_alive catches up, the next statusPump
+// tick (not a special case in finishPairingSuccess) must promote the
+// session to StateConnected/Live — pairing success and the steady-state
+// poller share exactly one place State/Live are computed (applyStatus), so
+// this is the same code path TestPairingSuccessDoesNotReportConnectedWhileTheSocketIsDown
+// exercises, one tick later.
+func TestTheStatusPumpPromotesToConnectedOnceTheSocketComesAlive(t *testing.T) {
+	const phone = "6281299990000"
+	var socketAlive atomic.Bool
+	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(int) waxum.Status {
+			return waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: socketAlive.Load(), PhoneNumber: phone}
+		},
+	})
+	b := &waxumBackend{client: client, pollInterval: 2 * time.Millisecond}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StatePairing)
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(context.Background(), s, ps, time.Hour, time.Now().Add(time.Hour))
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pairPump did not finish")
+	}
+	if got := s.Snapshot().State; got == StateConnected {
+		t.Fatalf("state = %v right after pairing success with socket_alive:false, want NOT connected", got)
+	}
+
+	socketAlive.Store(true)
+	waitForCondition(t, "statusPump to promote the session once socket_alive is true", func() bool {
+		return s.Snapshot().State == StateConnected
+	})
+	if !b.Live(s) {
+		t.Fatal("Live(s) = false after socket_alive turned true, want true")
+	}
+}
+
+// TestA503FromWaxumIsRetriedRatherThanFailingTheMessage is the send-side
+// regression test: waxum's 503 "Client not connected" now maps to
+// ErrNotConnected (mapErr), which isRetryable (sender_limits.go) already
+// retries — a send that races a still-dialling socket right after a
+// pairing success must succeed on a later attempt instead of hard-failing
+// on the first.
+func TestA503FromWaxumIsRetriedRatherThanFailingTheMessage(t *testing.T) {
+	var textCalls atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/messages/text") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		n := textCalls.Add(1)
+		if n <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			_, _ = w.Write([]byte(`{"success":false,"error":{"code":503,"message":"Client not connected"}}`))
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(waxum.MessageResult{MessageID: "wamid-1"})
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	client := waxum.New(srv.URL, "test-token", 5*time.Second,
+		waxum.WithClientRateLimit(1e6, 1e6),
+		waxum.WithRetryPolicy(1, func(int, string) time.Duration { return time.Millisecond }))
+
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StateConnected)
+	s.startSenderLocked()
+
+	done, err := s.Enqueue("m1", ToJID("628120001"), "hi")
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	select {
+	case res := <-done:
+		if res.Err != nil {
+			t.Fatalf("send result Err = %v, want nil — a transient 503 must be retried until it succeeds", res.Err)
+		}
+		if res.WAMessageID != "wamid-1" {
+			t.Fatalf("WAMessageID = %q, want %q", res.WAMessageID, "wamid-1")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("send did not complete — a retryable 503 must not hang past maxAttempts/backoff")
+	}
+	if got := textCalls.Load(); got != 3 {
+		t.Fatalf("POST .../messages/text was called %d times, want 3 (2 x 503 + 1 success)", got)
+	}
+}
+
+// TestDeletingASessionSurfacesAFailedBackendLogoutInsteadOfSilentlyOrphaningIt
+// is the regression test for the live incident where DELETE calls to waxum
+// were rate-limited (429) during a delete storm, the resulting error was
+// discarded (`_ = m.backend.Logout(...)`), and wa_sessions went to 0 rows
+// while waxum still held the sessions — permanently orphaned, with nothing
+// in the UI or logs to show it. The WSM row must still be deleted (a failed
+// remote logout must not block the local delete), but the failure must be
+// OBSERVABLE — via the session's own ring log, since s is still reachable
+// by pointer even after Manager.Delete removes it from the session map.
+func TestDeletingASessionSurfacesAFailedBackendLogoutInsteadOfSilentlyOrphaningIt(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{
+		deleteFn: func(int) int { return http.StatusTooManyRequests }, // permanently rate-limited
+	})
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-3333")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Delete(context.Background(), s.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, ok := mgr.Get(s.ID); ok {
+		t.Fatal("session is still reachable via Manager.Get after Delete")
+	}
+	assertRingContains(t, s, "backend logout failed")
+	if got := calls.delete_.Load(); got == 0 {
+		t.Fatal("DELETE /api/v1/sessions/{id} was never called")
+	}
+}
+
+// TestDeletingASessionAfterATransientRateLimitLogsOutCleanly is the paired
+// positive case: a 429 that clears within do()'s own retry budget must
+// result in a normal remote delete with NO orphan warning recorded.
+func TestDeletingASessionAfterATransientRateLimitLogsOutCleanly(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{
+		deleteFn: func(n int) int {
+			if n <= 2 {
+				return http.StatusTooManyRequests
+			}
+			return http.StatusOK
+		},
+	})
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-4444")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := mgr.Delete(context.Background(), s.ID); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	for _, evt := range s.events.Snapshot() {
+		if strings.Contains(evt.Note, "backend logout failed") {
+			t.Fatalf("ring recorded a logout-failure warning (%q) despite the 429 clearing within the retry budget", evt.Note)
+		}
+	}
+	if got := calls.delete_.Load(); got != 3 {
+		t.Fatalf("DELETE /api/v1/sessions/{id} was called %d times, want 3 (2 rate-limited + 1 success)", got)
+	}
+}
+
+// TestTheStatusPumpCanBeRestartedAfterItExits is the regression test for
+// Defect B: before this fix, waxumSessionState.pumping was never reset to
+// false when statusPump returned on ctx.Done(), so ensureStatusPump's
+// CompareAndSwap(false, true) guard could never succeed again for that
+// session id — WSM would go permanently blind for it (Live() frozen at
+// whatever it last observed), with no way back short of a process restart.
+func TestTheStatusPumpCanBeRestartedAfterItExits(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{})
+	b := &waxumBackend{client: client, pollInterval: 2 * time.Millisecond}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StateNew)
+
+	firstCtx, firstCancel := context.WithCancel(context.Background())
+	b.ensureStatusPump(firstCtx, s)
+
+	waitForCondition(t, "the first status pump makes at least one poll",
+		func() bool { return calls.status.Load() >= 1 })
+
+	firstCancel() // ends the first pump via ctx.Done()
+
+	waitForCondition(t, "pumping resets to false once the first pump has exited",
+		func() bool { return !b.sessionState(s.ID).pumping.Load() })
+
+	// A second ensureStatusPump call, matching what Connect (session.go's
+	// Activate, or this package's own reconnect supervisor) does on every
+	// (re)connect, must actually start polling again — proving the
+	// CompareAndSwap guard is usable again, not just that the flag reads
+	// false.
+	countAtRestart := calls.status.Load()
+	secondCtx, secondCancel := context.WithCancel(context.Background())
+	t.Cleanup(secondCancel)
+	b.ensureStatusPump(secondCtx, s)
+
+	waitForCondition(t, "the restarted status pump makes a NEW poll beyond the first pump's count",
+		func() bool { return calls.status.Load() > countAtRestart })
+}
+
+// TestAPairedSessionReportingWaitingForQRIsTreatedAsLoggedOutNotDisconnected
+// is the regression test for Defect 4 (mapWaxumStatus's doc comment, point
+// 3): a session WSM already has a jid for, whose waxum status has fallen
+// back to waiting_for_qr/waiting_for_pair_code with is_logged_in:false,
+// means the device was unlinked on the phone side — a re-pair is required,
+// not a reconnect. The old mapping produced StateDisconnected here, which
+// left the operator staring at a socket the reconnect supervisor
+// (reconnect.go) would spin on forever without ever being able to bring it
+// back (only a re-pair can), with no UI signal explaining why.
+//
+// applyStatus now requires loggedOutHysteresisPolls CONSECUTIVE qualifying
+// polls before committing to StateLoggedOut (see that constant's doc
+// comment) — this test drives exactly that many calls to still prove the
+// terminal verdict is eventually reached; the single-poll case (it must NOT
+// fire early) is TestASingleWaitingForQRPollDoesNotDeclareTheSessionLoggedOut's
+// job specifically, to keep this test's own regression purpose readable.
+func TestAPairedSessionReportingWaitingForQRIsTreatedAsLoggedOutNotDisconnected(t *testing.T) {
+	b := &waxumBackend{}
+	mgr := newWaxumTestManager(t, b)
+
+	paired := testSession(mgr, StateConnected)
+	paired.jid = types.NewJID("6281200009999", types.DefaultUserServer)
+	for i := 0; i < loggedOutHysteresisPolls; i++ {
+		b.applyStatus(paired, &waxum.Status{Status: "waiting_for_qr", IsLoggedIn: false, SocketAlive: false})
+	}
+	if paired.state != StateLoggedOut {
+		t.Fatalf("paired session: state = %v, want %v (device unlinked — needs a re-pair, not a reconnect)",
+			paired.state, StateLoggedOut)
+	}
+
+	// Control case: a session that was NEVER paired (no jid yet) reaching
+	// the exact same waxum status is an ordinary fresh pairing attempt in
+	// progress, not a logout — mapWaxumStatus's point 4. Regressing this
+	// would make EVERY brand-new QR pairing attempt appear logged-out
+	// before it ever had a chance to succeed.
+	fresh := testSession(mgr, StatePairing)
+	b.applyStatus(fresh, &waxum.Status{Status: "waiting_for_qr", IsLoggedIn: false, SocketAlive: false})
+	if fresh.state != StatePairing {
+		t.Fatalf("never-paired session: state = %v, want %v (a fresh pairing attempt must not be treated as logged out)",
+			fresh.state, StatePairing)
+	}
+}
+
+// TestASingleWaitingForQRPollDoesNotDeclareTheSessionLoggedOut is the
+// regression test for the production flap loggedOutHysteresisPolls's doc
+// comment describes: ONE qualifying poll (paired, !is_logged_in, status
+// waiting_for_qr) must not, on its own, commit the terminal StateLoggedOut
+// verdict — waxum's /status is demonstrably twitchy, and a session merely
+// re-dialling was seen logged_out, then un-logged_out 15s later, then fully
+// connected two minutes after that, all from single-poll snapshots. Before
+// applyStatus's hysteresis, this exact call sequence (see the now-updated
+// TestAPairedSessionReportingWaitingForQRIsTreatedAsLoggedOutNotDisconnected,
+// which used to make a single such call) reached StateLoggedOut
+// immediately.
+func TestASingleWaitingForQRPollDoesNotDeclareTheSessionLoggedOut(t *testing.T) {
+	b := &waxumBackend{}
+	mgr := newWaxumTestManager(t, b)
+
+	s := testSession(mgr, StateConnected)
+	s.jid = pairedTestJID()
+
+	b.applyStatus(s, &waxum.Status{Status: "waiting_for_qr", IsLoggedIn: false, SocketAlive: false})
+
+	if got := s.Snapshot().State; got != StateDisconnected {
+		t.Fatalf("state after ONE qualifying poll = %v, want %v (loggedOutHysteresisPolls=%d requires more than one poll before the terminal verdict commits)",
+			got, StateDisconnected, loggedOutHysteresisPolls)
+	}
+}
+
+// TestRepeatedWaitingForQRPollsEventuallyDeclareTheSessionLoggedOut proves
+// the hysteresis DELAYS the terminal verdict rather than preventing it: a
+// genuinely unlinked device — one that keeps reporting the same qualifying
+// status on every poll, with nothing healthy interleaved — must still reach
+// StateLoggedOut, exactly loggedOutHysteresisPolls consecutive polls in.
+func TestRepeatedWaitingForQRPollsEventuallyDeclareTheSessionLoggedOut(t *testing.T) {
+	b := &waxumBackend{}
+	mgr := newWaxumTestManager(t, b)
+
+	s := testSession(mgr, StateConnected)
+	s.jid = pairedTestJID()
+
+	for i := 1; i <= loggedOutHysteresisPolls; i++ {
+		b.applyStatus(s, &waxum.Status{Status: "waiting_for_qr", IsLoggedIn: false, SocketAlive: false})
+		got := s.Snapshot().State
+		if i < loggedOutHysteresisPolls {
+			if got == StateLoggedOut {
+				t.Fatalf("state after %d/%d consecutive qualifying polls = %v, want NOT logged_out yet",
+					i, loggedOutHysteresisPolls, got)
+			}
+			continue
+		}
+		if got != StateLoggedOut {
+			t.Fatalf("state after all %d consecutive qualifying polls = %v, want %v (a genuinely logged-out session must still reach the terminal state, only later)",
+				loggedOutHysteresisPolls, got, StateLoggedOut)
+		}
+	}
+}
+
+// TestANonQualifyingPollResetsTheLoggedOutEvidence proves the streak is
+// RESET, not merely paused, by an interleaved healthy poll — a session that
+// almost reached the threshold, then genuinely recovered, then started
+// flapping again must earn a whole fresh streak of loggedOutHysteresisPolls,
+// not just the one or two more it would take if the earlier near-miss still
+// counted.
+func TestANonQualifyingPollResetsTheLoggedOutEvidence(t *testing.T) {
+	if loggedOutHysteresisPolls < 2 {
+		t.Fatalf("this test requires loggedOutHysteresisPolls >= 2 to exercise a near-miss streak, got %d", loggedOutHysteresisPolls)
+	}
+	b := &waxumBackend{}
+	mgr := newWaxumTestManager(t, b)
+
+	s := testSession(mgr, StateConnected)
+	s.jid = pairedTestJID()
+
+	// One qualifying poll short of the threshold.
+	for i := 0; i < loggedOutHysteresisPolls-1; i++ {
+		b.applyStatus(s, &waxum.Status{Status: "waiting_for_qr", IsLoggedIn: false, SocketAlive: false})
+	}
+	if got := s.Snapshot().State; got == StateLoggedOut {
+		t.Fatalf("state after %d/%d qualifying polls = %v, want not yet logged_out (test setup is broken)",
+			loggedOutHysteresisPolls-1, loggedOutHysteresisPolls, got)
+	}
+
+	// A genuinely healthy poll interleaved: is_logged_in AND socket_alive
+	// both true. This must reset the streak, not just pause it.
+	b.applyStatus(s, &waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true})
+	if got := s.Snapshot().State; got != StateConnected {
+		t.Fatalf("state after the interleaved healthy poll = %v, want %v", got, StateConnected)
+	}
+
+	// Fewer than loggedOutHysteresisPolls fresh qualifying polls must NOT
+	// be enough — if the earlier near-miss streak had merely been paused
+	// instead of reset to 0, this exact count would already have reached
+	// the threshold before the healthy poll.
+	for i := 0; i < loggedOutHysteresisPolls-1; i++ {
+		b.applyStatus(s, &waxum.Status{Status: "waiting_for_qr", IsLoggedIn: false, SocketAlive: false})
+	}
+	if got := s.Snapshot().State; got == StateLoggedOut {
+		t.Fatalf("state = %v after only %d fresh qualifying polls following the reset, want NOT logged_out yet (the interleaved healthy poll should have reset the streak to 0, not merely paused it)",
+			got, loggedOutHysteresisPolls-1)
+	}
+
+	// One more qualifying poll completes a full FRESH streak and must
+	// finally commit the terminal verdict.
+	b.applyStatus(s, &waxum.Status{Status: "waiting_for_qr", IsLoggedIn: false, SocketAlive: false})
+	if got := s.Snapshot().State; got != StateLoggedOut {
+		t.Fatalf("state after a full fresh streak post-reset = %v, want %v", got, StateLoggedOut)
+	}
+}
+
+// TestTheReconnectAttemptCounterSurvivesATransientLoggedOutFlap ties the
+// applyStatus hysteresis fix back to reconnect.go's supervisor — the actual
+// harm the production incident caused, not just the state-machine mapping
+// in isolation. reconnect.go's scan loop deletes its attempts/nextAttempt
+// bookkeeping for a session the instant s.reconnectEligible() goes false
+// (the `!s.reconnectEligible()` branch, its own doc comment), and
+// StateLoggedOut is deliberately excluded from eligibility (session.go's
+// reconnectEligible) because it is terminal. Before this fix, ONE
+// qualifying poll — reproduced here exactly as observed live, then
+// "un-flapped" 15s later per loggedOutHysteresisPolls's doc comment's
+// transition log — would have flipped the session to StateLoggedOut long
+// enough for the supervisor's very next scan tick to see !reconnectEligible
+// and wipe its attempt count, so the NEXT eligible tick started counting
+// over at 1: the "1, 2, 1, 2, 1, 2, 3…" symptom observed live instead of a
+// number climbing toward reconnectDefaultStallThreshold. With the fix, the
+// flap never leaves StateDisconnected, so reconnectEligible never goes
+// false and the count is never wiped.
+func TestTheReconnectAttemptCounterSurvivesATransientLoggedOutFlap(t *testing.T) {
+	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	// A high stall threshold: this test only needs a handful of attempts
+	// to fire, and must not have the supervisor give up and stall mid-test.
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfigWithStallThreshold(10))
+
+	s := testSession(mgr, StateDisconnected)
+	s.jid = pairedTestJID()
+	s.active = true
+	registerSession(mgr, s)
+
+	waitForConditionWithin(t, 3*time.Second, "the supervisor fires at least 2 automatic reconnect attempts",
+		func() bool { return fake.connectCalls.Load() >= 2 })
+
+	// Inject the exact production flap. b is a standalone waxumBackend used
+	// only to drive applyStatus directly against s — applyStatus never
+	// touches mgr.backend (fake, wired above for the supervisor's own
+	// Connect calls), only its own sessionState(s.ID) bookkeeping and s
+	// itself, so this is safe to call against a session whose Manager was
+	// built with a different Backend.
+	b := &waxumBackend{}
+	b.applyStatus(s, &waxum.Status{Status: "waiting_for_qr", IsLoggedIn: false, SocketAlive: false}) // one qualifying poll
+	if got := s.Snapshot().State; got != StateDisconnected {
+		t.Fatalf("state right after the single qualifying poll = %v, want %v (must not go terminal on one poll)", got, StateDisconnected)
+	}
+	b.applyStatus(s, &waxum.Status{Status: "disconnected", IsLoggedIn: false, SocketAlive: false}) // "un-flap", 15s later in the real log
+	if got := s.Snapshot().State; got != StateDisconnected {
+		t.Fatalf("state after the un-flap = %v, want %v", got, StateDisconnected)
+	}
+
+	waitForConditionWithin(t, 3*time.Second, "the supervisor fires at least one more attempt after the flap",
+		func() bool { return fake.connectCalls.Load() >= 3 })
+
+	// The actual bookkeeping claim: the attempt counter reconnect.go prints
+	// into each ring note (its "attempt %d/%d" reason string) must never
+	// have reset to 1 after the flap.
+	var oneCount int
+	for _, note := range ringNotes(s) {
+		if strings.Contains(note, "attempt 1/") {
+			oneCount++
+		}
+	}
+	if oneCount != 1 {
+		t.Fatalf("ring contains %d \"attempt 1/...\" auto-reconnect notes, want exactly 1 (a reset after the flap would add a second one); notes = %v",
+			oneCount, ringNotes(s))
+	}
+}
+
+// TestStatusPumpRecordsAndBacksOffOnRepeatedPollFailures covers the second
+// half of statusPump's Defect B fix: Status() failures are no longer
+// silently dropped (each is logged AND rung — see setState's doc comment
+// for why both), and repeated failures back the poll interval off instead
+// of hammering an unreachable waxum at a fixed fast cadence forever
+// ("resilient... rather than silently spinning"). The fake server here
+// answers /status with 503 for its first two calls (WithRetryPolicy(1, ...)
+// below makes each of THOSE count as exactly one failed statusPump poll,
+// not itself retried away) then 200 forever, so this proves both the ring
+// records the failures AND the pump keeps going and eventually recovers.
+func TestStatusPumpRecordsAndBacksOffOnRepeatedPollFailures(t *testing.T) {
+	var statusCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/status") {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		n := statusCalls.Add(1)
+		if n <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true})
+	}))
+	t.Cleanup(srv.Close)
+	client := waxum.New(srv.URL, "test-token", time.Second,
+		waxum.WithClientRateLimit(1e6, 1e6),
+		waxum.WithRetryPolicy(1, func(int, string) time.Duration { return time.Millisecond }))
+
+	b := &waxumBackend{client: client, pollInterval: time.Millisecond}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StateNew)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	b.ensureStatusPump(ctx, s)
+
+	waitForCondition(t, "the session eventually recovers to StateConnected despite the first two poll failures",
+		func() bool { return s.Snapshot().State == StateConnected })
+
+	assertRingContains(t, s, "status poll failed")
 }

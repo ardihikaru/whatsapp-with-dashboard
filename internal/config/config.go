@@ -80,8 +80,21 @@ const (
 	// a full rollback BEFORE a device has paired through waxum.
 	DefaultWABackend = "waxum"
 
-	DefaultWaxumTimeout        = 30 * time.Second
-	DefaultWaxumQRPollInterval = 2 * time.Second
+	DefaultWaxumTimeout = 30 * time.Second
+	// DefaultWaxumQRPollInterval was 2s until the 429-storm incident
+	// documented in CLAUDE.md's waxum rate-limit hazard note: waxum's
+	// tower_governor default only allows a burst of ~3 requests per peer
+	// IP, and this pump alone issues up to 2 requests per tick (see
+	// backend_waxum.go's pairPump, point 7, which now skips GET /qr most
+	// ticks — the OTHER half of the fix). 3s is a deliberate, modest
+	// slowdown, not a rewrite of the pairing UX: a QR code is on-screen for
+	// tens of seconds and an operator will not notice the difference
+	// between a 2s and 3s refresh, but it cuts this pump's own worst-case
+	// request rate by a third on top of point 7's reduction. Raising
+	// waxum's own RATE_LIMIT_BURST (docker-compose.yml) is the primary
+	// fix; this and point 7 are defense-in-depth for anything still
+	// running against an unpatched waxum's tight defaults.
+	DefaultWaxumQRPollInterval = 3 * time.Second
 	DefaultWaxumPollInterval   = 15 * time.Second
 	DefaultWaxumPairTimeout    = 180 * time.Second
 )

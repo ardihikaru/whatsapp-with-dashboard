@@ -3,6 +3,7 @@ package wsm_test
 import (
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -252,5 +253,46 @@ func TestWaxumImageTagIsPinned(t *testing.T) {
 	if tag == "" || tag == "latest" || strings.Contains(tag, "${WAXUM_TAG:-latest}") {
 		t.Errorf("waxum image tag = %q, want a pinned version — never `latest`, "+
 			"an unpinned tag is an unreviewed upgrade on every pull", tag)
+	}
+}
+
+// RATE_LIMIT_PER_SECOND is NOT a requests-per-second rate, despite the name:
+// waxum's tower_governor middleware treats GovernorConfigBuilder.per_second()
+// as the REPLENISH INTERVAL, in seconds, for a single token — waxum's own
+// library default of 20 means one token every 20 seconds. That makes a
+// BIGGER number here TIGHTER, not looser. "Raising" it toward, say, 50 (as a
+// naive reading of the name suggests) would make waxum throttle 2.5x more
+// aggressively than doing nothing at all, and reintroduce the pairing-poller
+// 429s documented in CLAUDE.md's waxum rate-limit hazard note. The generous
+// setting keeps this interval small (near 1, i.e. ~1 token/sec) and gets its
+// headroom from RATE_LIMIT_BURST instead.
+func TestWaxumRateLimitIntervalIsSmallBecauseItIsAnIntervalNotARate(t *testing.T) {
+	services := composeServices(t, composeSource(t, baseCompose))
+	block, ok := services["waxum"]
+	if !ok {
+		t.Fatal(`no "waxum" service found in ` + baseCompose)
+	}
+
+	perSecond := regexp.MustCompile(`RATE_LIMIT_PER_SECOND:\s*["']?(\d+)`).FindStringSubmatch(block)
+	if perSecond == nil {
+		t.Fatalf("%s waxum service has no RATE_LIMIT_PER_SECOND line", baseCompose)
+	}
+	if n, err := strconv.Atoi(perSecond[1]); err != nil || n > 2 {
+		t.Errorf("waxum RATE_LIMIT_PER_SECOND = %q, want <= 2 — this is tower_governor's "+
+			"per_second(), the REPLENISH INTERVAL IN SECONDS for one token, not a "+
+			"requests-per-second rate. waxum's own default of 20 means one token every 20 "+
+			"seconds, so a BIGGER value here throttles HARDER, not softer. Do not raise this "+
+			"toward 50 to be \"generous\" — that is 2.5x tighter than doing nothing; tune "+
+			"generosity through RATE_LIMIT_BURST instead", perSecond[1])
+	}
+
+	burst := regexp.MustCompile(`RATE_LIMIT_BURST:\s*["']?(\d+)`).FindStringSubmatch(block)
+	if burst == nil {
+		t.Fatalf("%s waxum service has no RATE_LIMIT_BURST line", baseCompose)
+	}
+	if n, err := strconv.Atoi(burst[1]); err != nil || n < 100 {
+		t.Errorf("waxum RATE_LIMIT_BURST = %q, want >= 100 — waxum is reachable only on the "+
+			"compose network and only WSM talks to it, so there is no reason to keep its "+
+			"public-internet-facing default burst of ~3", burst[1])
 	}
 }

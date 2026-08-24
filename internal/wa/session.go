@@ -2,6 +2,7 @@ package wa
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -55,6 +56,46 @@ type ManagedSession struct {
 	pairing *PairingState // non-nil once pairing starts; replaced on restart
 	sendQ   chan sendJob  // non-nil only while the sender runs
 	events  *Ring         // never nil
+
+	// active mirrors wa_sessions.active (operator/pairing-success INTENT
+	// that this session stay connected) in memory, alongside the repo write
+	// every site below already makes — Snapshot/state alone cannot answer
+	// "does the operator want this reconnected", because a session can be
+	// legitimately StateDisconnected either because it was deliberately
+	// deactivated (Deactivate) or because the socket dropped out from under
+	// an otherwise-desired-active session (the production bug reconnect.go
+	// fixes). Set true by Activate and by a successful pairing
+	// (onPaired/finishPairingSuccess — both persist active=1 via
+	// SetPaired/SetActive already; this just keeps the in-memory copy in
+	// sync so reconnectEligible below needs no repo round trip on its hot,
+	// no-I/O path). Set false by Deactivate, markDeviceGone and
+	// permanentDown, each of which already persists active=0.
+	active bool
+
+	// stalled/stalledReason mark "needs operator attention" — the
+	// reconnect supervisor (reconnect.go) has called Backend.Connect
+	// ReconnectStallThreshold times in a row without the session ever
+	// reaching StateConnected. This is NOT a new State: state stays
+	// whatever it already was (StateDisconnected in every case the
+	// supervisor produces today — see reconnectEligible), because
+	// "stalled" answers a different question than the state machine does.
+	// StateLoggedOut already means "terminal, re-pair required"; a stalled
+	// session has NOT been told by the backend that it's logged out — it
+	// is credentialed and, as far as WSM can tell, should reconnect on its
+	// own, but repeated attempts have not brought the socket up (the
+	// documented waxum-side limitation in reconnect.go's package doc
+	// comment). Recasting that as StateLoggedOut would send an operator to
+	// re-pair a device that may not need it at all, and would wrongly make
+	// reconnectEligible (which excludes StateLoggedOut on purpose) stop
+	// seeing it forever, even after a fix on waxum's side. A plain second
+	// bool alongside `active` (both cheap, no-I/O, s.mu-guarded reads) is
+	// the smallest change that lets the state machine stay exactly as
+	// documented while still giving handlers something to render — see
+	// Snapshot.Stalled/StalledReason below and markStalled/isStalled in
+	// reconnect.go. Cleared only by a manual Activate (see Activate below)
+	// — the operator must always be able to try again.
+	stalled       bool
+	stalledReason string
 }
 
 // Snapshot is the value-copy DTO handed to HTTP handlers — no locks or
@@ -68,6 +109,14 @@ type Snapshot struct {
 	CreatedAt       time.Time
 	LastSelectedAt  *time.Time
 	LastEvents      []Event
+
+	// Stalled/StalledReason mirror ManagedSession.stalled/stalledReason —
+	// see that field's doc comment for why this is a flag alongside State
+	// rather than a new State value. StalledReason is worded for an
+	// operator to act on directly (see markStalled, reconnect.go), not a
+	// Go error string.
+	Stalled       bool
+	StalledReason string
 }
 
 // Snapshot copies the live status. Connected asks the backend's Live (a
@@ -82,6 +131,8 @@ func (s *ManagedSession) Snapshot() Snapshot {
 		LastSelectedAt: cloneTime(s.LastSelectedAt),
 		State:          s.state,
 		QueueLen:       len(s.sendQ),
+		Stalled:        s.stalled,
+		StalledReason:  s.stalledReason,
 	}
 	if !s.jid.IsEmpty() {
 		snap.JID = s.jid.String()
@@ -104,14 +155,27 @@ func cloneTime(t *time.Time) *time.Time {
 
 // setState commits a transition and persists last_status. Callers hold NO
 // locks. Persistence uses persistCtx so it still lands during teardown.
+//
+// Every transition is logged (slog) AND rung (s.ring) — this package's own
+// production incident (reconnect.go's doc comment) was invisible from WSM's
+// logs alone: waxum kept a session alive and authenticated for ten more
+// minutes after WSM's last "disconnected" write, and nothing here recorded
+// that the transition ever happened, let alone why. slog gives operational
+// (container-log) visibility; the ring buffer is this package's own
+// assertable per-session event log that ALSO reaches the operator directly
+// (Snapshot.LastEvents, rendered on the sessions page) without them having
+// to read container logs at all.
 func (s *ManagedSession) setState(st State) {
 	s.mu.Lock()
-	if s.state == st {
+	old := s.state
+	if old == st {
 		s.mu.Unlock()
 		return
 	}
 	s.state = st
 	s.mu.Unlock()
+	slog.Info("wa: state transition", "session", s.ID, "from", old, "to", st)
+	s.ring(fmt.Sprintf("state: %s -> %s", old, st))
 	if err := s.mgr.repo.UpdateStatus(s.mgr.persistCtx, s.ID, string(st)); err != nil {
 		slog.Warn("persist status", "session", s.ID, "state", st, "err", err)
 	}
@@ -135,6 +199,16 @@ func (s *ManagedSession) ensureCtxLocked() context.Context {
 // work (attach/reuse a client, dial) is Backend.Connect; this is the
 // transport-agnostic policy around it: the state-machine guard and the
 // active=1 persist stay here so a second backend gets them for free.
+//
+// A successful call ALSO clears stalled/stalledReason (see the field's doc
+// comment on ManagedSession and reconnect.go's markStalled): this is the
+// one path both the operator's UI/API "Activate" button and a manually
+// retried automatic reconnect go through, so it is the natural place for
+// "the operator asked to try again" to reset the supervisor's patience,
+// regardless of whether THIS particular call actually revives the socket —
+// see TestAManualActivateClearsTheStalledStateAndResumesRetrying
+// (reconnect_test.go). Idempotent/harmless for a session that was never
+// stalled.
 func (s *ManagedSession) Activate(ctx context.Context) error {
 	s.mu.Lock()
 	if s.state == StateConnected || s.state == StatePairing {
@@ -150,7 +224,16 @@ func (s *ManagedSession) Activate(ctx context.Context) error {
 	if err := s.mgr.backend.Connect(ctx, s); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	s.active = true
+	wasStalled := s.stalled
+	s.stalled = false
+	s.stalledReason = ""
+	s.mu.Unlock()
 	_ = s.mgr.repo.SetActive(s.mgr.persistCtx, s.ID, true)
+	if wasStalled {
+		s.ring("manual activate cleared the stalled flag; automatic reconnect attempts resume")
+	}
 	return nil
 }
 
@@ -166,6 +249,7 @@ func (s *ManagedSession) Deactivate(ctx context.Context) error {
 	}
 	s.stopSenderLocked() // close(sendQ): worker drains, fails leftovers, exits
 	s.state = StateDisconnected
+	s.active = false // operator intent: stop reconnecting — see reconnect.go's eligibility check
 	s.mu.Unlock()
 
 	_ = s.mgr.backend.Disconnect(ctx, s)
@@ -179,6 +263,52 @@ func (s *ManagedSession) Deactivate(ctx context.Context) error {
 // backend when its Connect finds no device for a paired jid.
 func (s *ManagedSession) markDeviceGone() {
 	s.setState(StateLoggedOut)
+	s.mu.Lock()
+	s.active = false // terminal: re-pair required, never auto-reconnected — see reconnect.go
+	s.mu.Unlock()
 	_ = s.mgr.repo.SetActive(s.mgr.persistCtx, s.ID, false)
 	s.ring("device record missing — re-pair required")
+}
+
+// reconnectEligible reports whether the reconnect supervisor (reconnect.go)
+// should treat s as a candidate this scan tick: the operator (or a
+// successful pairing) still wants it connected (active), it has
+// credentials (jid non-empty — paired), and the backend currently reports
+// it down in a way that is NOT terminal. StateDisconnected only —
+// deliberately excluding StateLoggedOut (needs a re-pair, not a reconnect;
+// see mapWaxumStatus's doc comment in backend_waxum.go for how that state
+// is now inferred), StateNew/StatePairing (no credential yet, or already
+// mid-handshake) and StateConnected (nothing to do). No I/O; cheap enough
+// to call every scan tick for every session.
+func (s *ManagedSession) reconnectEligible() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.active && !s.jid.IsEmpty() && s.state == StateDisconnected
+}
+
+// isStalled reports whether reconnect.go's supervisor has already given up
+// automatically retrying s (see the stalled field's doc comment). Checked
+// by the supervisor's scan loop as a SEPARATE gate from reconnectEligible,
+// not folded into it — reconnectEligible answers "does the state machine
+// say a reconnect makes sense", which stays true for a stalled session (see
+// TestStalledIsNotConfusedWithLoggedOut); this answers "has the supervisor
+// already decided retrying is futile for now".
+func (s *ManagedSession) isStalled() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stalled
+}
+
+// markStalled records that the supervisor is giving up automatic retries
+// for s until a manual Activate (see that method's doc comment) resets it.
+// reason must be worded for an operator to act on (see reconnect.go's call
+// site) — this is the ONLY place that text is composed, so a vague reason
+// here is a vague reason everywhere it is rendered.
+func (s *ManagedSession) markStalled(reason string) {
+	s.mu.Lock()
+	s.stalled = true
+	s.stalledReason = reason
+	s.mu.Unlock()
+	slog.Warn("wa: reconnect stalled — needs operator attention", "session", s.ID, "reason", reason)
+	s.ringLevel("warn", "stalled: "+reason)
 }

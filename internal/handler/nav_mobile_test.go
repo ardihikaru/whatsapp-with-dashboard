@@ -17,6 +17,7 @@ var pagesWithChrome = []string{
 	"/send",
 	"/logs",
 	"/admin/api-clients",
+	"/system-log",
 }
 
 // The drawer is three cooperating pieces: an <aside> the button can name, the
@@ -71,7 +72,7 @@ func TestDrawerCarriesEverySidebarDestination(t *testing.T) {
 	sidebar := sidebarHTML(t, body)
 
 	for _, want := range []string{
-		"Dashboard", "Sessions", "Send Message", "Message Log", "API Clients", "API Docs",
+		"Dashboard", "Sessions", "Send Message", "Message Log", "API Clients", "System Log", "API Docs",
 	} {
 		if !strings.Contains(sidebar, want) {
 			t.Errorf("sidebar is missing the %q destination", want)

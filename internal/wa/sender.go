@@ -2,6 +2,7 @@ package wa
 
 import (
 	"context"
+	"strconv"
 	"time"
 )
 
@@ -152,6 +153,13 @@ func (s *ManagedSession) finishJob(job sendJob, res SendResult) {
 	}
 	if res.Err != nil {
 		_ = s.mgr.msgs.MarkFailed(ctx, job.msgID, res.Err.Error(), res.Attempts)
+		// wa_messages (msgs.MarkFailed above) is the durable audit log for
+		// this send specifically — see message.Repository. This ring entry
+		// is the separate, high-frequency diagnostic trail (system log
+		// page, ring.go) an operator scans for "what's been going wrong
+		// lately" without a per-message query; see
+		// TestASendFailureIsRecordedInBothEventRings.
+		s.ringLevel("warn", "send failed after "+strconv.Itoa(res.Attempts)+" attempt(s): "+res.Err.Error())
 	} else {
 		_ = s.mgr.msgs.MarkSent(ctx, job.msgID, res.WAMessageID, res.Attempts)
 	}

@@ -65,6 +65,16 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/logs/list.html", "templates/partials/log_rows.html"),
 		root:  "base",
 	},
+	"system_log": {
+		// No rows partial in this fileset — like "sessions" above (and
+		// unlike "logs", which embeds its first page of rows inline), the
+		// tbody is empty on first render and fills itself via hx-get
+		// (system_log/list.html's hx-trigger="load, every 5s"); the rows
+		// partial lives only in partialFiles below, same as
+		// partials/session_rows.html.
+		files: append(chrome(), "templates/system_log/list.html"),
+		root:  "base",
+	},
 }
 
 // chrome is the shared base-layout file set every full page needs.
@@ -85,6 +95,7 @@ var partialFiles = []string{
 	"templates/partials/pairing_status.html",
 	"templates/partials/send_result.html",
 	"templates/partials/log_rows.html",
+	"templates/partials/system_log_rows.html",
 }
 
 // Renderer holds the parsed template sets.
