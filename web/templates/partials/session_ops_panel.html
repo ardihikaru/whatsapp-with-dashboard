@@ -1,0 +1,69 @@
+{{define "session_ops_panel"}}
+{{if .Unsupported}}
+<p>Session operations (pause/resume, auto-reconnect, history sync, appstate resync) are
+   <strong>not supported by this backend</strong>. They require <span class="mono">WSM_WA_BACKEND=waxum</span>.</p>
+{{else}}
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{else}}
+  <div class="ops-row">
+    <div class="ops-row-label">
+      <strong>Connection</strong>
+      <p class="muted">{{if .Paused}}Paused — this session will not send or receive until resumed.{{else}}Running normally.{{end}}</p>
+    </div>
+    <div class="ops-row-actions">
+      {{if .Paused}}
+      <button class="btn btn-primary" hx-post="{{u "/sessions"}}/{{.SessionID}}/ops/resume"
+              hx-target="#ops-panel" hx-swap="innerHTML">Resume</button>
+      {{else}}
+      <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.SessionID}}/ops/pause"
+              hx-target="#ops-panel" hx-swap="innerHTML">Pause</button>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="ops-row">
+    <div class="ops-row-label">
+      <strong>Auto-reconnect</strong>
+      <p class="muted">{{if .AutoReconnectEnabled}}Enabled — error count: {{.AutoReconnectErrorCount}}{{else}}Disabled{{end}}</p>
+    </div>
+    <div class="ops-row-actions">
+      {{if .AutoReconnectEnabled}}
+      <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.SessionID}}/ops/auto-reconnect/disable"
+              hx-target="#ops-panel" hx-swap="innerHTML">Disable</button>
+      {{else}}
+      <button class="btn btn-primary" hx-post="{{u "/sessions"}}/{{.SessionID}}/ops/auto-reconnect/enable"
+              hx-target="#ops-panel" hx-swap="innerHTML">Enable</button>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="ops-row">
+    <div class="ops-row-label">
+      <strong>History sync on reconnect</strong>
+      <p class="muted">{{if .HistorySyncSkip}}Skipped — a reconnect will NOT replay message history.{{else}}Syncing — a reconnect replays history.{{end}}</p>
+    </div>
+    <div class="ops-row-actions">
+      {{if .HistorySyncSkip}}
+      <button class="btn btn-primary" hx-post="{{u "/sessions"}}/{{.SessionID}}/ops/history-sync/enable"
+              hx-target="#ops-panel" hx-swap="innerHTML"
+              hx-confirm="Turning history sync ON can pull a VERY LARGE backlog on a long-dormant session. Continue?">Enable</button>
+      {{else}}
+      <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.SessionID}}/ops/history-sync/disable"
+              hx-target="#ops-panel" hx-swap="innerHTML">Disable</button>
+      {{end}}
+    </div>
+  </div>
+
+  <div class="ops-row">
+    <div class="ops-row-label">
+      <strong>App-state resync</strong>
+      <p class="muted">Forces a full resync of app-state collections (contacts, mute list, pins, …). Destructive-ish and requires an active connection.</p>
+    </div>
+    <div class="ops-row-actions">
+      <button class="btn btn-outline btn-danger" hx-post="{{u "/sessions"}}/{{.SessionID}}/ops/appstate-resync"
+              hx-target="#ops-panel" hx-swap="innerHTML"
+              hx-confirm="Resync all app-state collections now? This requires a live connection and can take a while.">Resync</button>
+    </div>
+  </div>
+  {{end}}
+{{end}}
+{{end}}

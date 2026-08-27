@@ -1,0 +1,24 @@
+{{define "call_rows"}}
+{{if .Error}}<tr><td colspan="6"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{range .Calls}}
+<tr>
+  <td>{{.SessionName}}</td>
+  <td class="mono">{{.ToPhone}}</td>
+  <td>{{.Kind}}</td>
+  <td><span class="badge badge-{{.Status}}">{{.Status}}</span>
+      {{if .Error}}<br><small class="muted" title="{{.Error}}">{{.Error}}</small>{{end}}</td>
+  <td class="mono">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+  <td class="row-actions">
+    {{if and (eq .Status "placed") .CallID}}
+    <button class="btn btn-outline btn-danger"
+            hx-post="{{u "/calls"}}/{{.SessionID}}/terminate"
+            hx-vals='{"call_id":"{{.CallID}}","peer":"{{.ToPhone}}"}'
+            hx-target="#call-rows" hx-swap="innerHTML"
+            hx-confirm="Terminate this call?">Terminate</button>
+    {{end}}
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="6">No calls placed yet.</td></tr>
+{{end}}
+{{end}}

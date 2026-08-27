@@ -1,0 +1,10 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Session Operations — {{.Session.Name}} <span class="mono">(+{{.Session.Phone}})</span></h4>
+  <a class="btn btn-outline" href="{{u "/sessions"}}">Back to sessions</a>
+</div>
+<div class="card" id="ops-panel" hx-get="{{u "/sessions"}}/{{.Session.ID}}/ops/panel"
+     hx-trigger="load, every 5s" hx-swap="innerHTML">
+  <p>Loading…</p>
+</div>
+{{end}}

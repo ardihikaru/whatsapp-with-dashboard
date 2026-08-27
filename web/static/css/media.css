@@ -1,0 +1,119 @@
+/* Phase 7 — media attachments, voice calls, session operations and webhook
+   admin. TENTH stylesheet, loaded after responsive.css in both base.html
+   and login.html (see base.html's load-order comment) so it can override
+   by cascade without touching the eight files that must stay byte-for-byte
+   identical to the old minimal.css. Tokens only — every colour below is a
+   :root variable already declared in base.css, with a [data-theme="dark"]
+   counterpart wherever the light value is not already theme-neutral. */
+
+/* ---------- CSS-only tabs (radio + label, no JS) --------------------------
+   Used by send.html (Text/Media) and calls.html (TTS/Play). The two radio
+   inputs are hidden and act as the tab state; sibling combinators show the
+   matching panel and highlight the matching label. Works with JS disabled,
+   which is why it is radio+label rather than an htmx/JS-driven show/hide —
+   see CLAUDE.md's "no-JS path stays the default" rule. */
+.send-tab-input { position: absolute; opacity: 0; pointer-events: none; }
+
+.send-tab-list { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid rgba(145, 158, 171, 0.2); }
+
+.send-tab-label {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+
+.send-tab-label:hover { color: var(--text-primary); }
+
+.send-tab-panel { display: none; }
+
+#send-tab-text:checked ~ .send-tab-list label[for="send-tab-text"],
+#send-tab-media:checked ~ .send-tab-list label[for="send-tab-media"],
+#call-tab-tts:checked ~ .send-tab-list label[for="call-tab-tts"],
+#call-tab-play:checked ~ .send-tab-list label[for="call-tab-play"] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+#send-tab-text:checked ~ [data-send-panel="text"],
+#send-tab-media:checked ~ [data-send-panel="media"],
+#call-tab-tts:checked ~ [data-send-panel="tts"],
+#call-tab-play:checked ~ [data-send-panel="play"] {
+  display: block;
+}
+
+/* ---------- media upload (send.html's Media tab) --------------------------- */
+.media-dropzone { margin-bottom: 20px; }
+
+.media-file-chip {
+  display: inline-block;
+  margin: 4px 0 0;
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  background: rgba(145, 158, 171, 0.12);
+}
+
+.media-size-error { margin: 8px 0 0; }
+
+.media-progress {
+  margin-top: 10px;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(145, 158, 171, 0.2);
+  overflow: hidden;
+}
+
+.media-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--primary);
+  transition: width 120ms ease;
+}
+
+/* Plain checkbox field — send.html's "voice note" toggle. Distinct from
+   .textfield (which is built around input[type=text|tel|...]/select). */
+.checkfield {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.checkfield input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); }
+
+/* ---------- call status pills (calls.html / call_rows.html) --------------- */
+.badge-placing    { color: var(--warning-dark); background: rgba(255, 171, 0, 0.16); }
+.badge-placed     { color: var(--success-dark); background: rgba(34, 197, 94, 0.16); }
+.badge-terminated { color: var(--grey-600);     background: rgba(145, 158, 171, 0.16); }
+
+[data-theme="dark"] .badge-placing    { color: var(--warning-light); }
+[data-theme="dark"] .badge-placed     { color: var(--success-light); }
+[data-theme="dark"] .badge-terminated { color: var(--grey-400); }
+
+/* ---------- session operations panel (session_ops_panel.html) ------------- */
+.ops-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 0;
+  border-bottom: 1px dashed rgba(145, 158, 171, 0.2);
+}
+
+.ops-row:last-child { border-bottom: none; padding-bottom: 0; }
+
+.ops-row-label p { margin: 4px 0 0; }
+
+.ops-row-actions { flex-shrink: 0; }
+
+/* ---------- webhook / DLQ tables (sessions/webhooks.html) ------------------ */
+.webhook-rows .badge + .badge { margin-left: 4px; }

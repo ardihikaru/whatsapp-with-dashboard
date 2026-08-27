@@ -5,40 +5,121 @@
 <div class="card form-card">
   <div id="send-result"></div>
   {{if .Connected}}
-  <form hx-post="{{u "/send"}}" hx-target="#send-result" hx-swap="innerHTML"
-        hx-sync="this:drop" hx-disabled-elt="find button"
-        action="{{u "/send"}}" method="post" novalidate>
-    <label class="textfield">
-      <span class="textfield-label">Routing</span>
-      <select name="routing" class="select">
-        <option value="auto" selected>Automatic routing</option>
-        <option value="explicit">Select a session</option>
-      </select>
-    </label>
-    <label class="textfield">
-      <span class="textfield-label">Session</span>
-      <select name="session_id" class="select">
-        <option value="">Automatic</option>
-        {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
-      </select>
-    </label>
-    <label class="textfield">
-      <span class="textfield-label">To (international format)</span>
-      <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
-    </label>
-    <label class="textfield">
-      <span class="textfield-label">Message</span>
-      <textarea name="text" rows="8" maxlength="4096"
-                placeholder="Plain text — line breaks, links and @mentions arrive as typed."></textarea>
-    </label>
-    <div class="form-actions">
-      <button class="btn btn-primary" type="submit">
-        <span class="btn-label">Send</span>
-        <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
-        <span class="htmx-indicator">Sending...</span>
-      </button>
+  <!-- CSS-only tabs (radio + label, no JS required) so a no-JS browser still
+       reaches both forms — see media.css's ".send-tabs" rules. -->
+  <div class="send-tabs">
+    <input type="radio" name="send-tab" id="send-tab-text" class="send-tab-input" checked>
+    <input type="radio" name="send-tab" id="send-tab-media" class="send-tab-input">
+    <div class="send-tab-list" role="tablist">
+      <label class="send-tab-label" for="send-tab-text">Text</label>
+      <label class="send-tab-label" for="send-tab-media">Media</label>
     </div>
-  </form>
+
+    <div class="send-tab-panel" data-send-panel="text">
+      <form hx-post="{{u "/send"}}" hx-target="#send-result" hx-swap="innerHTML"
+            hx-sync="this:drop" hx-disabled-elt="find button"
+            action="{{u "/send"}}" method="post" novalidate>
+        <label class="textfield">
+          <span class="textfield-label">Routing</span>
+          <select name="routing" class="select">
+            <option value="auto" selected>Automatic routing</option>
+            <option value="explicit">Select a session</option>
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Session</span>
+          <select name="session_id" class="select">
+            <option value="">Automatic</option>
+            {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">To (international format)</span>
+          <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Message</span>
+          <textarea name="text" rows="8" maxlength="4096"
+                    placeholder="Plain text — line breaks, links and @mentions arrive as typed."></textarea>
+        </label>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-label">Send</span>
+            <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+            <span class="htmx-indicator">Sending...</span>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="send-tab-panel" data-send-panel="media">
+      <!-- Both hx-encoding AND enctype are required, for different
+           consumers: htmx reads hx-encoding to send a real multipart body
+           instead of urlencoded-in-a-string, and the plain action/method
+           fallback (no JS) needs enctype. Shipping only one is the single
+           most likely bug here — see
+           TestTheMediaFormCarriesBothHxEncodingAndEnctype. -->
+      <form hx-post="{{u "/send/media"}}" hx-encoding="multipart/form-data"
+            hx-target="#send-result" hx-swap="innerHTML"
+            hx-sync="this:drop" hx-disabled-elt="find button"
+            action="{{u "/send/media"}}" method="post" enctype="multipart/form-data"
+            id="media-send-form" novalidate>
+        <label class="textfield">
+          <span class="textfield-label">Kind</span>
+          <select name="kind" class="select" required>
+            <option value="image">Image</option>
+            <option value="video">Video</option>
+            <option value="audio">Audio</option>
+            <option value="document">Document</option>
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Routing</span>
+          <select name="routing" class="select">
+            <option value="auto" selected>Automatic routing</option>
+            <option value="explicit">Select a session</option>
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Session</span>
+          <select name="session_id" class="select">
+            <option value="">Automatic</option>
+            {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">To (international format)</span>
+          <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
+        </label>
+        <div class="media-dropzone" data-media-dropzone data-max-bytes="{{.MediaMaxBytes}}">
+          <label class="textfield">
+            <span class="textfield-label">File</span>
+            <input type="file" name="file" id="media-file-input" required>
+          </label>
+          <p class="media-file-chip" id="media-file-chip" hidden></p>
+          <div class="alert alert-error media-size-error" id="media-size-error" hidden></div>
+          <div class="media-progress" id="media-progress" hidden>
+            <div class="media-progress-bar" id="media-progress-bar"></div>
+          </div>
+        </div>
+        <label class="textfield">
+          <span class="textfield-label">Caption (image, video, document)</span>
+          <textarea name="caption" rows="3" maxlength="1024"></textarea>
+        </label>
+        <label class="checkfield">
+          <input type="checkbox" name="ptt" value="true">
+          <span>Send as voice note (audio only)</span>
+        </label>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-label">Send</span>
+            <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+            <span class="htmx-indicator">Sending...</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
   {{else}}
   <p>No connected sessions. <a href="{{u "/sessions"}}">Pair or activate a session</a> first. Automatic routing becomes available when at least one session is connected.</p>
   {{end}}

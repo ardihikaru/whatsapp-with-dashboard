@@ -1,0 +1,22 @@
+{{define "webhook_dlq_rows"}}
+{{if .Unsupported}}
+<tr><td colspan="6">Webhook management is not supported by this backend.</td></tr>
+{{else}}
+{{if .Error}}<tr><td colspan="6"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{range .Entries}}
+<tr>
+  <td>{{.Event}}</td>
+  <td class="mono cell-clip">{{.WebhookURL}}</td>
+  <td>{{.Attempts}}</td>
+  <td class="cell-clip" title="{{.LastError}}">{{.LastError}}</td>
+  <td class="mono">{{.FailedAt}}</td>
+  <td class="row-actions">
+    <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{$.SessionID}}/webhooks/dlq/{{.ID}}/replay"
+            hx-target="#webhook-dlq-rows" hx-swap="innerHTML">Replay</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="6">The dead-letter queue is empty.</td></tr>
+{{end}}
+{{end}}
+{{end}}

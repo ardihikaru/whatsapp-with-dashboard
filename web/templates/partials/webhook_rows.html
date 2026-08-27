@@ -1,0 +1,28 @@
+{{define "webhook_rows"}}
+{{if .Unsupported}}
+<tr><td colspan="5">Webhook management is not supported by this backend.</td></tr>
+{{else}}
+{{if .Error}}<tr><td colspan="5"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{range .Webhooks}}
+<tr>
+  <td class="mono cell-clip">{{.URL}}</td>
+  <td>{{range .Events}}<span class="badge badge-new">{{.}}</span> {{end}}</td>
+  <td><span class="badge badge-{{if .Enabled}}connected{{else}}disconnected{{end}}">{{if .Enabled}}enabled{{else}}circuit open{{end}}</span></td>
+  <!-- THE SECRET ITSELF NEVER APPEARS HERE — has_secret only, per
+       api_webhooks.go's header comment. -->
+  <td>{{if .HasSecret}}secret set{{else}}no secret{{end}}</td>
+  <td class="row-actions">
+    {{if not .Enabled}}
+    <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{$.SessionID}}/webhooks/{{.ID}}/enable"
+            hx-target="#webhook-rows" hx-swap="innerHTML">Re-enable</button>
+    {{end}}
+    <button class="btn btn-outline btn-danger" hx-post="{{u "/sessions"}}/{{$.SessionID}}/webhooks/{{.ID}}/delete"
+            hx-target="#webhook-rows" hx-swap="innerHTML"
+            hx-confirm="Delete this webhook?">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="5">No webhooks registered for this session.</td></tr>
+{{end}}
+{{end}}
+{{end}}

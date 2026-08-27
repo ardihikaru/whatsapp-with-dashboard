@@ -19,6 +19,8 @@
     {{else}}
       <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/pair">Pair</a>
     {{end}}
+    <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/ops">Ops</a>
+    <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/webhooks">Webhooks</a>
     <button class="btn btn-outline btn-danger" hx-post="{{u "/sessions"}}/{{.ID}}/delete"
             hx-target="#session-rows" hx-swap="innerHTML"
             hx-confirm="Delete session {{.Name}}? This unlinks the device from WhatsApp.">Delete</button>

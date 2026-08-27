@@ -1,8 +1,10 @@
 {{define "send_result"}}
 {{if eq .Status "sent"}}
-<div class="alert alert-success">Sent{{if .SessionName}} via {{.SessionName}}{{end}} - WhatsApp message ID <span class="mono">{{.WAMessageID}}</span></div>
+<div class="alert alert-success">Sent{{if .Kind}} {{.Kind}}{{if .Filename}} ({{.Filename}}){{end}}{{end}}{{if .SessionName}} via {{.SessionName}}{{end}} - WhatsApp message ID <span class="mono">{{.WAMessageID}}</span>
+  {{if .PresignedURL}}<br><a href="{{.PresignedURL}}" target="_blank" rel="noopener">View archived copy</a>{{end}}
+</div>
 {{else if eq .Status "queued"}}
-<div class="alert">Queued{{if .SessionName}} via {{.SessionName}}{{end}} - {{.Error}}</div>
+<div class="alert">Queued{{if .Kind}} {{.Kind}}{{if .Filename}} ({{.Filename}}){{end}}{{end}}{{if .SessionName}} via {{.SessionName}}{{end}} - {{.Error}}</div>
 {{else}}
 <div class="alert alert-error">{{.Error}}</div>
 {{end}}
