@@ -51,11 +51,50 @@ log, a test fixture, a commit or an evidence note. Read them programmatically
 (`scripts/e2e-env.sh`, `e2e/auth.setup.ts`) and let the value die with the
 process.
 
-**Production MySQL is shared and is not a test target.** `10.10.0.2:5306` is
-`master-compose-ai`, holding several other products' data. Do not create a
-schema there, do not migrate it, do not point a dev binary at `wa_dashboard`.
-For local runs use `WSM_APP_DSN=sqlite:…` (see `internal/db.OpenAppStore`);
-`make e2e` does this for you.
+**Production MySQL is shared and is not a test target.** Since 2026-08-27 it
+is `10.10.0.4:5306` — the `master-compose-ai` stack MOVED to the app host, and
+`/home/sismedika/devel/projects/infra-prod`,
+`master-compose-ai-mysqldb-master-1` and the `master-compose-ai-net` network
+are all here now. It is still SHARED, holding several other products' data, so
+everything this entry ever said still applies: do not create a schema there,
+do not migrate it outside a real deploy, do not point a dev binary at
+`wa_dashboard`. Being local makes it easier to damage, not safer. For local
+runs use `WSM_APP_DSN=sqlite:…` (see `internal/db.OpenAppStore`); `make e2e`
+does this for you.
+
+**A waxum session can wedge in `connecting` forever, and waxum's own logs
+will tell you it is fine.** Observed 2026-08-27: `GET /sessions/{id}/status`
+returned `{"status":"connecting","is_logged_in":true,"socket_alive":false}`
+unchanged for as long as it was sampled, while waxum simultaneously logged
+`Session …: Connected` and emitted a `connected` event on every reconnect
+attempt, with no error, no 429 and no logout anywhere in its output.
+`mapWaxumStatus` requires `is_logged_in && socket_alive`, so WSM correctly
+reported it disconnected — and looked wrong doing so.
+
+Two things make this expensive to debug:
+
+  - **`/status` is the oracle, not waxum's logs.** The logs describe an
+    intent to connect; `socket_alive` describes the outcome. They disagree,
+    and only one of them is what WSM reads.
+  - **WSM's own reconnect does NOT clear it.** The supervisor calls waxum's
+    `Connect`, which produces another cheerful `connected` event and leaves
+    the socket exactly as dead as before. The app will loop like that
+    indefinitely. Only restarting the waxum PROCESS cleared it
+    (`docker compose … restart waxum` — never `down -v`, the volume is the
+    paired device's identity). Recovery needed no re-pairing.
+
+**"Connected" means three different things here, and they can disagree.**
+`s.state` (statusPump's verdict), `Live()` (an atomic fed by the same poll),
+and `s.sendQ != nil` (whether a sender loop exists) are independent. Two of
+them drive every operator-facing signal — `/sessions`, `/api/v1/health`,
+`SelectConnected` — and the third drives whether a send actually works.
+Nothing reads `sendQ` except `enqueue`, so a nil queue is invisible until
+someone tries to send. That is exactly how the waxum backend shipped able to
+send only between a pairing and the next restart (fixed: `Connect` now calls
+`startSenderLocked`, see `TestAWaxumSessionCanSendAfterConnectingWithoutPairing`).
+When "everything says connected but nothing sends", check all three before
+concluding anything — and note that a wedged socket and a nil queue present
+identically.
 
 **`web/templates/login.html` duplicates `base.html`'s entire `<head>`.** Any
 stylesheet or script change has to land in **both**. Guarded by
@@ -68,13 +107,17 @@ override `layout.css`. `responsive.css` is a ninth file loaded last and
 overrides by cascade. Do not reorder, and prefer adding a later file to editing
 those eight.
 
-**The app and its MySQL no longer share a host.** The app runs on `10.10.0.4`;
-the schema stays on the shared MySQL at `10.10.0.2:5306`. So
-`docker-compose.yml`'s external `master-compose-ai-net` and its
-`WSM_MYSQL_HOST: mysqldb-master` are both wrong there, and `up` fails with
-`network declared as external, but could not be found` — which reads as "the
-shared stack is down" and is not. `docker-compose.remote-db.yml`
-(`make up REMOTE_DB=1`) undoes both. Note `!reset`, not `[]`: compose MERGES a
+**The app and its MySQL share a host again (2026-08-27), and this entry used
+to say the opposite.** The shared stack moved onto `10.10.0.4`, so
+`master-compose-ai-net` and `mysqldb-master` now DO resolve here — the failure
+this entry was written about (`network declared as external, but could not be
+found`, which reads as "the shared stack is down" and is not) no longer
+reproduces on this host. `make up REMOTE_DB=1` remains correct and is what the
+2026-08-27 deploy used: the overlay resets the network and points services at
+`WSM_MYSQL_HOST` from `.env`, which is `10.10.0.4`. NOT verified since the
+move: whether plain `make up` (no overlay) also works now. Do not assume it
+does because the network exists — check before relying on it.
+`docker-compose.remote-db.yml` (`make up REMOTE_DB=1`) undoes both. Note `!reset`, not `[]`: compose MERGES a
 service's networks, so anything weaker leaves `infra` attached and the lookup
 still runs. Every container target goes through `$(COMPOSE)` so the mode cannot
 be applied to `up` and forgotten on `logs`; `compose_remote_db_test.go` holds
@@ -164,14 +207,16 @@ die with the process.
 `db-bootstrap`, `db-verify`, `db-drop`, `db-bootstrap-waxum`, and
 `db-verify-waxum` dial `mysql --protocol=TCP` at
 `WSM_MYSQL_HOST:WSM_MYSQL_PORT` — the same address the app itself uses — and
-never `docker exec` into a MySQL container. This follows directly from the
-"app and its MySQL no longer share a host" entry above: the app runs on
-`10.10.0.4`, MySQL's container lives on `10.10.0.2`, so `docker exec -i
-master-compose-ai-mysqldb-master-1 …` from the app host has no container to
-find. "Fixing" it back to `docker exec` breaks it on every host except the
-database server itself, and the failure reads as a docker-permissions problem
-(no access to `/var/run/docker.sock`, or "No such container" once that's
-fixed) rather than the topology problem it actually is.
+never `docker exec` into a MySQL container. The original reason was topological — MySQL's container lived on a
+different host, so `docker exec -i master-compose-ai-mysqldb-master-1 …` had
+no container to find. Since the 2026-08-27 move that container IS on this
+host, so `docker exec` would now appear to work. Keep TCP anyway: the recipes
+must keep working from any host, they read `WSM_MYSQL_HOST`/`_PORT` from
+`.env` like the app itself does, and a `docker exec` form silently couples
+them to one machine's container names. A future move back would break it, and
+the failure would read as a docker-permissions problem (no access to
+`/var/run/docker.sock`, or "No such container") rather than the topology
+problem it actually is.
 
 **waxum rate-limits per peer IP with a very small default burst, and a 429 is
 invisible in its own logs.** waxum's tower_governor middleware defaults to a
