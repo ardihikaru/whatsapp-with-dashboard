@@ -38,10 +38,14 @@ const mediaFormMaxMemory = 1 << 20 // 1 MiB
 // two kinds http.DetectContentType covers cleanly. audio and document have
 // their own checks in sniffAndValidate — see that function's doc comment
 // for the audio detail, and for a place this file's original spec did not
-// match what was actually observed on this Go toolchain.
+// match what was actually observed on this Go toolchain. video/webm is here
+// because http.DetectContentType matches WebM's EBML magic
+// (\x1A\x45\xDF\xA3) unconditionally — unlike MP4, there is no brand
+// scanning to fail — verified directly against this repo's Go toolchain
+// (go1.26.7's sniff.go, exactSig on that magic).
 var mediaAllowedContentTypes = map[wa.MediaKind]map[string]bool{
 	wa.MediaImage: {"image/jpeg": true, "image/png": true, "image/webp": true},
-	wa.MediaVideo: {"video/mp4": true},
+	wa.MediaVideo: {"video/mp4": true, "video/webm": true},
 }
 
 // parseMediaKind validates the "kind" form field against the four values
@@ -77,6 +81,20 @@ func has3GPPBrand(data []byte) bool {
 	}
 	brand := string(data[8:12])
 	return strings.HasPrefix(brand, "3gp") || strings.HasPrefix(brand, "3g2")
+}
+
+// isQuickTimeBrand reports whether an ftyp box's major brand (bytes 8:12) is
+// QuickTime's own "qt  " (note the trailing spaces — it is padded to 4
+// bytes, not a typo). http.DetectContentType's mp4Sig never recognizes this
+// brand as "mp4" (see the stdlib's sniff.go: it only matches a
+// compatible-brand slot that ITSELF starts with "mp4"), so an iPhone .mov
+// sniffs as application/octet-stream and used to be rejected outright —
+// measured directly against this repo's Go toolchain.
+func isQuickTimeBrand(data []byte) bool {
+	if !hasFtypBox(data) || len(data) < 12 {
+		return false
+	}
+	return string(data[8:12]) == "qt  "
 }
 
 // sniffAndValidate confirms the UPLOADED BYTES — never the multipart part's
@@ -116,6 +134,32 @@ func sniffAndValidate(kind wa.MediaKind, data []byte) (contentType string, ok bo
 		}
 		if has3GPPBrand(head) {
 			return "video/3gpp", true
+		}
+		// Any other ISO-BMFF ftyp container is accepted, mirroring what
+		// audio already does for the same container family (hasFtypBox
+		// above, and this function's doc comment on why audio bypasses
+		// mediaAllowedContentTypes entirely). Without this, http.DetectContentType's
+		// mp4Sig rejects any real MP4 whose compatible-brand list never
+		// contains a brand literally starting with "mp4" — measured
+		// directly: isom+[isom iso2 avc1] (no explicit mp4 brand) and
+		// isom+[isom iso2 hvc1] (HEVC) both sniff as
+		// application/octet-stream today, despite being ordinary MP4 video
+		// that audio's own ftyp fallback would already accept as audio/mp4.
+		if hasFtypBox(head) {
+			// QuickTime's own "qt  " brand is labelled honestly as
+			// video/quicktime rather than silently as video/mp4: a .mov is
+			// a different (superset) container from MP4 and WhatsApp's
+			// documented video mimetypes are video/mp4 and video/3gpp only,
+			// not video/quicktime. Mislabelling it "video/mp4" would let it
+			// past this check only to fail somewhere downstream (waxum or
+			// WhatsApp itself) with a confusing error that doesn't mention
+			// the real container. Labelling it accurately means a rejection,
+			// if there is one, happens with an honest mimetype in the
+			// message instead.
+			if isQuickTimeBrand(head) {
+				return "video/quicktime", true
+			}
+			return "video/mp4", true
 		}
 		return sniffed, false
 	case wa.MediaAudio:
@@ -222,6 +266,10 @@ func (h *handlers) parseMediaSendRequest(w http.ResponseWriter, r *http.Request)
 	}
 	if err != nil {
 		if isMaxBytesError(err) {
+			// Distinguishable from the sniff-failure log below: this is a
+			// SIZE rejection (never got to read "kind" or the file bytes),
+			// not a content-mismatch one. Never logs the body itself.
+			log.Printf("media upload: rejected, exceeds the configured limit (%d bytes + %d slack)", h.MediaMaxBytes, mediaUploadSlack)
 			return mediaSendRequest{}, &mediaDecodeError{http.StatusRequestEntityTooLarge, "upload exceeds the configured size limit"}
 		}
 		return mediaSendRequest{}, &mediaDecodeError{http.StatusBadRequest, "invalid multipart form"}
@@ -250,6 +298,13 @@ func (h *handlers) parseMediaSendRequest(w http.ResponseWriter, r *http.Request)
 	// Step 6: sniff, never trust the part's declared Content-Type.
 	contentType, ok := sniffAndValidate(kind, data)
 	if !ok {
+		// This is what caught the original video-send bug: before this log
+		// line existed, a rejection here was invisible — no wa_messages
+		// row (Insert happens well after this), no log line, and the HTTP
+		// response is a plain 200 to the UI form (media_send_ui.go renders
+		// the failure into a partial, not a status code). Never logs the
+		// file bytes themselves.
+		log.Printf("media upload: rejected as %s (sniffed %s, %d bytes)", kind, contentType, len(data))
 		return mediaSendRequest{}, &mediaDecodeError{http.StatusUnsupportedMediaType,
 			"uploaded file does not look like a " + string(kind) + " (sniffed " + contentType + ")"}
 	}

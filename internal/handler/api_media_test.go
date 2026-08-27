@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,31 @@ import (
 // pngMagic is a real PNG signature — enough for http.DetectContentType to
 // report "image/png"; the rest of the file need not be a valid image.
 var pngMagic = []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n'}
+
+// webmMagic is WebM/Matroska's EBML magic number
+// (\x1A\x45\xDF\xA3) — enough on its own for http.DetectContentType to
+// report "video/webm" (an exactSig match, see go1.26.7's sniff.go; no brand
+// scanning the way mp4Sig has, unlike the ftyp cases below).
+var webmMagic = []byte{0x1A, 0x45, 0xDF, 0xA3, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F, 0x42, 0x86, 0x81, 0x01}
+
+// buildFtypBox assembles a minimal synthetic ISO-BMFF "ftyp" box header:
+// a 4-byte size, "ftyp", the 4-byte major brand, a 4-byte minor version,
+// then each compatible brand concatenated — real files carry a lot more
+// after this, but sniffAndValidate/http.DetectContentType only ever look at
+// the head (512 bytes here, well under that), so this is enough to
+// reproduce exactly what was measured against http.DetectContentType
+// directly (see the video-send bug's evidence).
+func buildFtypBox(majorBrand string, compatibleBrands ...string) []byte {
+	b := make([]byte, 0, 64)
+	b = append(b, 0, 0, 0, 0x20)
+	b = append(b, []byte("ftyp")...)
+	b = append(b, []byte(majorBrand)...)
+	b = append(b, 0, 0, 0, 0) // minor version
+	for _, c := range compatibleBrands {
+		b = append(b, []byte(c)...)
+	}
+	return b
+}
 
 // buildMultipartMedia assembles a multipart/form-data body for the media
 // send endpoints. fileBytes == nil omits the "file" part entirely (for the
@@ -443,4 +469,218 @@ func mintWebSessionToken(t *testing.T, srv http.Handler) string {
 	// arbitrary value already proves that, since the assertion is "still
 	// 401", not "401 because the cookie itself was invalid".
 	return "not-a-real-session-token"
+}
+
+// TestSniffAndValidateAcceptsRealWorldVideoContainersTheOriginalCodeRejected
+// is the live-bug regression: every one of these is a container real
+// cameras/phones actually produce, and every non-mp4/non-3gpp one of them
+// sniffed as "application/octet-stream" under http.DetectContentType before
+// this fix — see api_media.go's sniffAndValidate doc comment and the ftyp
+// probe this test's fixtures mirror. mp4_no_mp4_brand (isom major brand,
+// compatible brands isom/iso2/avc1, no brand literally starting with "mp4")
+// is the case called out explicitly as the one that MUST go red on the
+// pre-fix code and green after — see
+// TestSniffAndValidateRedThenGreenOnTheNoMp4BrandCase right below.
+func TestSniffAndValidateAcceptsRealWorldVideoContainersTheOriginalCodeRejected(t *testing.T) {
+	cases := []struct {
+		name         string
+		kind         wa.MediaKind
+		data         []byte
+		wantOK       bool
+		wantMimetype string
+	}{
+		{
+			name:         "mp4 with an explicit mp4 compatible brand (accepted before and after)",
+			kind:         wa.MediaVideo,
+			data:         buildFtypBox("isom", "isom", "iso2", "avc1", "mp41"),
+			wantOK:       true,
+			wantMimetype: "video/mp4",
+		},
+		{
+			name:         "mp4_no_mp4_brand: isom major, no brand literally starting with mp4",
+			kind:         wa.MediaVideo,
+			data:         buildFtypBox("isom", "isom", "iso2", "avc1"),
+			wantOK:       true,
+			wantMimetype: "video/mp4",
+		},
+		{
+			name:         "HEVC-encoded mp4 (hvc1 compatible brand, no mp4 brand)",
+			kind:         wa.MediaVideo,
+			data:         buildFtypBox("isom", "isom", "iso2", "hvc1"),
+			wantOK:       true,
+			wantMimetype: "video/mp4",
+		},
+		{
+			name:         "mp42 major brand (accepted before and after — matches mp4Sig directly)",
+			kind:         wa.MediaVideo,
+			data:         buildFtypBox("mp42", "mp42", "isom"),
+			wantOK:       true,
+			wantMimetype: "video/mp4",
+		},
+		{
+			name:         "iPhone QuickTime .mov (qt major brand) — accepted, honestly labelled",
+			kind:         wa.MediaVideo,
+			data:         buildFtypBox("qt  ", "qt  "),
+			wantOK:       true,
+			wantMimetype: "video/quicktime",
+		},
+		{
+			name:         "3GPP (existing has3GPPBrand path, must still work)",
+			kind:         wa.MediaVideo,
+			data:         buildFtypBox("3gp4", "3gp4"),
+			wantOK:       true,
+			wantMimetype: "video/3gpp",
+		},
+		{
+			name:         "WebM (EBML magic, newly allow-listed)",
+			kind:         wa.MediaVideo,
+			data:         webmMagic,
+			wantOK:       true,
+			wantMimetype: "video/webm",
+		},
+		{
+			name:   "a PNG declared as video must still be rejected (not \"accept anything\")",
+			kind:   wa.MediaVideo,
+			data:   pngMagic,
+			wantOK: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotMimetype, gotOK := sniffAndValidate(tc.kind, tc.data)
+			if gotOK != tc.wantOK {
+				t.Fatalf("sniffAndValidate(%s, ...) ok = %v, want %v (sniffed mimetype %q)", tc.kind, gotOK, tc.wantOK, gotMimetype)
+			}
+			if tc.wantOK && gotMimetype != tc.wantMimetype {
+				t.Fatalf("sniffAndValidate(%s, ...) mimetype = %q, want %q", tc.kind, gotMimetype, tc.wantMimetype)
+			}
+		})
+	}
+}
+
+// TestMediaSendAcceptsARealWorldVideoContainerEndToEnd drives the SAME
+// isom+[isom iso2 avc1] fixture (no compatible brand literally starting with
+// "mp4") all the way through the real HTTP handler, not just
+// sniffAndValidate directly — proving the fix reaches the actual send path
+// the production bug report exercised ("wa_messages has rows for image,
+// audio and document ... and no video row at all").
+func TestMediaSendAcceptsARealWorldVideoContainerEndToEnd(t *testing.T) {
+	backend := &fakeGatewayBackend{
+		name: "fake",
+		uploadFn: func(ctx context.Context, sessionID string, kind wa.MediaKind, filename, mimetype string, data []byte) (wa.MediaDescriptor, error) {
+			return wa.MediaDescriptor{URL: "https://mmg.example/x", Mimetype: mimetype}, nil
+		},
+	}
+	srv, s, apiClients, msgs, _ := newMediaTestServer(t, mediaTestConfig{backend: backend})
+	token := apiToken(t, srv, apiClients, "media-video-e2e")
+
+	video := buildFtypBox("isom", "isom", "iso2", "avc1")
+	fields := map[string]string{"kind": "video", "to": "628123456789"}
+	body, ct := buildMultipartMedia(t, fields, video)
+
+	rec := postMultipartMedia(srv, token, "/api/v1/sessions/"+s.ID+"/messages/media", ct, body)
+	// The session built by newMediaTestServer is created but never
+	// activated (see that helper's own doc comment), so the send itself
+	// answers 409 "session not connected" here exactly as
+	// TestMediaSendPersistsTheFilenameAndKindOnTheMessageRow's identical
+	// image-kind case already does. What this test actually proves is
+	// upstream of that: validation did not 415-reject the video, and the
+	// Insert this test checks below actually ran — the live bug's evidence
+	// was precisely a MISSING row, not a wrong status code.
+	if rec.Code == http.StatusUnsupportedMediaType {
+		t.Fatalf("status = %d (415, mimetype rejected) — this is the live video-send bug; body = %s", rec.Code, rec.Body.String())
+	}
+
+	rows, err := msgs.Recent(context.Background(), s.ID, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("wa_messages has %d rows, want 1 — this is exactly the live bug (\"no video row at all, not even a failed one\")", len(rows))
+	}
+	if rows[0].MediaKind != "video" {
+		t.Errorf("MediaKind = %q, want %q", rows[0].MediaKind, "video")
+	}
+	if rows[0].MediaMime != "video/mp4" {
+		t.Errorf("MediaMime = %q, want %q", rows[0].MediaMime, "video/mp4")
+	}
+}
+
+// TestMediaSendLogsRejectionsWithDistinguishableMessagesForSizeVsMimetype
+// pins requirement 4 of the task: a validation failure used to be
+// completely invisible (no log line, no wa_messages row, 200 on the UI
+// path) — this asserts BOTH rejection paths (413 size, 415 mimetype) write
+// a log line, and that those two log lines are distinguishable from each
+// other rather than collapsing into one indistinguishable message.
+func TestMediaSendLogsRejectionsWithDistinguishableMessagesForSizeVsMimetype(t *testing.T) {
+	backend := &fakeGatewayBackend{name: "fake"}
+
+	origOutput := log.Writer()
+	origFlags := log.Flags()
+	t.Cleanup(func() { log.SetOutput(origOutput); log.SetFlags(origFlags) })
+
+	// --- 415: mimetype rejection (PNG declared as video) ---
+	var buf415 bytes.Buffer
+	log.SetOutput(&buf415)
+	log.SetFlags(0)
+	srv415, s415, apiClients415, _, _ := newMediaTestServer(t, mediaTestConfig{backend: backend})
+	token415 := apiToken(t, srv415, apiClients415, "media-log-415")
+	fields := map[string]string{"kind": "video", "to": "628123456789"}
+	body415, ct415 := buildMultipartMedia(t, fields, pngMagic)
+	rec415 := postMultipartMedia(srv415, token415, "/api/v1/sessions/"+s415.ID+"/messages/media", ct415, body415)
+	if rec415.Code != http.StatusUnsupportedMediaType {
+		t.Fatalf("415 case: status = %d, want %d", rec415.Code, http.StatusUnsupportedMediaType)
+	}
+	logged415 := buf415.String()
+	if !strings.Contains(logged415, "rejected as video") || !strings.Contains(logged415, "sniffed") {
+		t.Fatalf("415 case: log output = %q, want it to mention the kind and the sniffed content type", logged415)
+	}
+
+	// --- 413: size rejection ---
+	var buf413 bytes.Buffer
+	log.SetOutput(&buf413)
+	srv413, s413, apiClients413, _, _ := newMediaTestServer(t, mediaTestConfig{backend: backend, mediaMaxBytes: 1024})
+	token413 := apiToken(t, srv413, apiClients413, "media-log-413")
+	big := append(append([]byte{}, pngMagic...), bytes.Repeat([]byte("x"), 200*1024)...)
+	body413, ct413 := buildMultipartMedia(t, baseImageFields, big)
+	rec413 := postMultipartMedia(srv413, token413, "/api/v1/sessions/"+s413.ID+"/messages/media", ct413, body413)
+	if rec413.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("413 case: status = %d, want %d", rec413.Code, http.StatusRequestEntityTooLarge)
+	}
+	logged413 := buf413.String()
+	if logged413 == "" {
+		t.Fatal("413 case: nothing was logged for the oversize rejection")
+	}
+
+	// The two rejection reasons must never collapse into the same message
+	// — an operator reading the log needs to tell "too big" from "wrong
+	// mimetype" without cross-referencing the HTTP status.
+	if strings.TrimSpace(logged413) == strings.TrimSpace(logged415) {
+		t.Fatalf("413 and 415 rejections logged the SAME message (%q) — they must be distinguishable", strings.TrimSpace(logged413))
+	}
+	if strings.Contains(logged413, "rejected as video") {
+		t.Fatalf("413 case: log output = %q, unexpectedly looks like the mimetype-rejection message", logged413)
+	}
+}
+
+// TestSniffAndValidateRedThenGreenOnTheNoMp4BrandCase is the specific proof
+// the task asked for: the isom+[isom iso2 avc1] container (a completely
+// ordinary MP4 video with no compatible brand literally starting with
+// "mp4") must be accepted by sniffAndValidate. Reverting the video branch's
+// hasFtypBox fallback in api_media.go (i.e. checking out the version with
+// only the mediaAllowedContentTypes/has3GPPBrand checks) makes this test
+// fail: sniffAndValidate returns ("application/octet-stream", false)
+// instead — confirmed by temporarily reverting that block and re-running
+// this test (see the shell evidence in the task report, not committed
+// here).
+func TestSniffAndValidateRedThenGreenOnTheNoMp4BrandCase(t *testing.T) {
+	data := buildFtypBox("isom", "isom", "iso2", "avc1")
+	mimetype, ok := sniffAndValidate(wa.MediaVideo, data)
+	if !ok {
+		t.Fatalf("sniffAndValidate(video, isom+[isom iso2 avc1]) ok = false, want true (sniffed mimetype %q) — this is the live video-send bug", mimetype)
+	}
+	if mimetype != "video/mp4" {
+		t.Fatalf("sniffAndValidate(video, isom+[isom iso2 avc1]) mimetype = %q, want video/mp4", mimetype)
+	}
 }
