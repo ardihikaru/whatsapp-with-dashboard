@@ -1525,3 +1525,86 @@ func TestStatusPumpRecordsAndBacksOffOnRepeatedPollFailures(t *testing.T) {
 
 	assertRingContains(t, s, "status poll failed")
 }
+
+// TestAWaxumSessionCanSendAfterConnectingWithoutPairing is the regression
+// test for the live production bug: startSenderLocked used to be called
+// from exactly one place in this backend, finishPairingSuccess, so a
+// session that reached StateConnected via Connect ALONE — every boot
+// reconcile after an app restart, for a session that was already paired in
+// an earlier process — had s.state == StateConnected and Live(s) == true
+// (both maintained by statusPump/applyStatus) but s.sendQ == nil, and
+// enqueue (sender.go) gates on BOTH: `!connected || q == nil`. Every send
+// failed with ErrNotConnected while every operator-facing signal
+// (/sessions, /api/v1/health, SelectConnected) agreed the session was
+// usable. This test never calls StartPairing — only Connect, exactly the
+// boot-reconcile path — so it fails on the unfixed backend and passes once
+// Connect itself starts the sender.
+func TestAWaxumSessionCanSendAfterConnectingWithoutPairing(t *testing.T) {
+	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(int) waxum.Status {
+			return waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true, PhoneNumber: "6281299990000"}
+		},
+	})
+	b := &waxumBackend{client: client, pollInterval: 2 * time.Millisecond}
+	mgr := newWaxumTestManager(t, b)
+	// StateNew, jid already set: mirrors a session paired in an EARLIER
+	// process — manager_boot.go's StartAll->Activate->Connect path for a
+	// session that survives a restart, never StartPairing again.
+	s := testSession(mgr, StateNew)
+	s.jid = types.NewJID("6281299990000", types.DefaultUserServer)
+
+	if err := b.Connect(context.Background(), s); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	waitForCondition(t, "statusPump to promote the session to StateConnected",
+		func() bool { return s.Snapshot().State == StateConnected })
+
+	if _, err := s.Enqueue("m1", ToJID("628120001"), "hi"); err != nil {
+		t.Fatalf("Enqueue after Connect-only (no pairing) = %v, want nil — "+
+			"a connected session with no send queue is exactly the bug "+
+			"where /sessions and /api/v1/health both say connected but "+
+			"every send fails", err)
+	}
+}
+
+// TestConnectingTwiceDoesNotStartASecondSenderLoop pins the idempotency the
+// fix above relies on: startSenderLocked (sender.go) early-returns once
+// s.sendQ is already non-nil, so calling it on every Connect — including a
+// duplicate boot reconcile, or a manual reconnect after Disconnect — must
+// never replace the channel or spawn a second senderLoop goroutine for the
+// same session. Asserted the only way that's observable from outside
+// sender.go: the channel value identity is unchanged across two Connects.
+func TestConnectingTwiceDoesNotStartASecondSenderLoop(t *testing.T) {
+	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(int) waxum.Status {
+			return waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true, PhoneNumber: "6281299990000"}
+		},
+	})
+	b := &waxumBackend{client: client, pollInterval: 2 * time.Millisecond}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StateNew)
+	s.jid = types.NewJID("6281299990000", types.DefaultUserServer)
+
+	if err := b.Connect(context.Background(), s); err != nil {
+		t.Fatalf("first Connect: %v", err)
+	}
+	waitForCondition(t, "statusPump to promote the session to StateConnected",
+		func() bool { return s.Snapshot().State == StateConnected })
+
+	s.mu.Lock()
+	firstQ := s.sendQ
+	s.mu.Unlock()
+	if firstQ == nil {
+		t.Fatal("sendQ is nil after the first Connect")
+	}
+
+	if err := b.Connect(context.Background(), s); err != nil {
+		t.Fatalf("second Connect: %v", err)
+	}
+	s.mu.Lock()
+	secondQ := s.sendQ
+	s.mu.Unlock()
+	if secondQ != firstQ {
+		t.Fatal("sendQ channel identity changed across a second Connect — startSenderLocked started a second sender loop instead of no-op'ing")
+	}
+}

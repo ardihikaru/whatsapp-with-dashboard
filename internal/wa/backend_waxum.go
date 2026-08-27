@@ -309,6 +309,23 @@ func (b *waxumBackend) Connect(ctx context.Context, s *ManagedSession) error {
 	}
 	s.mu.Lock()
 	sctx := s.ensureCtxLocked()
+	// Every restart's boot-reconcile (StartAll -> Activate -> Connect)
+	// lands here WITHOUT ever going through StartPairing/
+	// finishPairingSuccess — that only runs once, at the moment a device is
+	// first paired. Before this line, THIS was the only path back to
+	// StateConnected for an already-paired session, and it never started
+	// the sender: s.state and Live(s) both go true (applyStatus, once
+	// statusPump's next poll reports is_logged_in && socket_alive), so
+	// every operator-facing signal — /sessions, /api/v1/health,
+	// SelectConnected — agreed the session was usable, while s.sendQ
+	// stayed nil forever and every send failed with ErrNotConnected
+	// (sender.go's enqueue: `!connected || q == nil`). Live/State have no
+	// way to see this: neither reads s.sendQ. startSenderLocked is
+	// idempotent (early-returns once s.sendQ != nil — see
+	// TestConnectingTwiceDoesNotStartASecondSenderLoop), so calling it
+	// unconditionally here, on every Connect/reconnect, is safe. See
+	// TestAWaxumSessionCanSendAfterConnectingWithoutPairing.
+	s.startSenderLocked()
 	s.mu.Unlock()
 	b.ensureStatusPump(sctx, s)
 	return nil
