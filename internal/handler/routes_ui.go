@@ -79,6 +79,36 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	// Send page.
 	mux.Handle("GET "+bp+"/send", page(http.HandlerFunc(h.GetSend)))
 	mux.Handle("POST "+bp+"/send", page(http.HandlerFunc(h.PostSend)))
+	mux.Handle("POST "+bp+"/send/media", page(http.HandlerFunc(h.PostSendMedia)))
+
+	// Calls page.
+	mux.Handle("GET "+bp+"/calls", page(http.HandlerFunc(h.GetCalls)))
+	mux.Handle("GET "+bp+"/calls/rows", page(http.HandlerFunc(h.GetCallRows)))
+	mux.Handle("POST "+bp+"/calls/tts", page(http.HandlerFunc(h.PostCallsTTS)))
+	mux.Handle("POST "+bp+"/calls/play", page(http.HandlerFunc(h.PostCallsPlay)))
+	mux.Handle("POST "+bp+"/calls/{id}/terminate", page(http.HandlerFunc(h.PostCallsTerminate)))
+
+	// Per-session operations page — reached from a button in
+	// partials/session_rows.html, NOT the sidebar (nav.go's buildNav):
+	// there is no single "operations" destination, only one per session.
+	mux.Handle("GET "+bp+"/sessions/{id}/ops", page(http.HandlerFunc(h.GetSessionOps)))
+	mux.Handle("GET "+bp+"/sessions/{id}/ops/panel", page(http.HandlerFunc(h.GetSessionOpsPanel)))
+	mux.Handle("POST "+bp+"/sessions/{id}/ops/pause", page(http.HandlerFunc(h.PostSessionOpsPause)))
+	mux.Handle("POST "+bp+"/sessions/{id}/ops/resume", page(http.HandlerFunc(h.PostSessionOpsResume)))
+	mux.Handle("POST "+bp+"/sessions/{id}/ops/auto-reconnect/enable", page(http.HandlerFunc(h.PostSessionOpsAutoReconnectEnable)))
+	mux.Handle("POST "+bp+"/sessions/{id}/ops/auto-reconnect/disable", page(http.HandlerFunc(h.PostSessionOpsAutoReconnectDisable)))
+	mux.Handle("POST "+bp+"/sessions/{id}/ops/history-sync/enable", page(http.HandlerFunc(h.PostSessionOpsHistorySyncEnable)))
+	mux.Handle("POST "+bp+"/sessions/{id}/ops/history-sync/disable", page(http.HandlerFunc(h.PostSessionOpsHistorySyncDisable)))
+	mux.Handle("POST "+bp+"/sessions/{id}/ops/appstate-resync", page(http.HandlerFunc(h.PostSessionOpsAppStateResync)))
+
+	// Per-session webhooks page — same "not the sidebar" rule as ops above.
+	mux.Handle("GET "+bp+"/sessions/{id}/webhooks", page(http.HandlerFunc(h.GetSessionWebhooks)))
+	mux.Handle("GET "+bp+"/sessions/{id}/webhooks/rows", page(http.HandlerFunc(h.GetSessionWebhookRows)))
+	mux.Handle("POST "+bp+"/sessions/{id}/webhooks", page(http.HandlerFunc(h.PostSessionWebhookRegister)))
+	mux.Handle("POST "+bp+"/sessions/{id}/webhooks/{webhookID}/delete", page(http.HandlerFunc(h.PostSessionWebhookDelete)))
+	mux.Handle("POST "+bp+"/sessions/{id}/webhooks/{webhookID}/enable", page(http.HandlerFunc(h.PostSessionWebhookEnable)))
+	mux.Handle("GET "+bp+"/sessions/{id}/webhooks/dlq/rows", page(http.HandlerFunc(h.GetSessionWebhookDLQRows)))
+	mux.Handle("POST "+bp+"/sessions/{id}/webhooks/dlq/{entryID}/replay", page(http.HandlerFunc(h.PostSessionWebhookDLQReplay)))
 
 	// Static assets (embedded). StripPrefix carries bp too — the files are
 	// addressed inside the embedded FS, which knows nothing about the mount.

@@ -41,6 +41,18 @@ func (fakeStartPairingBackend) SendText(context.Context, *wa.ManagedSession, wa.
 func (fakeStartPairingBackend) JoinedGroups(context.Context, *wa.ManagedSession) ([]wa.GroupInfo, error) {
 	panic("not used by this test")
 }
+func (fakeStartPairingBackend) SendMedia(context.Context, *wa.ManagedSession, wa.JID, wa.OutboundMedia) (string, error) {
+	panic("not used by this test")
+}
+func (fakeStartPairingBackend) CallTTS(context.Context, *wa.ManagedSession, wa.JID, string, string) (wa.CallOutcome, error) {
+	panic("not used by this test")
+}
+func (fakeStartPairingBackend) CallPlay(context.Context, *wa.ManagedSession, wa.JID, string) (wa.CallOutcome, error) {
+	panic("not used by this test")
+}
+func (fakeStartPairingBackend) CallTerminate(context.Context, *wa.ManagedSession, wa.JID, string, string) error {
+	panic("not used by this test")
+}
 func (fakeStartPairingBackend) Live(*wa.ManagedSession) bool { return false }
 func (fakeStartPairingBackend) Close()                       {}
 

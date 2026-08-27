@@ -9,7 +9,15 @@ info:
     only for the admin pages. Sends are queued per session (cap 100),
     rate-limited (1 msg/s, burst 3) and retried up to 3 times; delivery is
     at-least-once when a send times out.
-  version: 0.3.0
+
+    Media, voice calls, session-administration operations (pause/resume,
+    auto-reconnect, history-sync, appstate resync, spam reporting,
+    trust-conversation tokens) and webhook administration are all
+    waxum-backed only: every one of those routes answers 501 on a
+    whatsmeow-backed deployment (WSM_WA_BACKEND=whatsmeow). Voice calls
+    additionally answer 501 unless WSM_CALLS_ENABLED=true, independent of
+    the backend.
+  version: 0.4.0
 servers:
   - url: http://localhost:8800
 paths:
@@ -457,6 +465,933 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/sessions/{id}/messages/media:
+    post:
+      summary: Send a media message (image, video, audio or document) through this session
+      operationId: sendSessionMedia
+      tags: [media]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, kind, to]
+              properties:
+                file: {type: string, format: binary}
+                kind: {type: string, enum: [image, video, audio, document]}
+                to: {type: string, description: 'International format, e.g. +62 812-0000-0000'}
+                caption: {type: string}
+                ptt: {type: boolean, description: 'Send audio as a push-to-talk voice note'}
+                client_ref: {type: string}
+                tenant_ref: {type: string}
+                category: {type: string, enum: [otp, notification, alert, manual]}
+      responses:
+        '200':
+          description: Terminal outcome within 15s.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaSendResponse'}
+        '202':
+          description: Still queued after 15s.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaSendResponse'}
+        '400':
+          description: Missing/invalid form field.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '413':
+          description: Upload exceeds the configured size limit.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '415':
+          description: Uploaded bytes do not sniff as the declared kind.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no media store (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/messages/media:
+    post:
+      summary: Send a media message using automatic session routing
+      operationId: sendMediaAuto
+      tags: [media]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, kind, to]
+              properties:
+                file: {type: string, format: binary}
+                kind: {type: string, enum: [image, video, audio, document]}
+                to: {type: string}
+                caption: {type: string}
+                ptt: {type: boolean}
+                client_ref: {type: string}
+                tenant_ref: {type: string}
+                category: {type: string, enum: [otp, notification, alert, manual]}
+      responses:
+        '200':
+          description: Terminal outcome within 15s.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaSendResponse'}
+        '202':
+          description: Still queued after 15s.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaSendResponse'}
+        '400':
+          description: Missing/invalid form field.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: No connected session exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no media store (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/media/download:
+    post:
+      summary: Download and decrypt a previously issued media descriptor
+      operationId: downloadSessionMedia
+      tags: [media]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/MediaDescriptor'}
+      responses:
+        '200':
+          description: Decrypted bytes, base64-encoded (never raw octet-stream — see the handler's own doc comment).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/MediaDownloadResponse'}
+        '400':
+          description: Invalid kind or JSON body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no media store (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/sessions/{id}/calls/tts:
+    post:
+      summary: Place a text-to-speech voice call
+      description: >
+        501 unless WSM_CALLS_ENABLED=true (see CLAUDE.md's calls hazard note:
+        WhatsApp's terms are hostile to automated outbound calling, and this
+        capability is shipped disarmed by default).
+      operationId: placeCallTTS
+      tags: [calls]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, text]
+              properties:
+                to: {type: string}
+                text: {type: string}
+                voice: {type: string, description: 'Defaults to waxum''s own DefaultTTSVoice when empty'}
+      responses:
+        '200':
+          description: Call placed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CallPlaceResponse'}
+        '400':
+          description: Validation (phone rules; text required).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Calls disabled (WSM_CALLS_ENABLED=false) or backend has no call support.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/calls/play:
+    post:
+      summary: Place a pre-recorded-audio voice call
+      description: >
+        501 unless WSM_CALLS_ENABLED=true. waxum's SSRF guard rejects any
+        private audio_url, so this can never point inside the compose network.
+      operationId: placeCallPlay
+      tags: [calls]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, audio_url]
+              properties:
+                to: {type: string}
+                audio_url: {type: string}
+      responses:
+        '200':
+          description: Call placed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CallPlaceResponse'}
+        '400':
+          description: Validation (phone rules; audio_url required).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Calls disabled (WSM_CALLS_ENABLED=false) or backend has no call support.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/calls/terminate:
+    post:
+      summary: Terminate an in-progress call
+      description: 501 unless WSM_CALLS_ENABLED=true.
+      operationId: terminateCall
+      tags: [calls]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [peer, call_id]
+              properties:
+                peer: {type: string}
+                call_id: {type: string}
+                reason: {type: string}
+      responses:
+        '204':
+          description: Terminated; the matching wa_calls row (found by call_id) is marked terminated, best-effort.
+        '400':
+          description: Validation (phone rules; call_id required).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Calls disabled (WSM_CALLS_ENABLED=false) or backend has no call support.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/calls:
+    get:
+      summary: Recent placed-call audit log for this session
+      description: 501 unless WSM_CALLS_ENABLED=true.
+      operationId: listSessionCalls
+      tags: [calls]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, default: 50, maximum: 500}}
+      responses:
+        '200':
+          description: Newest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Call'
+        '501':
+          description: Calls disabled (WSM_CALLS_ENABLED=false) or backend has no call support.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/sessions/{id}/operations:
+    get:
+      summary: Aggregate paused + auto-reconnect + history-sync snapshot
+      description: >
+        One request instead of three, for the operations UI panel. waxum-only
+        — 501 on whatsmeow.
+      operationId: getSessionOperations
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Current snapshot.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/OperationsSnapshot'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/pause:
+    post:
+      summary: Pause message processing for this session
+      description: >
+        Resolves WITHOUT a live socket — unlike every other operation in this
+        group, pause/resume do not require a connected session. waxum-only.
+      operationId: pauseSession
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Paused.
+          content:
+            application/json:
+              schema: {type: object, properties: {paused: {type: boolean}}}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/resume:
+    post:
+      summary: Resume message processing for this session
+      description: Resolves WITHOUT a live socket, same as pause. waxum-only.
+      operationId: resumeSession
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Resumed.
+          content:
+            application/json:
+              schema: {type: object, properties: {paused: {type: boolean}}}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/auto-reconnect:
+    get:
+      summary: Read the session's auto-reconnect setting
+      description: >
+        NOTE: named auto-reconnect (not waxum's own "/reconnect"), which
+        would read as WSM's OWN reconnect supervisor. waxum-only.
+      operationId: getSessionAutoReconnect
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Current setting.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutoReconnect'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      summary: Change the session's auto-reconnect setting
+      operationId: setSessionAutoReconnect
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [enabled], properties: {enabled: {type: boolean}}}
+      responses:
+        '200':
+          description: Updated setting.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AutoReconnect'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/history-sync:
+    get:
+      summary: Read whether this session skips history-sync on (re)connect
+      operationId: getSessionHistorySync
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Current setting.
+          content:
+            application/json:
+              schema: {type: object, properties: {skip: {type: boolean}}}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    put:
+      summary: Change whether this session skips history-sync on (re)connect
+      description: >
+        CAUTION: skip=false on a long-dormant session makes WhatsApp replay a
+        potentially very large history backlog on its next (re)connect.
+      operationId: setSessionHistorySync
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [skip], properties: {skip: {type: boolean}}}
+      responses:
+        '200':
+          description: Updated setting.
+          content:
+            application/json:
+              schema: {type: object, properties: {skip: {type: boolean}}}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/appstate/resync:
+    post:
+      summary: Resync app-state collections
+      description: >
+        Requires a live socket; a 503 from waxum surfaces here as 409
+        ("session not connected"). waxum-only.
+      operationId: resyncSessionAppState
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                collections: {type: array, items: {type: string}}
+                mode: {type: string}
+      responses:
+        '200':
+          description: Resync result.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/AppStateResyncResult'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Session not connected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/spam-report:
+    post:
+      summary: Report a message as spam
+      description: >
+        DANGER: reports a THIRD PARTY to WhatsApp and is IRREVERSIBLE. API-only
+        by design — the dashboard deliberately has no button for this.
+        message_id and message_timestamp are both required. waxum-only.
+      operationId: reportSessionSpam
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message_id, message_timestamp]
+              properties:
+                message_id: {type: string}
+                message_timestamp: {type: integer, format: int64, description: 'Epoch seconds'}
+                from_jid: {type: string}
+                participant_jid: {type: string}
+                group_jid: {type: string}
+                group_subject: {type: string}
+                spam_flow: {type: string}
+                media_type: {type: string}
+      responses:
+        '200':
+          description: Report accepted.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SpamReportResult'}
+        '400':
+          description: message_id or message_timestamp missing.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/trust-tokens:
+    post:
+      summary: Issue trust-conversation tokens for one or more JIDs
+      description: >
+        Named trust-tokens (not waxum's own opaque "tctoken"). waxum-only.
+      operationId: issueSessionTrustTokens
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [jids]
+              properties:
+                jids: {type: array, items: {type: string}}
+      responses:
+        '200':
+          description: Issued tokens.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tokens:
+                    type: array
+                    items: {$ref: '#/components/schemas/TCToken'}
+        '400':
+          description: jids missing.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    get:
+      summary: List every JID this session currently holds a trust token for
+      operationId: listSessionTrustTokens
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: JIDs.
+          content:
+            application/json:
+              schema: {type: object, properties: {jids: {type: array, items: {type: string}}}}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/trust-tokens/{jid}:
+    get:
+      summary: Read trust-conversation token state for one JID
+      operationId: getSessionTrustToken
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: jid, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Token state (found=false if none exists for this JID).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/TCTokenInfo'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/trust-tokens/expired:
+    delete:
+      summary: Prune expired trust-conversation tokens
+      description: >
+        Requires a live socket; a 503 from waxum surfaces here as 409
+        ("session not connected"). waxum-only.
+      operationId: pruneSessionExpiredTrustTokens
+      tags: [operations]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Pruned.
+          content:
+            application/json:
+              schema: {type: object, properties: {pruned_count: {type: integer}}}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Session not connected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no session-operations support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/sessions/{id}/webhooks:
+    get:
+      summary: List webhooks registered for this session
+      description: >
+        Responses NEVER include the signing secret's value — only
+        has_secret (bool). waxum-only.
+      operationId: listSessionWebhooks
+      tags: [webhooks]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Registered webhooks.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Webhook'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no webhook administration support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      summary: Register a webhook subscription for this session
+      description: >
+        `events` is validated against waxum's known event-name set before the
+        request ever reaches waxum — an unknown value 400s naming it. A
+        callback URL resolving to loopback/RFC1918/ULA/CGNAT/link-local is
+        refused with 422 naming that as the cause (waxum's SSRF guard, no env
+        escape hatch — most operator-run receivers ARE on a private network,
+        so this is the single most likely mistake here). A duplicate URL
+        answers 409. The response NEVER includes the secret's value.
+      operationId: registerSessionWebhook
+      tags: [webhooks]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url, events]
+              properties:
+                url: {type: string}
+                events:
+                  type: array
+                  items:
+                    type: string
+                    enum: [all, message, receipt, presence, chat_presence, group_update,
+                           joined_group, qr_code, pair_code, connected, disconnected,
+                           logged_out, account_locked, picture_update, user_about_update,
+                           push_name_update, contact_update, device_list_update, pin_update,
+                           mute_update, archive_update, mark_chat_as_read, undecryptable_message,
+                           client_outdated, offline_sync_preview, offline_sync_completed,
+                           scheduled_sent, scheduled_failed, blast_progress, blast_completed,
+                           call_log_sync, stream_error, enc_decrypt_failed]
+                secret: {type: string, description: 'HMAC signing key; never echoed back'}
+      responses:
+        '200':
+          description: Registered.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Webhook'}
+        '400':
+          description: url missing, events missing, or an unknown event name (named in the message).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: A webhook with this URL is already registered.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '422':
+          description: waxum's SSRF guard refused the callback URL (message names the cause).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no webhook administration support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/webhooks/{webhookID}:
+    delete:
+      summary: Unregister a webhook subscription
+      operationId: deleteSessionWebhook
+      tags: [webhooks]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: webhookID, in: path, required: true, schema: {type: string}}
+      responses:
+        '204':
+          description: Unregistered.
+        '404':
+          description: Unknown session or webhook.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no webhook administration support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/webhooks/{webhookID}/enable:
+    post:
+      summary: Re-enable a webhook whose delivery circuit was opened after repeated failures
+      operationId: enableSessionWebhook
+      tags: [webhooks]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: webhookID, in: path, required: true, schema: {type: string}}
+      responses:
+        '204':
+          description: Re-enabled.
+        '404':
+          description: Unknown session or webhook.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no webhook administration support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/webhooks/dlq:
+    get:
+      summary: List this session's dead-lettered webhook deliveries
+      operationId: listSessionWebhookDLQ
+      tags: [webhooks]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: Dead-lettered deliveries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/DLQEntry'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no webhook administration support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/webhooks/dlq/{entryID}/replay:
+    post:
+      summary: Retry one dead-lettered webhook delivery
+      operationId: replaySessionWebhookDLQEntry
+      tags: [webhooks]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+        - {name: entryID, in: path, required: true, schema: {type: string}}
+      responses:
+        '204':
+          description: Replay requested.
+        '404':
+          description: Unknown session or DLQ entry.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Backend has no webhook administration support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/webhooks/reenable-all:
+    post:
+      summary: Re-enable every open webhook circuit across every session (fleet-level)
+      description: >
+        Deliberately NOT scoped under /sessions/{id} — this re-enables webhook
+        delivery for every session on the waxum instance at once.
+      operationId: reenableAllWebhooks
+      tags: [webhooks]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      responses:
+        '204':
+          description: Re-enabled fleet-wide.
+        '501':
+          description: Backend has no webhook administration support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+
+  /api/v1/gateway/health:
+    get:
+      summary: Backend gateway process health probe (authenticated)
+      description: >
+        NOT the same route as the unauthenticated /api/v1/health container
+        healthcheck — this one calls the backend inline and is deliberately
+        excluded from the liveness-probe path. Gains a cached backend field
+        in a future phase.
+      operationId: getGatewayHealth
+      tags: [system]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      responses:
+        '200':
+          description: Gateway reachable and healthy.
+          content:
+            application/json:
+              schema: {type: object, properties: {status: {type: string}}}
+        '501':
+          description: Backend has no separate gateway process to probe (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 components:
   securitySchemes:
     bearerAuth:
@@ -539,3 +1474,115 @@ components:
         attempts: {type: integer}
         created_at: {type: string, format: date-time}
         sent_at: {type: string, format: date-time, nullable: true}
+    MediaSendResponse:
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [queued, sent, failed]}
+        wa_message_id: {type: string}
+        error: {type: string}
+        session_id: {type: string}
+        session_name: {type: string}
+        kind: {type: string, enum: [image, video, audio, document]}
+        filename: {type: string}
+    MediaDescriptor:
+      type: object
+      required: [kind]
+      properties:
+        kind: {type: string, enum: [image, video, audio, document]}
+        url: {type: string}
+        direct_path: {type: string}
+        media_key: {type: string}
+        file_sha256: {type: string}
+        file_enc_sha256: {type: string}
+        file_length: {type: integer, format: int64}
+        media_type: {type: string}
+        mimetype: {type: string}
+    MediaDownloadResponse:
+      type: object
+      properties:
+        mimetype: {type: string}
+        size: {type: integer}
+        data_base64: {type: string, description: 'Decrypted bytes, base64-encoded'}
+    Call:
+      type: object
+      properties:
+        id: {type: string}
+        to_phone: {type: string}
+        kind: {type: string, enum: [tts, play]}
+        text: {type: string}
+        voice: {type: string}
+        audio_url: {type: string}
+        call_id: {type: string}
+        recording_url: {type: string}
+        status: {type: string, enum: [placing, placed, failed, terminated]}
+        error: {type: string}
+        created_at: {type: string, format: date-time}
+        ended_at: {type: string, format: date-time, nullable: true}
+    CallPlaceResponse:
+      type: object
+      properties:
+        id: {type: string}
+        status: {type: string, enum: [placed]}
+        call_id: {type: string}
+        recording_url: {type: string}
+    AutoReconnect:
+      type: object
+      properties:
+        enabled: {type: boolean}
+        error_count: {type: integer}
+    OperationsSnapshot:
+      type: object
+      properties:
+        paused: {type: boolean}
+        auto_reconnect: {$ref: '#/components/schemas/AutoReconnect'}
+        history_sync:
+          type: object
+          properties:
+            skip: {type: boolean}
+    AppStateResyncResult:
+      type: object
+      properties:
+        synced: {type: array, items: {type: string}}
+        fatal: {type: array, items: {type: string}}
+        retryable: {type: array, items: {type: string}}
+        skipped: {type: array, items: {type: string}}
+        all_synced: {type: boolean}
+    SpamReportResult:
+      type: object
+      properties:
+        success: {type: boolean}
+        report_id: {type: string, nullable: true}
+    TCToken:
+      type: object
+      properties:
+        jid: {type: string}
+        timestamp: {type: integer, format: int64}
+    TCTokenInfo:
+      type: object
+      properties:
+        jid: {type: string}
+        token_timestamp: {type: integer, format: int64}
+        sender_timestamp: {type: integer, format: int64, nullable: true}
+        found: {type: boolean}
+    Webhook:
+      type: object
+      description: >
+        The signing secret's VALUE is never present here — see has_secret.
+      properties:
+        id: {type: string}
+        url: {type: string}
+        events: {type: array, items: {type: string}}
+        enabled: {type: boolean}
+        has_secret: {type: boolean}
+    DLQEntry:
+      type: object
+      properties:
+        id: {type: string}
+        session_id: {type: string}
+        webhook_url: {type: string}
+        event: {type: string}
+        payload: {type: string}
+        last_error: {type: string}
+        attempts: {type: integer}
+        failed_at: {type: integer, format: int64}
