@@ -64,3 +64,46 @@ curl -i -X POST "$BASE/api/v1/auth/logout" \
 curl -i "$BASE/api/v1/sessions" \
   -H "Authorization: Bearer $TOKEN"
 ```
+
+## Media, session operations, webhooks (Phase 9)
+
+These three answer 501 unless `WSM_WA_BACKEND=waxum` (the default in
+`docker-compose.yml`; `make e2e` pins `whatsmeow` instead, so they 501 there).
+`$TOKEN` and `$SID` are placeholders — never paste a real token into an
+example.
+
+Send a media message, auto-routed to a connected session:
+
+```sh
+curl -sS -X POST "$BASE/api/v1/messages/media" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F file=@/path/to/photo.jpg \
+  -F kind=image \
+  -F to=+6281200000000 \
+  -F caption="From the dashboard"
+```
+
+Pause a session's send/receive (a session operation — auto-reconnect,
+history-sync and appstate resync follow the same
+`/api/v1/sessions/{id}/...` shape):
+
+```sh
+curl -sS -X POST "$BASE/api/v1/sessions/$SID/pause" \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+Register a webhook:
+
+```sh
+curl -sS -X POST "$BASE/api/v1/sessions/$SID/webhooks" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.test/hook","events":["message","connected","disconnected"],"secret":"replace-with-a-real-secret"}'
+```
+
+waxum's SSRF guard refuses any callback URL that resolves to loopback,
+RFC1918, ULA, CGNAT or link-local — a `url` pointing at a private address
+(e.g. an operator's own receiver sitting on the same private network) is
+rejected, not silently accepted. Use a publicly-resolvable callback URL, or
+consume events over the SSE-backed pump this app already runs instead of a
+webhook.

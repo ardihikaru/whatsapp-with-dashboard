@@ -208,6 +208,48 @@ either regresses, five things about this hazard are easy to get wrong:
     configured rate and proves nothing. A valid measurement drains the burst
     first, then waits a known idle period and counts successes against that.
 
+**waxum's `MediaData` is `#[serde(untagged)]` and variant order is
+load-bearing.** In stock 0.12.2 `Url` is declared first with no
+`deny_unknown_fields`, so a full pre-upload descriptor matched `Url`, the
+other six fields were silently dropped, waxum fetched the descriptor's
+`mmg.whatsapp.net` URL — which is the **encrypted** blob and passes the SSRF
+guard — and sent an undecryptable file while the API answered 200. Media
+sends therefore require the patched fork (`ardihikaru/waxum`), not
+`fdciabdul/waxum:0.12.2`: a silent-success failure mode like this one does
+not announce itself, it just produces a file the recipient's client can
+never open.
+
+**waxum's SSRF guard (`src/net_guard.rs`) has no env escape hatch** and
+rejects any URL resolving to loopback/RFC1918/ULA/CGNAT/link-local. It
+applies to send-media-by-URL, webhook registration *and* delivery, and call
+audio playback. This is why media uses the upload-descriptor path
+(`internal/waxum/media.go`'s `UploadMedia`/`SendUploaded`) rather than
+sending a URL, and why WSM consumes events by dialing OUT to waxum's SSE
+stream (`internal/wa/backend_waxum_events.go`) instead of registering a
+webhook pointed back at itself — a private callback URL is exactly what the
+guard exists to refuse.
+
+**waxum raises axum's body limit only on `/media/upload` (100 MB) and
+`/import` (512 MB).** Everything else keeps the 2 MB default, so a
+base64-inline media send fails above roughly a 1.5 MB file (base64 costs
+~33% over raw bytes) — another reason the multipart upload-descriptor path
+is the one this app uses, not a JSON body carrying the file inline.
+
+**An SSE event must not write session state.** `backend_waxum_events.go`'s
+event pump pokes `statusPump` awake on a connection-relevant event; it never
+calls `applyStatus` itself, which stays the sole authority over
+`ManagedSession.State`. An unthrottled poke would collapse
+`loggedOutHysteresisPolls`' evidence window into milliseconds and reopen the
+exact status-flap incident hysteresis exists to absorb — hence
+`pokeMinInterval` rate-limiting how often one event can wake the poller
+early.
+
+**`WSM_CALLS_ENABLED` defaults to false.** Automated outbound calling risks
+a ban on a paired device identity that has no second copy anywhere (see the
+whatsmeow/waxum singleton-volume entries above) — every `/calls/*` endpoint
+answers 501 and the `/calls` page says so plainly until an operator opts in
+deliberately.
+
 ---
 
 ## Layout

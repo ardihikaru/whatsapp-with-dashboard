@@ -8,7 +8,14 @@
 _data/*
 
 # Local env: MySQL and admin credentials.
+#
+# The glob matters as much as the literal name. A `.env.bak.<timestamp>` from
+# an in-place edit (sed -i.bak and friends) is a byte-for-byte copy of every
+# secret in .env, and with only `.env` listed here `git add -A` picks it up
+# without a murmur. Keep .env.example tracked; ignore every other sibling.
 .env
+.env.*
+!.env.example
 
 # Compiled binary / local bind-mount data.
 /wsm

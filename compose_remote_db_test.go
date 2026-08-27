@@ -236,18 +236,49 @@ func TestWaxumPublishesNoHostPort(t *testing.T) {
 	}
 }
 
-// A third-party image on an unpinned tag is an unreviewed upgrade landing on
-// every `docker compose pull`. Same reasoning as everything else this repo
-// pins deliberately.
-func TestWaxumImageTagIsPinned(t *testing.T) {
+// An image on an unpinned tag is an unreviewed upgrade landing on every
+// `docker compose pull`. Same reasoning as everything else this repo pins
+// deliberately.
+//
+// The image OWNER is asserted too, and that half is not stylistic. Upstream's
+// fdciabdul/waxum (and imtaqin/waxum, which it builds) cannot send
+// pre-uploaded media at all: `MediaData` is a `#[serde(untagged)]` enum with
+// `Url` declared first and no `deny_unknown_fields`, so a descriptor body
+// matches `Url`, its six other fields are silently dropped, and waxum fetches
+// the descriptor's mmg.whatsapp.net URL — the ENCRYPTED blob, which passes
+// waxum's own SSRF guard — and sends that. The recipient receives an
+// undecryptable file while the API answers 200 with a real message id, so
+// nothing on this side notices. `get_media_data` rejects the `Uploaded`
+// variant outright as well.
+//
+// ardihikaru/waxum's fix/uploaded-media-descriptor fixes both. Reverting this
+// line to upstream is therefore a silent, data-corrupting regression on every
+// media send rather than a rollback, which is exactly the class of change a
+// test should refuse to let through quietly.
+func TestWaxumImageIsOurForkOnAPinnedTag(t *testing.T) {
 	services := composeServices(t, composeSource(t, baseCompose))
 	block, ok := services["waxum"]
 	if !ok {
 		t.Fatal(`no "waxum" service found in ` + baseCompose)
 	}
-	m := regexp.MustCompile(`image:\s*fdciabdul/waxum:(\S+)`).FindStringSubmatch(block)
+	// Match the image LINE, not the whole service block: the block's own
+	// comment names the upstream images in order to explain why they must not
+	// be used, and a bare strings.Contains over the block would flag that
+	// explanation as the violation. Same substring-scan trap that
+	// TestHandlersDoNotImportWhatsmeow parses imports to avoid.
+	line := regexp.MustCompile(`(?m)^\s*image:\s*(\S+)\s*$`).FindStringSubmatch(block)
+	if line == nil {
+		t.Fatalf("%s waxum service has no image line at all", baseCompose)
+	}
+	ref := line[1]
+	if strings.HasPrefix(ref, "fdciabdul/waxum") || strings.HasPrefix(ref, "imtaqin/waxum") {
+		t.Fatalf("%s waxum image = %q, an upstream build; media sends silently "+
+			"deliver corrupt files on stock waxum — see this test's doc comment",
+			baseCompose, ref)
+	}
+	m := regexp.MustCompile(`^ardihikaru/waxum:(\S+)$`).FindStringSubmatch(ref)
 	if m == nil {
-		t.Fatalf("%s waxum service has no fdciabdul/waxum image line", baseCompose)
+		t.Fatalf("%s waxum image = %q, want ardihikaru/waxum:<pinned tag>", baseCompose, ref)
 	}
 	tag := m[1]
 	if tag == "" || tag == "latest" || strings.Contains(tag, "${WAXUM_TAG:-latest}") {

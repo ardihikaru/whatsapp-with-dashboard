@@ -1,5 +1,9 @@
 import { test, expect, Page } from "@playwright/test";
 
+// cmd/e2eseed's first fixed session id — used to reach the per-session
+// ops/webhooks pages added in Phase 9.
+const SESSION_ID = "e2e-sess-0001";
+
 // Wait for HTMX-populated regions to hold real content.
 //
 // networkidle is NOT sufficient here. /sessions fills its tbody from
@@ -7,11 +11,19 @@ import { test, expect, Page } from "@playwright/test";
 // does. Measuring during that window finds an EMPTY table, which of course does
 // not overflow — a layout bug on this page was invisible to this file for
 // exactly that reason. Wait for the placeholder to go.
+//
+// Generalised (Phase 9) to every hx-trigger="load"-populated region this
+// suite touches, not just /sessions' table: #ops-panel (session_ops_panel),
+// #webhook-rows/#webhook-dlq-rows (webhook_rows/webhook_dlq_rows) and
+// #call-rows (call_rows) all show the same "Loading…" placeholder until
+// their own load-triggered hx-get lands.
 async function waitForContent(page: Page) {
   await page.waitForLoadState("networkidle");
-  const rows = page.locator("#session-rows");
-  if (await rows.count()) {
-    await expect(rows).not.toContainText("Loading", { timeout: 10_000 });
+  for (const id of ["#session-rows", "#ops-panel", "#webhook-rows", "#webhook-dlq-rows", "#call-rows"]) {
+    const el = page.locator(id);
+    if (await el.count()) {
+      await expect(el).not.toContainText("Loading", { timeout: 10_000 });
+    }
   }
 }
 
@@ -25,6 +37,16 @@ const PAGES = [
   "/send",
   "/logs",
   "/admin/api-clients",
+  // Phase 9 (media send, calls, ops, webhooks). WSM_WA_BACKEND=whatsmeow
+  // here (scripts/e2e-env.sh), so /calls renders its "disabled on this
+  // deployment" copy and the two session-scoped pages render their
+  // "not supported by this backend" copy — see e2e/media.spec.ts's header
+  // comment for the full story. This suite only cares that the DEGRADED
+  // layout does not overflow a phone viewport, which is a real risk
+  // independent of whether the underlying feature is reachable here.
+  "/calls",
+  `/sessions/${SESSION_ID}/ops`,
+  `/sessions/${SESSION_ID}/webhooks`,
 ];
 
 for (const path of PAGES) {
