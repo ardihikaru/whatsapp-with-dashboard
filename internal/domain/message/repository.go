@@ -32,6 +32,17 @@ func nullIfEmpty(s string) any {
 	return s
 }
 
+// nullIfZero is nullIfEmpty's numeric sibling: a plain text message has
+// MediaSize==0, and that must persist as SQL NULL — not the number 0 — so
+// media_size stays genuinely absent for every non-media row, the same reason
+// nullIfEmpty exists for the string columns.
+func nullIfZero(n int64) any {
+	if n == 0 {
+		return nil
+	}
+	return n
+}
+
 func (r *SQLRepository) Insert(ctx context.Context, m *Message) error {
 	if m.CreatedAt.IsZero() {
 		m.CreatedAt = time.Now().UTC()
@@ -42,11 +53,14 @@ func (r *SQLRepository) Insert(ctx context.Context, m *Message) error {
 	_, err := r.pool.ExecContext(ctx,
 		`INSERT INTO wa_messages
 		   (id, session_id, api_client_id, client_ref, tenant_ref, category,
-		    to_phone, body, status, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		    to_phone, body, status, created_at,
+		    media_kind, media_filename, media_mime, media_size, media_object_key)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		m.ID, m.SessionID, nullIfEmpty(m.APIClientID), nullIfEmpty(m.ClientRef),
 		nullIfEmpty(m.TenantRef), nullIfEmpty(m.Category),
-		m.ToPhone, m.Body, m.Status, m.CreatedAt.Format(timeLayout))
+		m.ToPhone, m.Body, m.Status, m.CreatedAt.Format(timeLayout),
+		nullIfEmpty(m.MediaKind), nullIfEmpty(m.MediaFilename), nullIfEmpty(m.MediaMime),
+		nullIfZero(m.MediaSize), nullIfEmpty(m.MediaObjectKey))
 	return err
 }
 
@@ -71,7 +85,8 @@ func (r *SQLRepository) Recent(ctx context.Context, sessionID string, limit int)
 	}
 	rows, err := r.pool.QueryContext(ctx,
 		`SELECT id, session_id, to_phone, body, status, wa_message_id, error, attempts,
-		        created_at, sent_at
+		        created_at, sent_at,
+		        media_kind, media_filename, media_mime, media_size, media_object_key
 		 FROM wa_messages WHERE session_id = ?
 		 ORDER BY created_at DESC LIMIT ?`, sessionID, limit)
 	if err != nil {
@@ -83,8 +98,11 @@ func (r *SQLRepository) Recent(ctx context.Context, sessionID string, limit int)
 		var m Message
 		var created string
 		var sent sql.NullString
+		var mediaKind, mediaFilename, mediaMime, mediaObjectKey sql.NullString
+		var mediaSize sql.NullInt64
 		if err := rows.Scan(&m.ID, &m.SessionID, &m.ToPhone, &m.Body, &m.Status,
-			&m.WAMessageID, &m.Error, &m.Attempts, &created, &sent); err != nil {
+			&m.WAMessageID, &m.Error, &m.Attempts, &created, &sent,
+			&mediaKind, &mediaFilename, &mediaMime, &mediaSize, &mediaObjectKey); err != nil {
 			return nil, err
 		}
 		m.CreatedAt, _ = time.Parse(timeLayout, created)
@@ -93,6 +111,11 @@ func (r *SQLRepository) Recent(ctx context.Context, sessionID string, limit int)
 				m.SentAt = &t
 			}
 		}
+		m.MediaKind = mediaKind.String
+		m.MediaFilename = mediaFilename.String
+		m.MediaMime = mediaMime.String
+		m.MediaSize = mediaSize.Int64
+		m.MediaObjectKey = mediaObjectKey.String
 		out = append(out, m)
 	}
 	return out, rows.Err()

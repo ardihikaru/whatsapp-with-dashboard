@@ -156,7 +156,12 @@ var schema = []string{
 	  error         TEXT NOT NULL DEFAULT '',
 	  attempts      INTEGER NOT NULL DEFAULT 0,
 	  created_at    TEXT NOT NULL,
-	  sent_at       TEXT
+	  sent_at       TEXT,
+	  media_kind       TEXT,
+	  media_filename   TEXT,
+	  media_mime       TEXT,
+	  media_size       INTEGER,
+	  media_object_key TEXT
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_wa_messages_session
 	  ON wa_messages(session_id, created_at DESC)`,
@@ -185,6 +190,26 @@ var schema = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_api_access_tokens_client
 	  ON api_access_tokens(client_id)`,
+	// 0004: calls are a separate table from wa_messages (see that migration's
+	// header for why) — no body, no wa_message_id, its own terminal states.
+	`CREATE TABLE IF NOT EXISTS wa_calls (
+	  id            TEXT PRIMARY KEY,
+	  session_id    TEXT NOT NULL REFERENCES wa_sessions(id) ON DELETE CASCADE,
+	  api_client_id TEXT,
+	  to_phone      TEXT NOT NULL,
+	  kind          TEXT NOT NULL,
+	  text          TEXT,
+	  voice         TEXT,
+	  audio_url     TEXT,
+	  call_id       TEXT NOT NULL DEFAULT '',
+	  recording_url TEXT NOT NULL DEFAULT '',
+	  status        TEXT NOT NULL DEFAULT 'placing',
+	  error         TEXT NOT NULL DEFAULT '',
+	  created_at    TEXT NOT NULL,
+	  ended_at      TEXT
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_calls_session
+	  ON wa_calls(session_id, created_at DESC)`,
 }
 
 // EnsureSchema creates the app tables and index if missing, inside one
@@ -213,7 +238,17 @@ func EnsureSchema(ctx context.Context, pool *sql.DB) error {
 		}
 	}
 	// 0003 absolute token cutoff, same reason.
-	return ensureColumn(ctx, pool, "api_clients", "token_expires_at", "TEXT")
+	if err := ensureColumn(ctx, pool, "api_clients", "token_expires_at", "TEXT"); err != nil {
+		return err
+	}
+	// 0004 media columns, same reason. media_size is INTEGER (BIGINT in MySQL);
+	// the rest are TEXT like every other nullable string column in this schema.
+	for _, col := range []string{"media_kind", "media_filename", "media_mime", "media_object_key"} {
+		if err := ensureColumn(ctx, pool, "wa_messages", col, "TEXT"); err != nil {
+			return err
+		}
+	}
+	return ensureColumn(ctx, pool, "wa_messages", "media_size", "INTEGER")
 }
 
 func ensureColumn(ctx context.Context, pool *sql.DB, table, column, typ string) error {

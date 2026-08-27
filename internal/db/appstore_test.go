@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// appTables are the four tables the app owns. whatsmeow's crypto tables are not
+// appTables are the tables the app owns. whatsmeow's crypto tables are not
 // in this list: they belong to sqlstore.Container.Upgrade, not EnsureSchema.
-var appTables = []string{"api_access_tokens", "api_clients", "wa_messages", "wa_sessions"}
+var appTables = []string{"api_access_tokens", "api_clients", "wa_calls", "wa_messages", "wa_sessions"}
 
 func TestSQLiteAppStoreCreatesEveryAppTable(t *testing.T) {
 	ctx := context.Background()
