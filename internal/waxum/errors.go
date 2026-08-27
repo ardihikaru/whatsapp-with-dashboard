@@ -1,6 +1,7 @@
 package waxum
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 )
@@ -39,6 +40,32 @@ type APIError struct {
 
 func (e *APIError) Error() string {
 	return fmt.Sprintf("waxum: unexpected status %d: %s", e.StatusCode, e.Body)
+}
+
+// waxumErrorEnvelope is the JSON shape waxum wraps every non-2xx error
+// body in: {"success":false,"error":{"code":N,"message":"..."}} — the
+// exact shape observed live and quoted in ErrClientNotConnected's doc
+// comment above.
+type waxumErrorEnvelope struct {
+	Error struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// Message extracts the human-readable reason from Body, if it parses as
+// waxum's own error envelope, falling back to the raw body otherwise (e.g.
+// a proxy-generated error page that never reached waxum's own handler).
+// Added specifically so a rejection whose CAUSE matters to an operator —
+// waxum's SSRF guard refusing a private callback URL, for one — can be
+// surfaced verbatim rather than as the generic "backend rejected the
+// request" ErrRejectedByBackend text alone (internal/wa's mapErr calls
+// this).
+func (e *APIError) Message() string {
+	var env waxumErrorEnvelope
+	if err := json.Unmarshal([]byte(e.Body), &env); err == nil && env.Error.Message != "" {
+		return env.Error.Message
+	}
+	return e.Body
 }
 
 // errorFromStatus maps an HTTP status (already known to be non-2xx) to one
