@@ -128,6 +128,24 @@ func NewManager(rootCtx context.Context, backend Backend,
 	// gain a background goroutine with no purpose.
 	if backend != nil {
 		m.go1(func() { m.reconnectSupervisor(supCtx) })
+		// backendStarter is an OPTIONAL lifecycle hook, the same
+		// type-assertion pattern capabilities.go uses for gateway
+		// administration — most Backend implementations (meowBackend)
+		// don't need one. waxumBackend implements it to launch the
+		// fleet-wide SSE event pump (backend_waxum_events.go, Phase 8) on
+		// supCtx, the exact ctx the reconnectSupervisor line above already
+		// uses — manager-wide, not keyed to any one session, and cancelled
+		// by Close BEFORE per-session teardown and m.wg.Wait() (see
+		// manager_boot.go's Close). Takes *Manager rather than
+		// context.Context (which the plan this phase came from
+		// originally specified): the event pump's handleEvent needs
+		// m.Get and m.RecordEvent, and its own lifecycle needs m.go1 —
+		// none of that is reachable from a bare context, and passing
+		// *Manager costs nothing extra since this stays entirely
+		// in-package.
+		if starter, ok := backend.(interface{ Start(*Manager) }); ok {
+			starter.Start(m)
+		}
 	}
 	return m
 }

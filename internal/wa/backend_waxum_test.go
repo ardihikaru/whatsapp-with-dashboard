@@ -28,6 +28,10 @@ type waxumFakeCalls struct {
 	pair    atomic.Int32
 	connect atomic.Int32
 	delete_ atomic.Int32
+	// events counts how many times a client has dialed GET
+	// /api/v1/events/tail — one per connection ATTEMPT, so a test asserting
+	// a redial can watch this climb past 1.
+	events atomic.Int32
 }
 
 // waxumFakeOpts configures newWaxumFakeServer. Zero value is a server that
@@ -62,6 +66,17 @@ type waxumFakeOpts struct {
 	// client's bounded per-call retry count — is what stops a genuinely
 	// permanent rate limit from hanging.
 	alwaysRateLimited bool
+	// eventsHandler, when set, handles GET /api/v1/events/tail directly —
+	// full control over an SSE test's timing (scripted frames, flushing,
+	// holding the connection open, ending the stream, answering a non-2xx
+	// status) rather than trying to force one more opts.*Fn shape to cover
+	// every case a stream test needs. nil registers a handler that writes
+	// a 200 + text/event-stream header, flushes, and then blocks on the
+	// REQUEST's own context until the client gives up — an always-open,
+	// never-emitting stream, the same "nothing about it ever makes the
+	// pump exit on its own" default this type's doc comment already
+	// promises for every other endpoint here, extended to this one.
+	eventsHandler http.HandlerFunc
 }
 
 // newWaxumFakeServer builds an httptest server covering exactly the waxum
@@ -101,6 +116,19 @@ func newWaxumFakeServer(t *testing.T, opts waxumFakeOpts) (*waxum.Client, *waxum
 			status = opts.createFn(n)
 		}
 		w.WriteHeader(status)
+	})
+	mux.HandleFunc("/api/v1/events/tail", func(w http.ResponseWriter, r *http.Request) {
+		calls.events.Add(1)
+		if opts.eventsHandler != nil {
+			opts.eventsHandler(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		<-r.Context().Done() // hang open until the client gives up — see waxumFakeOpts.eventsHandler's doc comment
 	})
 	mux.HandleFunc("/api/v1/sessions/", func(w http.ResponseWriter, r *http.Request) {
 		if opts.alwaysRateLimited {

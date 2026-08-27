@@ -153,6 +153,18 @@ func cloneTime(t *time.Time) *time.Time {
 	return &v
 }
 
+// RingWarn appends a warn-level diagnostic note to this session's event ring
+// (and the fleet-wide system ring) via ringLevel — the exact mechanism
+// finishJob (sender.go) already uses for a failed send. Exported so callers
+// OUTSIDE this package (internal/handler) can record a diagnostic note
+// against a specific session for a failure that is not itself a send
+// outcome or a state transition — e.g. Phase 6's best-effort MinIO archive
+// write, which must never fail the send but should still be visible on the
+// session's event ring and the system log page.
+func (s *ManagedSession) RingWarn(note string) {
+	s.ringLevel("warn", note)
+}
+
 // setState commits a transition and persists last_status. Callers hold NO
 // locks. Persistence uses persistCtx so it still lands during teardown.
 //
