@@ -139,14 +139,21 @@ db-verify-waxum: ## Show waxum's DB user's grants (must be scoped to this schema
 	@echo "line always accompanies it and is MySQL's no-privileges placeholder, not an"
 	@echo "escalation. Real privileges on *.* would violate the shared-host rule."
 
+# Every recipe below is @-prefixed, and that is NOT cosmetic. WA_DSN embeds
+# $(WSM_MYSQL_PASSWORD) inline, so an unprefixed recipe makes `make` echo the
+# whole connection string — password included — to stdout before running it.
+# That put the production wa_dashboard password into a terminal scrollback on
+# 2026-08-27, and would put it into any CI log or piped-to-file output just as
+# readily. goose still prints its own progress; only the command line is
+# suppressed. Guarded by TestNoMakefileRecipeEchoesTheDatabasePassword.
 migrate-up: ## Apply migrations
-	$(GOOSE) -dir $(MIGRATIONS_DIR) mysql "$(WA_DSN)" up
+	@$(GOOSE) -dir $(MIGRATIONS_DIR) mysql "$(WA_DSN)" up
 
 migrate-status: ## Show migration status
-	$(GOOSE) -dir $(MIGRATIONS_DIR) mysql "$(WA_DSN)" status
+	@$(GOOSE) -dir $(MIGRATIONS_DIR) mysql "$(WA_DSN)" status
 
 migrate-down-all: ## Roll every migration back (DESTRUCTIVE)
-	$(GOOSE) -dir $(MIGRATIONS_DIR) mysql "$(WA_DSN)" down-to 0
+	@$(GOOSE) -dir $(MIGRATIONS_DIR) mysql "$(WA_DSN)" down-to 0
 
 # `. ./.env` in the SHELL, not make's own `export`, and this is load-bearing.
 #

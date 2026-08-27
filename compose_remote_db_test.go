@@ -287,6 +287,31 @@ func TestWaxumImageIsOurForkOnAPinnedTag(t *testing.T) {
 	}
 }
 
+// WA_DSN (Makefile) embeds $(WSM_MYSQL_PASSWORD) inline, so any recipe using
+// it MUST be @-prefixed: without that, make echoes the whole command — the
+// password with it — to stdout before running it. That is how the production
+// wa_dashboard password landed in a terminal scrollback on 2026-08-27, and it
+// would reach a CI log or a redirected file exactly as easily. Same family as
+// the `docker compose config` hazard: the secret is not printed by the thing
+// you are running, it is printed by the tooling around it.
+func TestNoMakefileRecipeEchoesTheDatabasePassword(t *testing.T) {
+	src := composeSource(t, "Makefile")
+	for i, line := range strings.Split(src, "\n") {
+		// Recipe lines start with a literal tab; everything else is a
+		// variable definition, a comment or a target header.
+		if !strings.HasPrefix(line, "\t") {
+			continue
+		}
+		if !strings.Contains(line, "$(WA_DSN)") {
+			continue
+		}
+		if !strings.HasPrefix(strings.TrimPrefix(line, "\t"), "@") {
+			t.Errorf("Makefile:%d uses $(WA_DSN) without an @ prefix, so make "+
+				"echoes the password: %s", i+1, strings.TrimSpace(line))
+		}
+	}
+}
+
 // RATE_LIMIT_PER_SECOND is NOT a requests-per-second rate, despite the name:
 // waxum's tower_governor middleware treats GovernorConfigBuilder.per_second()
 // as the REPLENISH INTERVAL, in seconds, for a single token — waxum's own
