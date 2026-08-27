@@ -8,8 +8,10 @@ import (
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/storage"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
 
@@ -25,8 +27,29 @@ type Deps struct {
 	// type so the write interface stays free of query methods.
 	MessageStats *message.SQLRepository
 	APIClients   *apiclient.Repository
-	SessionTTL   time.Duration
-	DarkMode     bool
+	// Calls is the wa_calls persistence seam (Phase 6's placed-call
+	// handlers write through it; nothing calls it yet in this phase).
+	Calls call.Repository
+	// Objects is the media-archival seam onto MinIO (Phase 6's media-send
+	// handler uploads through it before enqueuing; nothing calls it yet in
+	// this phase). An interface, not *minio.Client, so handler tests can
+	// substitute a fake — see storage.ObjectStore's doc comment.
+	Objects storage.ObjectStore
+
+	// Media/Calls config (Phase 6a — internal/config/media.go's loadMedia).
+	// Copied onto Deps like every other resolved config value here (BasePath,
+	// CookieSecure, SessionTTL, …) rather than threading *config.Config
+	// itself, which this package has never depended on.
+	MediaMaxBytes          int64
+	MediaUploadTimeout     time.Duration
+	MediaUploadConcurrency int
+	MediaArchive           bool
+	// CallsEnabled gates every /calls/* endpoint — see api_calls.go's
+	// callsDisabledMessage.
+	CallsEnabled bool
+
+	SessionTTL time.Duration
+	DarkMode   bool
 	// PlatformURL is the absolute backoffice url for the sidebar's back-link.
 	PlatformURL string
 	AssetsFS    fs.FS // embedded FS rooted at the app dir (web/..., openapi.yaml)
@@ -65,16 +88,32 @@ type Deps struct {
 // BasePath — the failure looks like "the form does nothing" and points nowhere
 // near the proxy.
 func New(d Deps) http.Handler {
-	h := &handlers{Deps: d}
+	h := &handlers{Deps: d, mediaSem: make(chan struct{}, mediaUploadConcurrency(d.MediaUploadConcurrency))}
 	mux := http.NewServeMux()
 	h.mountUI(mux)
 	h.mountAPI(mux)
 	return withLogging(mux)
 }
 
+// mediaUploadConcurrency clamps Deps.MediaUploadConcurrency to at least 1:
+// a zero-value Deps (every handler test that predates Phase 6a) must not
+// hand make() a zero-sized channel, which would deadlock the FIRST media
+// upload it ever received instead of the intended "no concurrent uploads
+// configured" no-op.
+func mediaUploadConcurrency(n int) int {
+	if n <= 0 {
+		return 1
+	}
+	return n
+}
+
 // handlers groups the route methods around the shared dependencies.
 type handlers struct {
 	Deps
+	// mediaSem bounds concurrent media uploads at cfg.MediaUploadConcurrency
+	// (see api_media.go) — sendQueueCap (internal/wa) bounds the send
+	// QUEUE, not uploads, which happen before enqueue.
+	mediaSem chan struct{}
 }
 
 // cookiePath is the Path every cookie this service sets must carry: the mount,

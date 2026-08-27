@@ -71,6 +71,17 @@ services:
       # waxum service below for why it publishes no host port.
       WSM_WAXUM_URL: http://waxum:3451
       WSM_WAXUM_TOKEN: ${WAXUM_TOKEN}
+      # Phase 9 (media send, calls, waxum events): pass-through with the
+      # same defaults internal/config.loadMedia/loadWaxum fall back to when
+      # unset, so this file stays the one place documenting the app's full
+      # container-mode env surface — .env can still override any of these.
+      WSM_MEDIA_MAX_BYTES: ${WSM_MEDIA_MAX_BYTES:-16777216}
+      WSM_MEDIA_UPLOAD_TIMEOUT: ${WSM_MEDIA_UPLOAD_TIMEOUT:-60s}
+      WSM_MEDIA_UPLOAD_CONCURRENCY: ${WSM_MEDIA_UPLOAD_CONCURRENCY:-4}
+      WSM_MEDIA_ARCHIVE: ${WSM_MEDIA_ARCHIVE:-true}
+      # false by default — see CLAUDE.md's calls hazard note.
+      WSM_CALLS_ENABLED: ${WSM_CALLS_ENABLED:-false}
+      WSM_WAXUM_EVENTS: ${WSM_WAXUM_EVENTS:-true}
 
     volumes:
       - wsm-sqlite:/data
@@ -112,12 +123,22 @@ services:
   # ONLY at http://waxum:3451 on this compose network — see the deliberate
   # absence of a `ports:` block below.
   waxum:
-    image: fdciabdul/waxum:${WAXUM_TAG}
-    # Pinned via .env.example's WAXUM_TAG=0.12.2 (current as of this writing,
-    # matches waxum's own Cargo.toml, multi-arch amd64/arm64), and never
-    # `latest`: this is a third-party image, and an unpinned tag is an
-    # unreviewed upgrade landing on every `docker compose pull`. Bump
-    # WAXUM_TAG deliberately when there is a reason to.
+    image: ardihikaru/waxum:${WAXUM_TAG}
+    # OUR OWN BUILD, not upstream's `fdciabdul/waxum`, and that is load-bearing
+    # rather than a preference: stock 0.12.2 cannot send pre-uploaded media at
+    # all. Its `MediaData` is a `#[serde(untagged)]` enum with `Url` declared
+    # first and no `deny_unknown_fields`, so a descriptor body matches `Url`,
+    # the six other fields are silently dropped, and waxum fetches the
+    # descriptor's mmg.whatsapp.net URL -- the ENCRYPTED blob, which passes its
+    # own SSRF guard -- and sends that. The recipient gets an undecryptable
+    # file while the API answers 200. `get_media_data` also rejects the
+    # `Uploaded` variant outright. Both are fixed in ardihikaru/waxum's
+    # fix/uploaded-media-descriptor (models/messages.rs reorders the enum,
+    # handlers/messages.rs adds resolve_media). Reverting this line to
+    # fdciabdul/waxum silently breaks every media send.
+    #
+    # Still never `latest`: an unpinned tag is an unreviewed upgrade landing on
+    # every `docker compose pull`. Bump WAXUM_TAG deliberately.
     restart: unless-stopped
     env_file:
       - .env
@@ -147,6 +168,14 @@ services:
       # having room to serve this app's normal traffic without throttling it.
       RATE_LIMIT_PER_SECOND: "1"     # replenish interval in SECONDS -> 1 token/sec
       RATE_LIMIT_BURST: "200"
+      # Webhook delivery retry/DLQ (Phase 9). Same house rule as
+      # RATE_LIMIT_* above — a waxum-PROCESS setting, not read anywhere in
+      # this Go codebase, so it lives here rather than as a WSM_* var. These
+      # values are reasonable defaults, NOT verified against a live waxum
+      # instance from this environment; tune them there if delivery behaviour
+      # says otherwise.
+      WEBHOOK_RETRY_MAX_ATTEMPTS: "5"
+      WEBHOOK_DLQ_CAPACITY: "1000"
     volumes:
       - waxum-sessions:/data
 

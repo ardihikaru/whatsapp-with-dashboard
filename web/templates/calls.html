@@ -1,0 +1,112 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Voice Calls</h4>
+</div>
+{{if not .CallsEnabled}}
+<div class="alert">Voice calling is disabled on this deployment. An operator can turn it on with
+  <span class="mono">WSM_CALLS_ENABLED=true</span> — see CLAUDE.md's calls hazard note before doing so:
+  WhatsApp's terms are hostile to automated outbound calling and the paired device identity has no backup.</div>
+{{else if .Connected}}
+<div class="card form-card">
+  <div class="send-tabs">
+    <input type="radio" name="call-tab" id="call-tab-tts" class="send-tab-input" checked>
+    <input type="radio" name="call-tab" id="call-tab-play" class="send-tab-input">
+    <div class="send-tab-list" role="tablist">
+      <label class="send-tab-label" for="call-tab-tts">Text-to-speech</label>
+      <label class="send-tab-label" for="call-tab-play">Play audio</label>
+    </div>
+
+    <div class="send-tab-panel" data-send-panel="tts">
+      <form hx-post="{{u "/calls/tts"}}" hx-target="#call-rows" hx-swap="innerHTML"
+            hx-sync="this:drop" hx-disabled-elt="find button"
+            action="{{u "/calls/tts"}}" method="post" novalidate>
+        <label class="textfield">
+          <span class="textfield-label">Routing</span>
+          <select name="routing" class="select">
+            <option value="auto" selected>Automatic routing</option>
+            <option value="explicit">Select a session</option>
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Session</span>
+          <select name="session_id" class="select">
+            <option value="">Automatic</option>
+            {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">To (international format)</span>
+          <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Text to speak</span>
+          <textarea name="text" rows="4" maxlength="2000" required></textarea>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Voice (optional)</span>
+          <input type="text" name="voice" placeholder="leave blank for the backend default">
+        </label>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-label">Place call</span>
+            <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="send-tab-panel" data-send-panel="play">
+      <form hx-post="{{u "/calls/play"}}" hx-target="#call-rows" hx-swap="innerHTML"
+            hx-sync="this:drop" hx-disabled-elt="find button"
+            action="{{u "/calls/play"}}" method="post" novalidate>
+        <label class="textfield">
+          <span class="textfield-label">Routing</span>
+          <select name="routing" class="select">
+            <option value="auto" selected>Automatic routing</option>
+            <option value="explicit">Select a session</option>
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Session</span>
+          <select name="session_id" class="select">
+            <option value="">Automatic</option>
+            {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">To (international format)</span>
+          <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Audio URL</span>
+          <input type="url" name="audio_url" placeholder="https://example.com/clip.mp3" required>
+          <small class="muted">Must resolve to a PUBLIC address — waxum refuses any URL resolving to
+            loopback, a private (RFC1918) range, or link-local, with no override.</small>
+        </label>
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-label">Place call</span>
+            <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{{else}}
+<div class="card"><p>No connected sessions. <a href="{{u "/sessions"}}">Pair or activate a session</a> first.</p></div>
+{{end}}
+
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Session</th><th>To</th><th>Kind</th><th>Status</th><th>Created</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="call-rows" hx-get="{{u "/calls/rows"}}" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <tr><td colspan="6">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

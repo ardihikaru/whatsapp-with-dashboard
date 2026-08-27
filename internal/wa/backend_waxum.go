@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -40,6 +41,14 @@ type waxumBackend struct {
 	pairTimeout    time.Duration // hard deadline for the pairing pump (hazard: see pairPump)
 
 	sessions sync.Map // id (string) -> *waxumSessionState
+
+	// eventsEnabled/eventPumpOnce/gatewayReachable/healthKnown belong to
+	// the fleet-wide SSE event pump — see backend_waxum_events.go's
+	// package doc comment for what each does.
+	eventsEnabled    bool
+	eventPumpOnce    sync.Once
+	gatewayReachable atomic.Bool // last verdict from the event pump — see Reachable
+	healthKnown      atomic.Bool // true once ANY verdict has been recorded
 }
 
 // waxumSessionState is this backend's own per-session bookkeeping —
@@ -82,6 +91,21 @@ type waxumSessionState struct {
 	// race directly; atomic.Int32's Add/Load/Store give correctness
 	// (no lost updates, no torn reads) regardless.
 	loggedOutStreak atomic.Int32
+
+	// poke lets the fleet-wide SSE event pump (backend_waxum_events.go)
+	// wake THIS session's statusPump early, without ever writing session
+	// state itself — see backend_waxum_events.go's package doc comment for
+	// why an event stream must never become a second state authority.
+	// Buffered 1: a poke that arrives while statusPump is mid-poll, or
+	// hasn't drained a previously queued one yet, is dropped rather than
+	// blocking — one pending poke is exactly as useful as ten, since
+	// either way the very next GET /status already reconciles real state,
+	// and handleEvent's send is non-blocking specifically so the
+	// fleet-wide pump can never stall on a session with no running
+	// statusPump (not yet Connect'ed, or already torn down). Allocated
+	// alongside the rest of this struct in sessionState — see that
+	// method's doc comment.
+	poke chan struct{}
 }
 
 // loggedOutHysteresisPolls is how many CONSECUTIVE GET /status polls must
@@ -137,6 +161,11 @@ type WaxumConfig struct {
 	QRPollInterval time.Duration
 	PollInterval   time.Duration
 	PairTimeout    time.Duration
+	// EventsEnabled turns on the fleet-wide SSE event pump
+	// (backend_waxum_events.go, Phase 8) — WSM_WAXUM_EVENTS. false leaves
+	// statusPump behaving exactly as it did before that phase: pure
+	// polling, no poke ever sent.
+	EventsEnabled bool
 }
 
 // NewWaxumBackend builds a Backend that drives a running waxum instance
@@ -148,6 +177,7 @@ func NewWaxumBackend(client *waxum.Client, cfg WaxumConfig) Backend {
 		qrPollInterval: cfg.QRPollInterval,
 		pollInterval:   cfg.PollInterval,
 		pairTimeout:    cfg.PairTimeout,
+		eventsEnabled:  cfg.EventsEnabled,
 	}
 }
 
@@ -164,10 +194,24 @@ func (b *waxumBackend) Close() {}
 
 // sessionState returns (creating on first use) this backend's bookkeeping
 // for id. Only writers (Connect/StartPairing/statusPump) create an entry;
-// Live only reads.
+// Live only reads. poke is allocated here (buffered 1) so every entry —
+// whichever caller creates it first — is immediately pokeable; the event
+// pump (backend_waxum_events.go) and statusPump never need to coordinate
+// over which of them provisions it.
 func (b *waxumBackend) sessionState(id string) *waxumSessionState {
-	v, _ := b.sessions.LoadOrStore(id, &waxumSessionState{})
+	v, _ := b.sessions.LoadOrStore(id, &waxumSessionState{poke: make(chan struct{}, 1)})
 	return v.(*waxumSessionState)
+}
+
+// pokeSession wakes id's statusPump early, if one is running — a
+// non-blocking send, so a session with no live poller (or one that is
+// already mid-poll) never stalls the caller. See waxumSessionState.poke's
+// doc comment.
+func (b *waxumBackend) pokeSession(id string) {
+	select {
+	case b.sessionState(id).poke <- struct{}{}:
+	default:
+	}
 }
 
 func (b *waxumBackend) markLive(id string, live bool) {
@@ -206,6 +250,14 @@ func (b *waxumBackend) Live(s *ManagedSession) bool {
 // that races a still-dialling socket right after a pairing success (see
 // finishPairingSuccess's point 8) gets retried instead of hard-failing on
 // the first attempt.
+//
+// A *waxum.APIError carrying 400/415/422 maps to ErrRejectedByBackend: a
+// media/ops/webhook payload waxum's own validation refused (a bad
+// mimetype, a malformed descriptor, an unknown webhook event name — see
+// that sentinel's doc comment). Any OTHER status inside an *APIError falls
+// through to the default case unchanged — genuinely unexpected statuses
+// stay a bare *waxum.APIError rather than being folded into a sentinel that
+// would misrepresent them.
 func mapErr(err error) error {
 	switch {
 	case err == nil:
@@ -219,6 +271,24 @@ func mapErr(err error) error {
 	case errors.Is(err, waxum.ErrRateLimited):
 		return ErrBackendBusy
 	default:
+		var apiErr *waxum.APIError
+		if errors.As(err, &apiErr) {
+			switch apiErr.StatusCode {
+			case http.StatusBadRequest, http.StatusUnsupportedMediaType, http.StatusUnprocessableEntity:
+				// apiErr.Message() extracts waxum's own human-readable
+				// reason (its {"error":{"message":...}} envelope) rather
+				// than dropping it: for a webhook registration rejected by
+				// waxum's SSRF guard, ErrRejectedByBackend's generic text
+				// alone reads as "backend said no" with no indication WHY
+				// — an operator whose receiver genuinely is on a private
+				// network (the single most likely cause) gets nothing to
+				// go on. See ErrRejectedByBackend's own doc comment.
+				if msg := apiErr.Message(); msg != "" {
+					return fmt.Errorf("%w: %s", ErrRejectedByBackend, msg)
+				}
+				return ErrRejectedByBackend
+			}
+		}
 		return err
 	}
 }
@@ -396,14 +466,62 @@ func (b *waxumBackend) ensureStatusPump(ctx context.Context, s *ManagedSession) 
 // polled at a slow, bounded cadence, not fast forever.
 const maxStatusPollBackoff = 5 * time.Minute
 
-// statusPump is the sole state source for this backend today: it polls
-// GET /status every pollInterval, refreshes the Live() atomic, and calls
-// setState on a recognized transition. A future phase may add a waxum
-// webhook that reports transitions immediately — this poller is
-// deliberately kept as the whole state machine (not layered under
-// something webhook-shaped) so that later addition can simply take
-// precedence over a tick (e.g. by also calling applyStatus) without
-// restructuring this loop.
+// pokeMinIntervalDivisor derives pokeMinInterval (below) from b.pollInterval
+// rather than a fixed duration: 4, so that at config.DefaultWaxumPollInterval
+// (60s) the floor lands at exactly 15s — the OLD DefaultWaxumPollInterval,
+// i.e. the cadence loggedOutHysteresisPolls's ~45s evidence window was
+// originally calibrated against (see that constant's doc comment) — without
+// hardcoding a second, independent reference to that old value. Deriving it
+// ALSO means a test that injects a tiny pollInterval (this package's own
+// house convention — WaxumConfig's fields are all struct fields, not
+// constants, for exactly this reason) gets a correspondingly tiny floor,
+// instead of a fixed 15s swallowing an entire fast test.
+const pokeMinIntervalDivisor = 4
+
+// pokeMinInterval floors how close together two REAL GET /status polls may
+// land when at least one of them was triggered early by an SSE poke
+// (waxumSessionState.poke) rather than the timer. See
+// pokeMinIntervalDivisor's doc comment for how the floor is derived.
+//
+// Why this needs to exist at all: applyStatus's loggedOutHysteresisPolls
+// gate counts CONSECUTIVE qualifying polls, with no timing requirement of
+// its own — it was calibrated (see that constant's doc comment) assuming
+// consecutive polls are naturally spaced by whatever the poll cadence is,
+// giving ~45s of real wall-clock evidence at the OLD 15s default before a
+// terminal StateLoggedOut verdict could commit. A poke breaks that
+// assumption on purpose (that's the whole point of this phase — see this
+// file's package doc comment and backend_waxum_events.go's), and without a
+// floor a BURST of SSE events (three logged_out frames arriving within a
+// couple hundred milliseconds, exactly the scenario waxum's own lossy
+// events ring makes plausible right after a reconnect) could trigger three
+// consecutive real polls within that same couple hundred milliseconds —
+// numerically still "3 consecutive qualifying polls", but with the
+// production flap's actual timescale (a 15s flap, per that doc comment)
+// compressed to a fifth of a second. That would reopen the exact incident
+// loggedOutHysteresisPolls exists to prevent, just triggered by an event
+// burst instead of a single poll.
+//
+// The FIRST poke after any idle period longer than this still reacts
+// immediately (see statusPump) — only a poke arriving within
+// pokeMinInterval of the PREVIOUS real poll is deferred, not dropped. See
+// TestAnEventDoesNotShortCircuitTheLoggedOutHysteresis.
+func (b *waxumBackend) pokeMinInterval() time.Duration {
+	if b.pollInterval <= 0 {
+		return 0
+	}
+	return b.pollInterval / pokeMinIntervalDivisor
+}
+
+// statusPump is the sole state source for this backend: it polls GET
+// /status every pollInterval, refreshes the Live() atomic, and calls
+// setState on a recognized transition. Phase 8 (backend_waxum_events.go)
+// added a second way to wake this loop early — a poke on
+// sessionState(s.ID).poke, sent by the fleet-wide SSE event pump — but that
+// pump NEVER calls applyStatus itself and NEVER carries a *waxum.Status; a
+// poke only shortens the wait before the NEXT real GET /status, which then
+// flows through applyStatus exactly as a timer-driven tick would. This
+// loop remains the one and only state machine — see
+// backend_waxum_events.go's package doc comment for why that split matters.
 //
 // It is wg-tracked (spawned via s.mgr.go1) and exits solely on ctx.Done()
 // — ctx is s.ctx, a child of Manager.rootCtx, canceled by
@@ -411,7 +529,7 @@ const maxStatusPollBackoff = 5 * time.Minute
 // separate hard deadline is needed the way the pairing pump needs one (that
 // one has no terminal item of its own — see pairPump).
 //
-// Two fixes live here:
+// Three fixes live here:
 //
 //  1. pumping (the sessionState guard ensureStatusPump uses to avoid a
 //     duplicate poller for the same id) is reset to false on EVERY exit
@@ -427,12 +545,20 @@ const maxStatusPollBackoff = 5 * time.Minute
 //     cadence forever — "resilient... rather than silently spinning".
 //     failCount resets to 0 on the next success, returning the pump to its
 //     normal pollInterval cadence.
+//  3. A poke (sst.poke, Phase 8) shortens the wait instead of the timer —
+//     but only down to pokeMinInterval since the LAST real poll, never to
+//     zero; see that constant's doc comment for why a floor is required,
+//     not optional. lastPoll tracks that timestamp across iterations.
 func (b *waxumBackend) statusPump(ctx context.Context, s *ManagedSession) {
-	defer b.sessionState(s.ID).pumping.Store(false)
+	sst := b.sessionState(s.ID)
+	defer sst.pumping.Store(false)
 
+	pokeFloor := b.pokeMinInterval()
 	failCount := 0
+	var lastPoll time.Time
 	for {
 		st, err := b.client.Status(ctx, s.ID)
+		lastPoll = time.Now()
 		wait := b.pollInterval
 		switch {
 		case err == nil:
@@ -447,6 +573,20 @@ func (b *waxumBackend) statusPump(ctx context.Context, s *ManagedSession) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-sst.poke:
+			// An SSE event pumped this session (backend_waxum_events.go's
+			// handleEvent) — react sooner than `wait`, but never sooner
+			// than pokeFloor since lastPoll (see pokeMinInterval's doc
+			// comment). Still inside the floor: wait out the remainder
+			// instead of polling immediately; ctx.Done() still takes
+			// priority even during that deferral.
+			if since := time.Since(lastPoll); since < pokeFloor {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(pokeFloor - since):
+				}
+			}
 		case <-time.After(wait):
 		}
 	}

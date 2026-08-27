@@ -95,8 +95,28 @@ const (
 	// fix; this and point 7 are defense-in-depth for anything still
 	// running against an unpatched waxum's tight defaults.
 	DefaultWaxumQRPollInterval = 3 * time.Second
-	DefaultWaxumPollInterval   = 15 * time.Second
-	DefaultWaxumPairTimeout    = 180 * time.Second
+	// DefaultWaxumPollInterval was 15s until Phase 8 (SSE event pump,
+	// internal/wa/backend_waxum_events.go) gave statusPump a second way to
+	// wake up early: a fleet-wide GET /api/v1/events/tail stream "pokes"
+	// the poller (waxumSessionState.poke) the instant a connection-state
+	// event arrives, instead of it having to wait out the full interval.
+	// With that in place, statusPump is a reconciling BACKSTOP rather than
+	// the primary signal, so its own cadence can relax — 60s cuts this
+	// poller's steady-state request rate by 4x (on top of everything
+	// pairPump's point 7 already saves — see CLAUDE.md's waxum rate-limit
+	// hazard note) while perceived transition latency still drops to ~0 on
+	// the event path. loggedOutHysteresisPolls's evidence window is
+	// unaffected: it is now floored by pokeMinInterval
+	// (backend_waxum.go), not by this value, specifically so relaxing this
+	// default cannot also relax how much wall-clock evidence a terminal
+	// StateLoggedOut verdict requires.
+	DefaultWaxumPollInterval = 60 * time.Second
+	DefaultWaxumPairTimeout  = 180 * time.Second
+	// DefaultWaxumEventsEnabled turns the fleet-wide SSE event pump on by
+	// default (Phase 8) — WSM_WAXUM_EVENTS=false is the escape hatch back
+	// to statusPump-only polling, e.g. against a waxum build whose
+	// /api/v1/events/tail is unreachable or misbehaving.
+	DefaultWaxumEventsEnabled = true
 )
 
 // Config is the resolved application configuration.
@@ -184,6 +204,24 @@ type Config struct {
 	WaxumQRPollInterval time.Duration
 	WaxumPollInterval   time.Duration
 	WaxumPairTimeout    time.Duration // hard deadline for the pairing pump
+	// WaxumEventsEnabled gates the fleet-wide SSE event pump
+	// (internal/wa/backend_waxum_events.go). Resolves to a default
+	// regardless of backend, like the interval/timeout knobs above; only
+	// matters when WABackend == "waxum".
+	WaxumEventsEnabled bool
+
+	// Media (see media.go's loadMedia). MediaMaxBytes/MediaUploadTimeout/
+	// MediaUploadConcurrency bound one media send's HTTP handler; MediaArchive
+	// gates the best-effort MinIO archive step.
+	MediaMaxBytes          int64
+	MediaUploadTimeout     time.Duration
+	MediaUploadConcurrency int
+	MediaArchive           bool
+
+	// CallsEnabled gates the /calls/* endpoints — false (the default) makes
+	// every one of them answer 501 and place nothing. See media.go's
+	// DefaultCallsEnabled doc comment.
+	CallsEnabled bool
 }
 
 // Load resolves the configuration and fails fast on an invalid env value.
@@ -269,6 +307,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if err := loadWaxum(cfg); err != nil {
+		return nil, err
+	}
+	if err := loadMedia(cfg); err != nil {
 		return nil, err
 	}
 	return cfg, nil

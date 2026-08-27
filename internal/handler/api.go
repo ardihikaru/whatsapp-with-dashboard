@@ -9,6 +9,7 @@ import (
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
 
 const maxBodyBytes = 64 * 1024
@@ -55,6 +56,45 @@ const backendBusyRetryAfterSeconds = "5"
 func writeBackendBusy(w http.ResponseWriter, message string) {
 	w.Header().Set("Retry-After", backendBusyRetryAfterSeconds)
 	writeError(w, http.StatusServiceUnavailable, message)
+}
+
+// writeWAError maps a wa.Err* sentinel to its HTTP status and writes it.
+// internal/wa/errors.go's header comment documents this exact map — keep
+// the two in step whenever either changes.
+//
+// Extracted from apiToggle (previously the only hand-rolled copy of this
+// switch, covering ErrNotPaired/ErrDeviceGone/ErrBackendBusy) as the FIRST
+// thing Phase 6a does, precisely because that phase adds 20+ endpoints that
+// all need the same mapping: a switch statement copy-pasted 20 times is how
+// this status map rots the moment one sentinel's meaning changes and only
+// some copies get updated. Every handler this package adds from here on
+// funnels its wa.* errors through this one function instead.
+func writeWAError(w http.ResponseWriter, err error) {
+	switch {
+	case err == nil:
+		return
+	case errors.Is(err, wa.ErrNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, wa.ErrNotPaired),
+		errors.Is(err, wa.ErrDeviceGone),
+		errors.Is(err, wa.ErrWrongState),
+		errors.Is(err, wa.ErrNotConnected):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, wa.ErrNotAGroupJID):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, wa.ErrQueueFull):
+		writeError(w, http.StatusTooManyRequests, err.Error())
+	case errors.Is(err, wa.ErrRejectedByBackend):
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, wa.ErrAlreadyExists):
+		writeError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, wa.ErrBackendBusy):
+		writeBackendBusy(w, err.Error())
+	case errors.Is(err, wa.ErrUnsupported):
+		writeError(w, http.StatusNotImplemented, err.Error())
+	default:
+		writeError(w, http.StatusInternalServerError, err.Error())
+	}
 }
 
 // PostAPILogin authenticates an API client and returns a bearer access token.
@@ -129,11 +169,31 @@ func (h *handlers) GetStats(w http.ResponseWriter, r *http.Request) {
 
 // GetHealth reports process health with real session counts. No DB ping
 // needed — SQLite is local to the process.
+//
+// backend, when the active backend supports GatewayHealth (waxum), reports
+// its CACHED reachability verdict (Manager.CachedBackendHealth) — never a
+// live call: this route is unauthenticated and is the container healthcheck
+// (docker-compose.yml), probed on every liveness interval, and an inline
+// call there would put a network hop on every probe and feed waxum's own
+// rate limiter for no reason a liveness check needs (CLAUDE.md's waxum
+// rate-limit hazard note). "reachable" is omitted (not defaulted to
+// true/false) when the event pump maintaining that cache hasn't recorded a
+// first verdict yet (cold boot, or WSM_WAXUM_EVENTS=false) — an omitted
+// field reads as "unknown", not as a guess. The field itself is omitted
+// entirely under a backend with no GatewayHealth at all (whatsmeow).
 func (h *handlers) GetHealth(w http.ResponseWriter, r *http.Request) {
 	total, connected := h.Manager.Counts()
-	writeJSON(w, http.StatusOK, map[string]any{
+	out := map[string]any{
 		"status":    "ok",
 		"sessions":  total,
 		"connected": connected,
-	})
+	}
+	if name, reachable, known, supported := h.Manager.CachedBackendHealth(); supported {
+		backend := map[string]any{"name": name}
+		if known {
+			backend["reachable"] = reachable
+		}
+		out["backend"] = backend
+	}
+	writeJSON(w, http.StatusOK, out)
 }

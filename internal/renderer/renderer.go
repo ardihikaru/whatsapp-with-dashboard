@@ -51,6 +51,24 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/send.html"),
 		root:  "base",
 	},
+	// Note for "calls"/"session-ops"/"session-webhooks": none of these
+	// filesets include their own row/panel partials — same as "sessions"
+	// above never including session_rows.html. Every table/panel fills
+	// itself via hx-get (load, every 5s) against a partial that lives only
+	// in partialFiles below, so the poll and the initial paint can never
+	// render two different shapes.
+	"calls": {
+		files: append(chrome(), "templates/calls.html"),
+		root:  "base",
+	},
+	"session-ops": {
+		files: append(chrome(), "templates/sessions/ops.html"),
+		root:  "base",
+	},
+	"session-webhooks": {
+		files: append(chrome(), "templates/sessions/webhooks.html"),
+		root:  "base",
+	},
 	"api_clients/list": {
 		files: append(chrome(), "templates/api_clients/list.html", "templates/api_clients/expiry.html",
 			"templates/api_clients/secret.html", "templates/partials/pager.html"),
@@ -96,6 +114,10 @@ var partialFiles = []string{
 	"templates/partials/send_result.html",
 	"templates/partials/log_rows.html",
 	"templates/partials/system_log_rows.html",
+	"templates/partials/call_rows.html",
+	"templates/partials/session_ops_panel.html",
+	"templates/partials/webhook_rows.html",
+	"templates/partials/webhook_dlq_rows.html",
 }
 
 // Renderer holds the parsed template sets.
@@ -112,7 +134,7 @@ type Renderer struct {
 // this serves at a host root. Every in-app URL in a template goes through the
 // `u` function below.
 //
-// WHY A TEMPLATE FUNCTION AND NOT A FIELD ON THE PAGE DATA
+// # WHY A TEMPLATE FUNCTION AND NOT A FIELD ON THE PAGE DATA
 //
 // The obvious move is a Base field on PageBase and {{.Base}}/sessions in the
 // markup. It does not work here. RenderPartial executes a named partial with

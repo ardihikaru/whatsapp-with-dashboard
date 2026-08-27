@@ -339,3 +339,131 @@ mountpoint on .2 failed for want of a password, so its `||` branch printed
 reads `/var/lib/docker/volumes` through a container instead, which does run as
 root. A failed check that prints the reassuring branch is worth more suspicion
 than a check that errors out loudly.
+
+## 2026-08-27 Phase 9 finishing pass — media/calls/ops/webhooks e2e coverage
+
+Base URL: `http://127.0.0.1:8801` (throwaway instance, app tables in SQLite,
+**no MySQL contacted**). `WSM_WA_BACKEND=whatsmeow` (scripts/e2e-env.sh's own
+pin) — this run proves the DEGRADED path for every Phase 6a/9 surface, never
+the real feature; see `e2e/media.spec.ts`'s header comment for why.
+
+Browser: Playwright 1.62.1, Chromium, system libraries via
+`npx playwright install-deps`.
+
+Browser user: admin `ardihikaru`. Secret handling: unchanged.
+
+**Why this run needed a manual step first.** `go run ./cmd/app` (what
+`scripts/e2e-env.sh` execs) failed to boot with `WSM_MINIO_ENDPOINT is
+required` — MinIO became an unconditional boot requirement in an earlier
+phase (`internal/config.loadMinio`), but neither `scripts/e2e-env.sh` nor
+`playwright.config.ts` was updated to supply it, and `.env` is never sourced
+by a bare `go run` (only `docker compose`'s `env_file:` reads it). Worked
+around by exporting only the four `WSM_MINIO_*` keys from `.env` into the
+shell running `./scripts/e2e-run.sh` — deliberately NOT sourcing the whole
+file, since it also carries production's `WSM_ADDR`/`WA_BASE_URL`/
+`WA_COOKIE_SECURE` values that would have broken the hermetic 8801 setup.
+This gap is real and unfixed; see the phase report for the recommendation.
+
+Results:
+
+| Check | Result |
+|---|---|
+| `go build ./...` | clean |
+| `go vet ./...` | clean |
+| `go clean -testcache && go test ./...` | pass, all packages |
+| Playwright, all projects (mobile-portrait, mobile-small, desktop) | **72 passed, 0 failed** (31 skipped — desktop/phone-only guards + opt-in evidence capture) (1.3m) |
+| `/send` with no live-connected session (whatsmeow device store empty at boot) | "No connected sessions." shown; media tab and file input absent, pinned rather than untested |
+| `/calls` (`WSM_CALLS_ENABLED=false` default) | "disabled on this deployment" shown |
+| `/sessions/{id}/ops` panel (backend has no `SessionOps`) | "not supported by this backend" shown, after the panel's own `load` poll |
+| `/sessions/{id}/webhooks` (backend has no `WebhookAdmin`) | "not supported by this backend" shown synchronously |
+| New pages at 390×844 / 360×740 / 1280×800: no element wider than the configured viewport | pass, `/calls` + `/sessions/{id}/ops` + `/sessions/{id}/webhooks` |
+| Same pages: scrolls to bottom | skipped — degraded-copy layout fits on one screen at every tested viewport |
+
+Notes:
+
+- **The media tab was never reached, and that is reported rather than
+  papered over.** `cmd/e2eseed`'s sessions carry `LastStatus="connected"` in
+  the DB, but the app reconciles LIVE state at boot by asking the backend;
+  the boot log for this run shows `WARN boot reconnect failed
+  session=e2e-sess-0001 err="whatsmeow device missing for paired session
+  (re-pair required)"` for both seeded sessions, so
+  `wa.ManagedSession.Connected` is never true here. `send.html` gates its
+  whole tabbed form — text and media alike — behind `{{if .Connected}}`.
+  Reaching the media tab, or a live call, needs a real paired device or a
+  real waxum instance, both out of reach from this environment.
+- **Phase 1's red-then-green evidence** (the five previously-untested
+  session-ops/webhook actions — auto-reconnect, history-sync, appstate
+  resync, webhook register, DLQ replay) is a `go test` result, not a
+  Playwright one; see the phase report for the failing-then-passing output.
+
+## 2026-08-27 Cleanup pass — `opsAction` error surfacing, and `make e2e` boots hermetically
+
+Two bugs the Phase 9 finishing pass documented rather than fixed.
+
+**Bug 1 — a failed session-ops action told the operator nothing.**
+`internal/handler/ops_ui.go`'s `opsAction` only `slog.Warn`ed a failed
+Pause/Resume/auto-reconnect/history-sync/appstate-resync and re-rendered an
+ordinary, error-free panel — the button did nothing and the page said
+nothing. `renderOpsPanel` now takes the action's error and puts it on the
+panel's own `Error` field, the same way `loadOpsPanel`'s three read calls
+already do; `errors.Is(err, wa.ErrUnsupported)` reads as "not supported by
+this backend" rather than a raw error string.
+`TestSessionOpsAppStateResyncReachesTheBackendWithNoFilter`'s doc comment,
+which deliberately pinned the swallow as documented-not-fixed, now says so
+in the past tense and points at the new test.
+`TestAFailedSessionOpsActionTellsTheOperator`
+(`internal/handler/session_admin_pages_test.go`) is red against the old
+`renderOpsPanel` (confirmed by temporarily reverting it: the panel rendered
+with no `alert-error` and no error text) and green against the fix.
+
+**Bug 2 — `make e2e` could not boot the app, in two separate ways.**
+`scripts/e2e-env.sh` exported no `WSM_MINIO_*` values, but `config.Load()`
+has required all four unconditionally since MinIO landed, so `go run
+./cmd/app` died with `WSM_MINIO_ENDPOINT is required` on a clean checkout.
+Fixed by pulling exactly those four keys out of `.env` (never sourced
+wholesale) with one `grep` each, exported, and left to die with the
+process — same rule as `_data/paswd`'s handling just above it in the same
+file. Absent `.env` and an unset key both fail fast with a message naming
+all four keys, rather than the opaque `config.Load()` error.
+
+Running `make e2e` end-to-end (not exercised in the Phase 9 evidence above,
+which bypassed `make` and ran `./scripts/e2e-run.sh` directly after
+exporting the MinIO keys by hand) surfaced a **second, independent**
+blocker: this repo's `Makefile` does `-include .env` + `export` near its
+top, so every target — including `e2e` — runs with `.env` exported
+wholesale into the recipe's own environment already, before
+`scripts/e2e-env.sh` ever runs. `scripts/e2e-env.sh`'s
+`${WSM_ADDR:-127.0.0.1:8801}`-style defaults only apply when a variable is
+*unset*, so `.env`'s own `WSM_ADDR=:8800`, `WA_BASE_URL=<production
+host>`, and `WA_COOKIE_SECURE=true` all leaked straight through: the app
+bound `:8800` instead of `127.0.0.1:8801` (where Playwright's readiness
+probe and every test's `baseURL` actually point), and — had it bound the
+right port — a `Secure` cookie over plain HTTP would have failed every
+login. Fixed by forcing those three, with an override hook under distinct
+`WSM_E2E_ADDR` / `WSM_E2E_BASE_URL` / `WSM_E2E_COOKIE_SECURE` names instead
+of the app's own — so `.env`, leaked in through `make`, cannot reach them
+through the names it already occupies.
+
+Base URL: `http://127.0.0.1:8801` (throwaway instance, app tables in
+SQLite, no MySQL contacted). `WSM_WA_BACKEND=whatsmeow` (unchanged pin).
+
+Browser: Playwright 1.62.1, Chromium, system libraries via
+`npx playwright install-deps`.
+
+Results:
+
+| Check | Result |
+|---|---|
+| `go build ./...` | clean |
+| `go vet ./...` | clean |
+| `go clean -testcache && go test ./...` | pass, all packages |
+| `TestAFailedSessionOpsActionTellsTheOperator` | red against the pre-fix `renderOpsPanel` (verified by temporary revert), green against the fix |
+| `make e2e` (no manual exports, straight from a `make` invocation) | exit 0; app listens on `http://127.0.0.1:8801` (not `:8800`); **72 passed, 0 failed** (31 skipped — desktop/phone-only guards + opt-in evidence capture) (1.4m) |
+
+Notes:
+
+- The media-tab / live-connection gap this cleanup pass was explicitly told
+  NOT to fix (`cmd/e2eseed`'s sessions never reconcile to `Connected` under
+  whatsmeow, so `/send`'s media tab stays structurally unreachable here) is
+  unchanged and still correctly documented in `e2e/media.spec.ts` and the
+  Phase 9 entry above.

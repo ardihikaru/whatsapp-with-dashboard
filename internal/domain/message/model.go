@@ -31,6 +31,15 @@ type Message struct {
 	ClientRef   string // laundry client uid (caller-supplied)
 	TenantRef   string // laundry tenant/outlet uid (caller-supplied)
 	Category    string // otp | notification | alert | manual
+
+	// Media (0004 columns). All optional: "" / 0 mean "no media", i.e. a plain
+	// text send. The caption is NOT here — it reuses Body, the same column a
+	// text message already has (see migrations/0004's header).
+	MediaKind      string // image | video | audio | document ("" for text)
+	MediaFilename  string
+	MediaMime      string
+	MediaSize      int64
+	MediaObjectKey string // this app's own MinIO archive key, independent of waxum's copy
 }
 
 // Categories a send may declare. Unknown values are clamped to CategoryNotification

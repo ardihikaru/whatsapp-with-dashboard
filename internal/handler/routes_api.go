@@ -55,4 +55,45 @@ func (h *handlers) mountAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/sessions/{id}/messages", api(http.HandlerFunc(h.PostAPISendMessage)))
 	mux.Handle("GET /api/v1/sessions/{id}/messages", api(http.HandlerFunc(h.GetAPISessionMessages)))
 	mux.Handle("GET /api/v1/sessions/{id}/groups", api(http.HandlerFunc(h.GetAPISessionGroups)))
+
+	// Phase 6a: media send/download.
+	mux.Handle("POST /api/v1/sessions/{id}/messages/media", api(http.HandlerFunc(h.PostAPISessionSendMedia)))
+	mux.Handle("POST /api/v1/messages/media", api(http.HandlerFunc(h.PostAPISendMediaAuto)))
+	mux.Handle("POST /api/v1/sessions/{id}/media/download", api(http.HandlerFunc(h.PostAPISessionMediaDownload)))
+
+	// Phase 6a: calls — 501 on every one of these until WSM_CALLS_ENABLED=true
+	// (see api_calls.go's callsDisabledMessage).
+	mux.Handle("POST /api/v1/sessions/{id}/calls/tts", api(http.HandlerFunc(h.PostAPICallTTS)))
+	mux.Handle("POST /api/v1/sessions/{id}/calls/play", api(http.HandlerFunc(h.PostAPICallPlay)))
+	mux.Handle("POST /api/v1/sessions/{id}/calls/terminate", api(http.HandlerFunc(h.PostAPICallTerminate)))
+	mux.Handle("GET /api/v1/sessions/{id}/calls", api(http.HandlerFunc(h.GetAPISessionCalls)))
+
+	// Phase 6b §1: session operations (capabilities.go's SessionOps) — 501
+	// on every one of these on the whatsmeow backend. Route names are
+	// WSM-native, not waxum's own — see api_ops.go's header comment.
+	mux.Handle("GET /api/v1/sessions/{id}/operations", api(http.HandlerFunc(h.GetAPISessionOperations)))
+	mux.Handle("POST /api/v1/sessions/{id}/pause", api(http.HandlerFunc(h.PostAPISessionPause)))
+	mux.Handle("POST /api/v1/sessions/{id}/resume", api(http.HandlerFunc(h.PostAPISessionResume)))
+	mux.Handle("GET /api/v1/sessions/{id}/auto-reconnect", api(http.HandlerFunc(h.GetAPISessionAutoReconnect)))
+	mux.Handle("PUT /api/v1/sessions/{id}/auto-reconnect", api(http.HandlerFunc(h.PutAPISessionAutoReconnect)))
+	mux.Handle("GET /api/v1/sessions/{id}/history-sync", api(http.HandlerFunc(h.GetAPISessionHistorySync)))
+	mux.Handle("PUT /api/v1/sessions/{id}/history-sync", api(http.HandlerFunc(h.PutAPISessionHistorySync)))
+	mux.Handle("POST /api/v1/sessions/{id}/appstate/resync", api(http.HandlerFunc(h.PostAPISessionAppStateResync)))
+	mux.Handle("POST /api/v1/sessions/{id}/spam-report", api(http.HandlerFunc(h.PostAPISessionSpamReport)))
+	mux.Handle("POST /api/v1/sessions/{id}/trust-tokens", api(http.HandlerFunc(h.PostAPISessionTrustTokens)))
+	mux.Handle("GET /api/v1/sessions/{id}/trust-tokens", api(http.HandlerFunc(h.GetAPISessionTrustTokens)))
+	mux.Handle("GET /api/v1/sessions/{id}/trust-tokens/{jid}", api(http.HandlerFunc(h.GetAPISessionTrustToken)))
+	mux.Handle("DELETE /api/v1/sessions/{id}/trust-tokens/expired", api(http.HandlerFunc(h.DeleteAPISessionTrustTokensExpired)))
+
+	// Phase 6b §2: webhook administration (capabilities.go's WebhookAdmin).
+	mux.Handle("GET /api/v1/sessions/{id}/webhooks", api(http.HandlerFunc(h.GetAPISessionWebhooks)))
+	mux.Handle("POST /api/v1/sessions/{id}/webhooks", api(http.HandlerFunc(h.PostAPISessionWebhooks)))
+	mux.Handle("DELETE /api/v1/sessions/{id}/webhooks/{webhookID}", api(http.HandlerFunc(h.DeleteAPISessionWebhook)))
+	mux.Handle("POST /api/v1/sessions/{id}/webhooks/{webhookID}/enable", api(http.HandlerFunc(h.PostAPISessionWebhookEnable)))
+	mux.Handle("GET /api/v1/sessions/{id}/webhooks/dlq", api(http.HandlerFunc(h.GetAPISessionWebhookDLQ)))
+	mux.Handle("POST /api/v1/sessions/{id}/webhooks/dlq/{entryID}/replay", api(http.HandlerFunc(h.PostAPISessionWebhookDLQReplay)))
+	mux.Handle("POST /api/v1/webhooks/reenable-all", api(http.HandlerFunc(h.PostAPIWebhooksReenableAll)))
+
+	// Phase 6b §3: gateway health — authenticated, unlike /api/v1/health.
+	mux.Handle("GET /api/v1/gateway/health", api(http.HandlerFunc(h.GetAPIGatewayHealth)))
 }

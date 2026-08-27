@@ -1,6 +1,7 @@
-// Package storage wires up the MinIO object-storage connection. There is no
-// consuming feature yet — this package exists to establish and verify the
-// connection at boot, per the "required at boot" decision in config.
+// Package storage wires up the MinIO object-storage connection (New,
+// EnsureBuckets — established and verified at boot, per the "required at
+// boot" decision in config) and the object-level API handlers use to reach
+// it (objects.go's ObjectStore / MinioObjects).
 package storage
 
 import (

@@ -1,0 +1,73 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Webhooks — {{.Session.Name}} <span class="mono">(+{{.Session.Phone}})</span></h4>
+  <a class="btn btn-outline" href="{{u "/sessions"}}">Back to sessions</a>
+</div>
+
+{{if .Unsupported}}
+<div class="card">
+  <p>Webhook management is <strong>not supported by this backend</strong>. It requires
+     <span class="mono">WSM_WA_BACKEND=waxum</span>.</p>
+</div>
+{{else}}
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+
+<div class="card form-card">
+  <h5>Register a webhook</h5>
+  <p class="muted">waxum refuses any callback URL that resolves to a private address — loopback,
+     RFC1918 (10.x/172.16-31.x/192.168.x), link-local, or similar — with no override. A receiver on
+     this compose network (e.g. <span class="mono">http://app:8800/...</span>) will always be rejected.
+     The URL must be reachable from the PUBLIC internet (or wherever waxum itself runs).</p>
+  <form hx-post="{{u "/sessions"}}/{{.Session.ID}}/webhooks" hx-target="#webhook-rows" hx-swap="innerHTML"
+        hx-disabled-elt="find button"
+        action="{{u "/sessions"}}/{{.Session.ID}}/webhooks" method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Callback URL</span>
+      <input type="url" name="url" placeholder="https://example.com/webhook" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Events (comma-separated)</span>
+      <input type="text" name="events" placeholder="message, receipt, connected, disconnected" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Secret (optional, HMAC signing key)</span>
+      <input type="password" name="secret" autocomplete="off">
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Register</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h5>Registered webhooks</h5>
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>URL</th><th>Events</th><th>Status</th><th>Secret</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="webhook-rows" hx-get="{{u "/sessions"}}/{{.Session.ID}}/webhooks/rows"
+             hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <tr><td colspan="5">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="card">
+  <h5>Dead-letter queue</h5>
+  <p class="muted">Deliveries waxum gave up on after repeated failures. Replaying re-attempts delivery once.</p>
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Event</th><th>URL</th><th>Attempts</th><th>Last error</th><th>Failed at</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="webhook-dlq-rows" hx-get="{{u "/sessions"}}/{{.Session.ID}}/webhooks/dlq/rows"
+             hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <tr><td colspan="6">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+{{end}}

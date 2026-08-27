@@ -35,6 +35,10 @@ const (
 	iconSystemLog template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M3 12h4l2-7 4 14 2-7h6v2h-4.5l-2 7-4-14-2 7H3z"/></svg>`
 	// left-pointing arrow out of a panel — "leave this module, back to the platform"
 	iconPlatform template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M11.7 7.7 8.4 11H20v2H8.4l3.3 3.3-1.4 1.4L4.6 12l5.7-5.7 1.4 1.4zM14 3h5a2 2 0 0 1 2 2v3h-2V5h-5V3zm0 16h5v-3h2v3a2 2 0 0 1-2 2h-5v-2z"/></svg>`
+	// handset receiver — "voice calls", distinct from iconSend's paper-plane
+	// (a text message) so the sidebar itself hints these dispatch two
+	// different kinds of thing before an operator reads the label.
+	iconCalls template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8c1.4 2.8 3.8 5.2 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.4.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.5.6 3.6.1.4 0 .8-.2 1L6.6 10.8z"/></svg>`
 )
 
 // platformLink is the sidebar footer's way back out to the platform backoffice.
@@ -67,6 +71,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 		{Subheader: "WhatsApp", Items: []NavItem{
 			{Title: "Sessions", Path: "/sessions", Icon: iconSessions},
 			{Title: "Send Message", Path: "/send", Icon: iconSend},
+			{Title: "Voice Calls", Path: "/calls", Icon: iconCalls},
 			{Title: "Message Log", Path: "/logs", Icon: iconLogs},
 		}},
 		{Subheader: "Admin", Items: []NavItem{

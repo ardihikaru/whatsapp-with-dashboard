@@ -3,6 +3,7 @@ package wa
 import (
 	"context"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -89,6 +90,30 @@ type fakeBackend struct {
 	// can assert "attempted N times" without racing on a bespoke counter.
 	connectFn    func(ctx context.Context, s *ManagedSession) error
 	connectCalls atomic.Int32
+
+	// sendMediaID, when non-empty, makes SendMedia succeed and return it
+	// instead of the default ErrUnsupported — the media analogue of
+	// sendTextID above, for later phases' sender tests exercising a media
+	// job.
+	sendMediaID string
+
+	// mediaMu guards sentMedia and sendMediaCalls, the record of every
+	// OutboundMedia that has crossed SendMedia — a later phase's sender
+	// tests need to assert on the exact media that reached the backend,
+	// the same way sendTextID alone cannot prove text content.
+	mediaMu        sync.Mutex
+	sentMedia      []OutboundMedia
+	sendMediaCalls int
+
+	// sendMediaFn, when set, is called (NOT under mediaMu — it must not
+	// itself call back into this fake while holding it, but IS free to read
+	// mediaMu-guarded fields via its own locking) before sendMediaID/
+	// ErrUnsupported is applied. A non-nil return overrides that default,
+	// letting a test vary the outcome per call — e.g.
+	// TestAMediaSendIsRetriedWithoutReUploading fails the first two calls
+	// with a retryable error and succeeds the third, to prove trySend's
+	// retry loop re-sends rather than re-uploads.
+	sendMediaFn func(to JID, m OutboundMedia) error
 }
 
 func (f *fakeBackend) Name() string { return f.name }
@@ -115,6 +140,31 @@ func (f *fakeBackend) SendText(context.Context, *ManagedSession, JID, string) (s
 }
 func (f *fakeBackend) JoinedGroups(context.Context, *ManagedSession) ([]GroupInfo, error) {
 	return nil, ErrUnsupported
+}
+func (f *fakeBackend) SendMedia(ctx context.Context, s *ManagedSession, to JID, m OutboundMedia) (string, error) {
+	f.mediaMu.Lock()
+	f.sendMediaCalls++
+	f.sentMedia = append(f.sentMedia, m)
+	fn := f.sendMediaFn
+	f.mediaMu.Unlock()
+	if fn != nil {
+		if err := fn(to, m); err != nil {
+			return "", err
+		}
+	}
+	if f.sendMediaID != "" {
+		return f.sendMediaID, nil
+	}
+	return "", ErrUnsupported
+}
+func (f *fakeBackend) CallTTS(context.Context, *ManagedSession, JID, string, string) (CallOutcome, error) {
+	return CallOutcome{}, ErrUnsupported
+}
+func (f *fakeBackend) CallPlay(context.Context, *ManagedSession, JID, string) (CallOutcome, error) {
+	return CallOutcome{}, ErrUnsupported
+}
+func (f *fakeBackend) CallTerminate(context.Context, *ManagedSession, JID, string, string) error {
+	return ErrUnsupported
 }
 func (f *fakeBackend) Live(*ManagedSession) bool { return false }
 func (f *fakeBackend) Close()                    { f.closeCalled = true }

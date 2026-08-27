@@ -17,12 +17,10 @@
 package waxum
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -55,6 +53,13 @@ type Client struct {
 	baseURL string
 	token   string
 	http    *http.Client
+
+	// maxResponseBytes caps how much of a JSON response body send() will
+	// read for an ordinary call — defaults to the package maxResponseBytes
+	// constant. DownloadMedia (media.go) passes its own, larger cap
+	// directly to send() rather than overriding this field, since only
+	// that one call needs it.
+	maxResponseBytes int64
 
 	maxRateLimitRetries int
 	// retryDelay computes how long to wait before retrying a 429. attempt
@@ -114,6 +119,7 @@ func New(baseURL, token string, timeout time.Duration, opts ...Option) *Client {
 		baseURL:             strings.TrimSuffix(baseURL, "/"),
 		token:               token,
 		http:                &http.Client{Timeout: timeout},
+		maxResponseBytes:    maxResponseBytes,
 		maxRateLimitRetries: defaultMaxRateLimitRetries,
 		retryDelay:          defaultRetryDelay,
 		limiter:             newClientBucket(defaultClientRate, defaultClientBurst),
@@ -184,66 +190,11 @@ func (c *Client) do(ctx context.Context, method, path string, reqBody, out any, 
 			return fmt.Errorf("waxum: encoding request body for %s %s: %w", method, path, err)
 		}
 	}
-
-	var lastErr error
-	for attempt := 0; ; attempt++ {
-		// Client-wide throttle (ratelimit.go) — applies to every attempt,
-		// including retries, since each is a real outgoing request. A
-		// cancelled/expired ctx here returns immediately rather than
-		// waiting out the limiter, same reasoning as the 429-retry
-		// ctx.Done() case below.
-		if err := c.limiter.wait(ctx); err != nil {
-			return fmt.Errorf("waxum: %s %s: %w", method, path, err)
-		}
-
-		var body io.Reader
-		if encoded != nil {
-			body = bytes.NewReader(encoded) // fresh reader per attempt — a *bytes.Reader is spent after one read
-		}
-
-		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
-		if err != nil {
-			return fmt.Errorf("waxum: building request for %s %s: %w", method, path, err)
-		}
-		if body != nil {
-			req.Header.Set("Content-Type", "application/json")
-		}
-		if authenticate {
-			req.Header.Set("Authorization", "Bearer "+c.token)
-		}
-
-		resp, err := c.http.Do(req)
-		if err != nil {
-			return fmt.Errorf("waxum: %s %s: %w", method, path, err)
-		}
-		respBody, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes))
-		retryAfterHeader := resp.Header.Get("Retry-After")
-		_ = resp.Body.Close()
-		if err != nil {
-			return fmt.Errorf("waxum: reading response body for %s %s: %w", method, path, err)
-		}
-
-		if resp.StatusCode == http.StatusTooManyRequests && attempt < c.maxRateLimitRetries {
-			lastErr = errorFromStatus(resp.StatusCode, respBody)
-			select {
-			case <-time.After(c.retryDelay(attempt, retryAfterHeader)):
-				continue
-			case <-ctx.Done():
-				return lastErr
-			}
-		}
-
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			return errorFromStatus(resp.StatusCode, respBody)
-		}
-		if out == nil || len(respBody) == 0 {
-			return nil
-		}
-		if err := json.Unmarshal(respBody, out); err != nil {
-			return fmt.Errorf("waxum: decoding response body for %s %s: %w", method, path, err)
-		}
-		return nil
+	contentType := ""
+	if encoded != nil {
+		contentType = "application/json"
 	}
+	return c.send(ctx, method, path, contentType, encoded, out, authenticate, c.maxResponseBytes)
 }
 
 func sessionPath(id string, suffix string) string {
@@ -331,6 +282,15 @@ func (c *Client) SendText(ctx context.Context, id, to, text string) (*MessageRes
 // which is exactly the class of bug
 // TestSendImageWrapsTheURLInAnObjectUnderTheImageKey exists to catch before
 // a real request ever goes out.
+//
+// This method cannot be used for anything WSM hosts internally. waxum's SSRF
+// guard (src/net_guard.rs) rejects every URL resolving to a loopback,
+// link-local, RFC1918, ULA, CGNAT, multicast, broadcast or 0.0.0.0/8
+// address, re-checked on every DNS resolution including redirect hops, with
+// no env escape hatch — so a URL like "http://minio:9000/…" or
+// "http://app:8800/…" is refused before waxum ever fetches it. media.go's
+// UploadMedia/SendUploaded pair (the "descriptor" transport) is the only way
+// to send media this app itself is hosting.
 func (c *Client) SendMedia(ctx context.Context, id string, kind MediaKind, to, url, caption string) (*MessageResult, error) {
 	switch kind {
 	case MediaImage, MediaVideo, MediaAudio, MediaDocument:
@@ -374,13 +334,6 @@ func (c *Client) Groups(ctx context.Context, id string) ([]Group, error) {
 		})
 	}
 	return out, nil
-}
-
-// RegisterWebhook subscribes a URL to receive the named events for this
-// session.
-func (c *Client) RegisterWebhook(ctx context.Context, id, url, secret string, events []string) error {
-	body := map[string]any{"url": url, "events": events, "secret": secret}
-	return c.do(ctx, http.MethodPost, sessionPath(id, "/webhooks"), body, nil, true)
 }
 
 // Health checks waxum's own liveness. Unlike every other method here, this

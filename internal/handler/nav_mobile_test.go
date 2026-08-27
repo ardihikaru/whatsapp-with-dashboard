@@ -15,10 +15,21 @@ var pagesWithChrome = []string{
 	"/sessions",
 	"/sessions/new",
 	"/send",
+	"/calls",
 	"/logs",
 	"/admin/api-clients",
 	"/system-log",
 }
+
+// /sessions/{id}/ops and /sessions/{id}/webhooks (Phase 7) are deliberately
+// NOT in pagesWithChrome above: newLogsTestServer builds a wa.Manager with a
+// nil backend and never calls StartAll, so Manager.Get("sess-1") — which
+// both pages call before rendering anything — fails and they 404 instead of
+// rendering chrome. They are covered by
+// TestSessionOpsPageRendersTheDrawerMarkup and
+// TestSessionWebhooksPageRendersTheDrawerMarkup below, each over a properly
+// seeded manager (newMediaTestServer, media_calls_test_backend_test.go),
+// rather than silently going untested.
 
 // The drawer is three cooperating pieces: an <aside> the button can name, the
 // button itself, and a backdrop. Missing any one of them leaves the phone
@@ -72,7 +83,7 @@ func TestDrawerCarriesEverySidebarDestination(t *testing.T) {
 	sidebar := sidebarHTML(t, body)
 
 	for _, want := range []string{
-		"Dashboard", "Sessions", "Send Message", "Message Log", "API Clients", "System Log", "API Docs",
+		"Dashboard", "Sessions", "Send Message", "Voice Calls", "Message Log", "API Clients", "System Log", "API Docs",
 	} {
 		if !strings.Contains(sidebar, want) {
 			t.Errorf("sidebar is missing the %q destination", want)

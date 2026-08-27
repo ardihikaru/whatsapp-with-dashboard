@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -56,6 +57,14 @@ func loadWaxum(cfg *Config) error {
 			return fmt.Errorf("invalid WSM_WAXUM_PAIR_TIMEOUT %q: %v", raw, err)
 		}
 		cfg.WaxumPairTimeout = d
+	}
+	cfg.WaxumEventsEnabled = DefaultWaxumEventsEnabled
+	if raw := os.Getenv("WSM_WAXUM_EVENTS"); raw != "" {
+		b, err := strconv.ParseBool(raw)
+		if err != nil {
+			return fmt.Errorf("invalid WSM_WAXUM_EVENTS %q: %v", raw, err)
+		}
+		cfg.WaxumEventsEnabled = b
 	}
 
 	if cfg.WABackend != "waxum" {

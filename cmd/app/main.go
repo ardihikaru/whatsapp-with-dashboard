@@ -29,6 +29,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/config"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/handler"
@@ -84,6 +85,7 @@ func newBackend(ctx context.Context, cfg *config.Config) (wa.Backend, io.Closer,
 			QRPollInterval: cfg.WaxumQRPollInterval,
 			PollInterval:   cfg.WaxumPollInterval,
 			PairTimeout:    cfg.WaxumPairTimeout,
+			EventsEnabled:  cfg.WaxumEventsEnabled,
 		})
 		return backend, nil, nil
 	default: // "whatsmeow" — config.Load already rejects any other value
@@ -128,6 +130,11 @@ func run() error {
 	}
 	log.Printf("minio: connected to %s (bucket=%s, temp bucket=%s)",
 		cfg.MinioEndpoint, cfg.MinioBucket, cfg.MinioTempBucket)
+	// Wraps the same minioClient the connectivity check above just proved
+	// live — no new connection, just the object-level API (Put/PresignedGet)
+	// handlers reach it through. See storage.ObjectStore's doc comment for
+	// why this is threaded through Deps as an interface.
+	objectStore := storage.NewObjects(minioClient, cfg)
 
 	// WA backend: whatsmeow's SQLite crypto store (single writer), or a
 	// waxum HTTP client that opens no local store at all — see newBackend's
@@ -156,6 +163,7 @@ func run() error {
 	// One message repo, shared by the send worker (write path) and the /logs +
 	// dashboard read path (its analytics methods).
 	msgRepo := message.NewRepository(appDB)
+	callRepo := call.NewRepository(appDB)
 
 	manager := wa.NewManager(ctx, backend, wasession.NewRepository(appDB),
 		msgRepo, wa.Config{
@@ -197,14 +205,21 @@ func run() error {
 			// budget only ever moves on FAILURE.
 			Middleware: auth.NewMiddleware(sessions, apiClients, cfg.BasePath).
 				WithBasicThrottle(auth.NewThrottle(1.0/3.0, 20)),
-			Manager:      manager,
-			Messages:     msgRepo,
-			MessageStats: msgRepo,
-			APIClients:   apiClients,
-			SessionTTL:   cfg.SessionTTL,
-			DarkMode:     cfg.DarkMode,
-			PlatformURL:  cfg.PlatformURL,
-			AssetsFS:     wsm.FS,
+			Manager:                manager,
+			Messages:               msgRepo,
+			MessageStats:           msgRepo,
+			APIClients:             apiClients,
+			Calls:                  callRepo,
+			Objects:                objectStore,
+			MediaMaxBytes:          cfg.MediaMaxBytes,
+			MediaUploadTimeout:     cfg.MediaUploadTimeout,
+			MediaUploadConcurrency: cfg.MediaUploadConcurrency,
+			MediaArchive:           cfg.MediaArchive,
+			CallsEnabled:           cfg.CallsEnabled,
+			SessionTTL:             cfg.SessionTTL,
+			DarkMode:               cfg.DarkMode,
+			PlatformURL:            cfg.PlatformURL,
+			AssetsFS:               wsm.FS,
 			Admin: auth.AdminCredential{
 				Username:     cfg.AdminUser,
 				PasswordHash: cfg.AdminPasswordHash,

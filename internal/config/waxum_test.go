@@ -171,6 +171,43 @@ func TestLoadWaxumParsesOverriddenIntervalsAndRejectsInvalidDurations(t *testing
 	}
 }
 
+// TestLoadWaxumDefaultsEventsToEnabledAndParsesTheOverride guards
+// WSM_WAXUM_EVENTS (Phase 8's escape hatch for the SSE event pump,
+// internal/wa/backend_waxum_events.go): on by default, resolves regardless
+// of backend (same as the interval/timeout knobs), and rejects a
+// non-boolean value.
+func TestLoadWaxumDefaultsEventsToEnabledAndParsesTheOverride(t *testing.T) {
+	t.Run("defaults to enabled", func(t *testing.T) {
+		t.Setenv("WSM_WA_BACKEND", "whatsmeow")
+		cfg := &Config{}
+		if err := loadWaxum(cfg); err != nil {
+			t.Fatalf("loadWaxum: %v", err)
+		}
+		if !cfg.WaxumEventsEnabled {
+			t.Error("WaxumEventsEnabled = false, want true (default)")
+		}
+	})
+
+	t.Run("WSM_WAXUM_EVENTS=false disables it", func(t *testing.T) {
+		t.Setenv("WSM_WA_BACKEND", "whatsmeow")
+		t.Setenv("WSM_WAXUM_EVENTS", "false")
+		cfg := &Config{}
+		if err := loadWaxum(cfg); err != nil {
+			t.Fatalf("loadWaxum: %v", err)
+		}
+		if cfg.WaxumEventsEnabled {
+			t.Error("WaxumEventsEnabled = true, want false after WSM_WAXUM_EVENTS=false")
+		}
+	})
+
+	t.Run("rejects a non-boolean value", func(t *testing.T) {
+		t.Setenv("WSM_WAXUM_EVENTS", "not-a-bool")
+		if err := loadWaxum(&Config{}); err == nil {
+			t.Fatal("loadWaxum with WSM_WAXUM_EVENTS=not-a-bool: got nil error, want a failure")
+		}
+	})
+}
+
 func TestParseWaxumURLKeepsTheSchemeUnlikeParseMinioEndpoint(t *testing.T) {
 	got, err := parseWaxumURL("http://127.0.0.1:9000/")
 	if err != nil {

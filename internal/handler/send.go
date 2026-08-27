@@ -19,6 +19,12 @@ const (
 type sendPageData struct {
 	PageBase
 	Connected []wa.Snapshot
+	// MediaMaxBytes feeds the media tab's data-max-bytes attribute — see
+	// media-upload.js's doc comment on why the pre-check is client-side
+	// AND best-effort (the server-side http.MaxBytesReader in
+	// parseMediaSendRequest is the real limit; this only avoids uploading
+	// a doomed file over a slow connection first).
+	MediaMaxBytes int64
 }
 
 type sendResultData struct {
@@ -26,6 +32,16 @@ type sendResultData struct {
 	WAMessageID string
 	Error       string
 	SessionName string
+	// Kind/Filename are set only by a media send (PostSendMedia) — "" for
+	// the plain-text form, which send_result.html uses to decide whether
+	// to mention the attachment at all.
+	Kind     string
+	Filename string
+	// PresignedURL is set only when Deps.Objects archived the upload AND
+	// could mint a presigned link back to it — best-effort on both counts
+	// (archiveMedia and PresignedGet can each fail independently), so "" is
+	// an ordinary outcome, not an error.
+	PresignedURL string
 }
 
 // GetSend renders the compose page. Automatic routing is the default; the
@@ -37,7 +53,7 @@ func (h *handlers) GetSend(w http.ResponseWriter, r *http.Request) {
 			connected = append(connected, s)
 		}
 	}
-	data := sendPageData{Connected: connected}
+	data := sendPageData{Connected: connected, MediaMaxBytes: h.MediaMaxBytes}
 	data.PageBase = h.newPageBase(r, "Send Message", "/send")
 	h.Renderer.RenderPage(w, "send", data)
 }
@@ -56,17 +72,9 @@ func (h *handlers) PostSend(w http.ResponseWriter, r *http.Request) {
 		h.sendResult(w, sendResultData{Error: err.Error()})
 		return
 	}
-	s, ok := h.Manager.Get(r.FormValue("session_id"))
-	if r.FormValue("routing") == "auto" || r.FormValue("session_id") == "" {
-		var snap wa.Snapshot
-		s, snap, ok = h.Manager.SelectConnected(r.Context())
-		if !ok {
-			h.sendResult(w, sendResultData{Error: "no connected sessions available"})
-			return
-		}
-		_ = snap
-	} else if !ok {
-		h.sendResult(w, sendResultData{Error: "select a connected session"})
+	s, errMsg := h.selectSendSession(r)
+	if errMsg != "" {
+		h.sendResult(w, sendResultData{Error: errMsg})
 		return
 	}
 
@@ -99,25 +107,73 @@ func (h *handlers) sendThroughSession(r *http.Request, s *wa.ManagedSession, dig
 	return h.sendThroughJID(r, s, wa.ToJID(digits), digits, text, attr)
 }
 
-// sendThroughJID is the whole send path — audit row, enqueue, 15s wait — for ANY
-// destination. It took bare phone digits until Fase 9 and built the JID itself,
-// which is what kept group sends out.
+// sendThroughJID is the whole TEXT send path — audit row, enqueue, 15s wait —
+// for ANY destination. It took bare phone digits until Fase 9 and built the
+// JID itself, which is what kept group sends out. Its exported behaviour
+// (signature, status codes, outcome shape) is unchanged by the Phase 6a
+// dispatch-seam refactor below: it mints its own message id and calls
+// dispatchSend with no media, exactly what its old inline body did.
 //
 // Nothing below the queue needed changing: sendJob.to has always been a wa.JID
 // and trySend hands it straight to the backend, so the token bucket, the retry
 // loop and MarkSent are destination-agnostic already. That is why kb-30 is a
 // validator plus a handler and touches no crypto.
-//
-// toDisplay is stored in wa_messages.to_phone. For a group that is the @g.us JID
-// rather than a phone number — the column name is now slightly wrong, and that is
-// a better trade than a second audit table: GET /sessions/{id}/messages shows
-// group sends for free, with no new code.
 func (h *handlers) sendThroughJID(
 	r *http.Request, s *wa.ManagedSession, to wa.JID, toDisplay, text string, attr message.Attribution,
 ) (sendOutcome, int) {
-	msg := &message.Message{ID: wa.NewID(), SessionID: s.ID, ToPhone: toDisplay,
+	return h.dispatchSend(r, s, wa.NewID(), to, toDisplay, text, attr, nil)
+}
+
+// mediaDispatch is sendMediaThroughJID's media-send payload: the
+// already-uploaded wa.OutboundMedia descriptor PLUS the wa_messages audit
+// columns OutboundMedia itself does not carry (Mime/Size/ObjectKey — see
+// message.Message's media columns doc comment). Kept as its own type,
+// rather than widening OutboundMedia, because Mime/Size/ObjectKey are this
+// app's own audit metadata and mean nothing to a backend's SendMedia call.
+type mediaDispatch struct {
+	Outbound  wa.OutboundMedia
+	Mime      string
+	Size      int64
+	ObjectKey string
+}
+
+// sendMediaThroughJID is sendThroughJID's media sibling (Phase 6a's dispatch
+// seam, §1b of the phase brief). msgID is minted by the CALLER — the media
+// handler, before this is ever reached — because the MinIO object key that
+// handler's best-effort archive step writes under embeds the message id
+// (see storage.ObjectKey's doc comment): the id must exist before that
+// upload, not after. media.Outbound must already carry a completed
+// MediaStore.UploadMedia descriptor; this function and dispatchSend never
+// upload, only Insert-then-enqueue, mirroring wa.EnqueueMedia's own
+// "upload does not ride the queue" rule one layer down.
+func (h *handlers) sendMediaThroughJID(
+	r *http.Request, s *wa.ManagedSession, msgID string, to wa.JID, toDisplay string,
+	attr message.Attribution, media mediaDispatch,
+) (sendOutcome, int) {
+	return h.dispatchSend(r, s, msgID, to, toDisplay, media.Outbound.Caption, attr, &media)
+}
+
+// dispatchSend is sendThroughJID/sendMediaThroughJID's shared tail: build
+// the audit row, Insert it, Enqueue (or EnqueueMedia) it, and wait up to
+// sendWaitLimit for a terminal result — the 15s wait, the
+// ErrQueueFull/ErrNotConnected mapping and the MarkFailed-on-enqueue-failure
+// fallback all live here exactly once, per Phase 6a §1b of the plan. media
+// == nil selects the plain-text path (Enqueue); non-nil selects the media
+// path (EnqueueMedia) and also fills the message row's five media columns.
+func (h *handlers) dispatchSend(
+	r *http.Request, s *wa.ManagedSession, msgID string, to wa.JID, toDisplay, text string,
+	attr message.Attribution, media *mediaDispatch,
+) (sendOutcome, int) {
+	msg := &message.Message{ID: msgID, SessionID: s.ID, ToPhone: toDisplay,
 		Body: text, Status: message.StatusQueued, CreatedAt: time.Now().UTC(),
 		ClientRef: attr.ClientRef, TenantRef: attr.TenantRef, Category: attr.Category}
+	if media != nil {
+		msg.MediaKind = string(media.Outbound.Kind)
+		msg.MediaFilename = media.Outbound.Filename
+		msg.MediaMime = media.Mime
+		msg.MediaSize = media.Size
+		msg.MediaObjectKey = media.ObjectKey
+	}
 	// api_client_id comes from the authenticated principal, never the request body,
 	// so a client cannot attribute its sends to another. Empty for the /send UI.
 	if p, ok := auth.APIPrincipalFrom(r.Context()); ok {
@@ -126,7 +182,14 @@ func (h *handlers) sendThroughJID(
 	if err := h.Messages.Insert(r.Context(), msg); err != nil {
 		return sendOutcome{Error: "could not store the message"}, http.StatusInternalServerError
 	}
-	done, err := s.Enqueue(msg.ID, to, text)
+
+	var done <-chan wa.SendResult
+	var err error
+	if media != nil {
+		done, err = s.EnqueueMedia(msg.ID, to, media.Outbound)
+	} else {
+		done, err = s.Enqueue(msg.ID, to, text)
+	}
 	if err != nil {
 		reason := "could not queue the message"
 		status := http.StatusInternalServerError
@@ -153,4 +216,25 @@ func (h *handlers) sendThroughJID(
 	case <-r.Context().Done():
 		return sendOutcome{ID: msg.ID, Status: message.StatusQueued}, http.StatusAccepted
 	}
+}
+
+// selectSendSession resolves the /send page's routing form fields
+// ("routing", "session_id") to a connected session — shared by the text
+// form (PostSend) and the media form (PostSendMedia, media_send_ui.go), so
+// the two forms cannot silently drift on what "Automatic routing" means.
+// Returns a human-readable error, never a wa.Err* sentinel: the browser
+// forms render it straight into send_result's Error field.
+func (h *handlers) selectSendSession(r *http.Request) (*wa.ManagedSession, string) {
+	s, ok := h.Manager.Get(r.FormValue("session_id"))
+	if r.FormValue("routing") == "auto" || r.FormValue("session_id") == "" {
+		s, _, ok = h.Manager.SelectConnected(r.Context())
+		if !ok {
+			return nil, "no connected sessions available"
+		}
+		return s, ""
+	}
+	if !ok {
+		return nil, "select a connected session"
+	}
+	return s, ""
 }
