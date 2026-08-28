@@ -83,10 +83,14 @@ func TestOperationsHitTheirDocumentedMethodsAndPaths(t *testing.T) {
 			_, err := client.TCTokenPrune(context.Background(), "sess-1")
 			return err
 		}},
+		{"CheckContacts", http.MethodPost, "/api/v1/sessions/sess-1/contacts/check", []byte(`{"results":[]}`), func() error {
+			_, err := client.CheckContacts(context.Background(), "sess-1", []string{"559999999999"})
+			return err
+		}},
 	}
 
-	if len(cases) != 12 {
-		t.Fatalf("table has %d cases, want 12 (one per documented operation)", len(cases))
+	if len(cases) != 13 {
+		t.Fatalf("table has %d cases, want 13 (one per documented operation, plus CheckContacts from contacts.go)", len(cases))
 	}
 
 	for _, tc := range cases {
