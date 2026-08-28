@@ -44,6 +44,15 @@ type Deps struct {
 	MediaUploadTimeout     time.Duration
 	MediaUploadConcurrency int
 	MediaArchive           bool
+	// MediaMaxBytes{Image,Video,Audio,Document} are the per-kind caps
+	// parseMediaSendRequest (api_media.go) checks a decoded upload against,
+	// on top of the socket-level MediaMaxBytes above. A zero value here
+	// (any handler test built before this field existed) falls back to
+	// MediaMaxBytes for that kind — see mediaKindLimit's doc comment.
+	MediaMaxBytesImage    int64
+	MediaMaxBytesVideo    int64
+	MediaMaxBytesAudio    int64
+	MediaMaxBytesDocument int64
 	// CallsEnabled gates every /calls/* endpoint — see api_calls.go's
 	// callsDisabledMessage.
 	CallsEnabled bool

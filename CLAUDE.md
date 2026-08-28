@@ -295,6 +295,22 @@ whatsmeow/waxum singleton-volume entries above) — every `/calls/*` endpoint
 answers 501 and the `/calls` page says so plainly until an operator opts in
 deliberately.
 
+**An upload larger than the edge's `client_max_body_size` produces a bare
+413 with NO app-side trace at all — no log line, no `wa_messages` row —
+because nginx never proxies the request in the first place.** This is
+exactly what happened to a 1.6 MB video send: it failed with "content too
+large" and looked, from inside the app, like the request had simply never
+arrived — every send that had ever worked before it was, by coincidence,
+under nginx's 1 MiB default. `docs/deploy-nginx-wa.conf.example` now sets
+`client_max_body_size 110m`, deliberately ABOVE `WSM_MEDIA_MAX_BYTES` (100
+MiB in production), so the app's own kind-aware error is what an operator
+sees, not nginx's bare 413 — but the app's per-kind limits
+(`internal/config/media.go`'s `WSM_MEDIA_MAX_BYTES_{IMAGE,VIDEO,AUDIO,
+DOCUMENT}`) are irrelevant until the edge is raised to admit the request at
+all. If a media send ever again looks like the app silently ignored it —
+nothing in this app's own logs, nothing in `wa_messages` — check the edge's
+`client_max_body_size` before the app's config.
+
 ---
 
 ## Layout

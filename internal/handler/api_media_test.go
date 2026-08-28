@@ -100,6 +100,119 @@ func TestMediaSendRejectsABodyOverTheConfiguredLimit(t *testing.T) {
 	}
 }
 
+// mediaKindBoundaryCase pins one kind's per-kind size ceiling test fixture:
+// enough real magic bytes for sniffAndValidate to accept it as that kind,
+// plus the kind-specific per-request limit under test.
+type mediaKindBoundaryCase struct {
+	kind  string
+	limit int
+	magic []byte
+}
+
+var mediaKindBoundaryCases = []mediaKindBoundaryCase{
+	{"image", 2048, pngMagic},
+	{"video", 4096, webmMagic},
+	{"audio", 4096, []byte("OggS")},
+	{"document", 8192, []byte{0x01, 0x02, 0x03, 0x04}}, // sniffAndValidate accepts any bytes for document
+}
+
+// fillTo pads magic out to exactly n bytes with filler — n must be >=
+// len(magic).
+func fillTo(t *testing.T, magic []byte, n int) []byte {
+	t.Helper()
+	if n < len(magic) {
+		t.Fatalf("fillTo: n=%d smaller than magic (%d bytes)", n, len(magic))
+	}
+	return append(append([]byte{}, magic...), bytes.Repeat([]byte("x"), n-len(magic))...)
+}
+
+// TestMediaSendAcceptsAFileExactlyAtItsKindsPerKindLimit pins the accept
+// half of the per-kind boundary, for every kind at once: a file exactly at
+// (never over) that kind's configured limit, comfortably under a much
+// larger global WSM_MEDIA_MAX_BYTES ceiling, must not be rejected for size.
+func TestMediaSendAcceptsAFileExactlyAtItsKindsPerKindLimit(t *testing.T) {
+	backend := &fakeGatewayBackend{name: "fake"}
+	srv, s, apiClients, _, _ := newMediaTestServer(t, mediaTestConfig{
+		backend:               backend,
+		mediaMaxBytes:         10 * 1024 * 1024, // generous global ceiling
+		mediaMaxBytesImage:    2048,
+		mediaMaxBytesVideo:    4096,
+		mediaMaxBytesAudio:    4096,
+		mediaMaxBytesDocument: 8192,
+	})
+	token := apiToken(t, srv, apiClients, "media-perkind-accept")
+
+	for _, tc := range mediaKindBoundaryCases {
+		t.Run(tc.kind, func(t *testing.T) {
+			data := fillTo(t, tc.magic, tc.limit)
+			fields := map[string]string{"kind": tc.kind, "to": "628123456789"}
+			body, ct := buildMultipartMedia(t, fields, data)
+			rec := postMultipartMedia(srv, token, "/api/v1/sessions/"+s.ID+"/messages/media", ct, body)
+			// Never a validation rejection (413 size, 415 mimetype, 400
+			// malformed) — the fixture backend's UploadMedia has no
+			// uploadFn (fakeGatewayBackend's doc comment) and answers
+			// wa.ErrUnsupported -> 501 past every validation step, which
+			// is the expected, PASSING outcome here: it proves the file
+			// cleared the size AND mimetype checks and reached the
+			// backend upload call.
+			switch rec.Code {
+			case http.StatusRequestEntityTooLarge, http.StatusUnsupportedMediaType, http.StatusBadRequest:
+				t.Fatalf("%s upload exactly at its %d-byte limit: got %d (a validation rejection); body = %s",
+					tc.kind, tc.limit, rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
+// TestMediaSendRejectsAFileOverItsKindsPerKindLimitButUnderTheGlobalCeiling
+// is the red-then-green case for §1 of the phase brief: a file one byte
+// over its OWN kind's limit, while still comfortably under the generous
+// global WSM_MEDIA_MAX_BYTES ceiling that would otherwise let it through —
+// proving the rejection is the per-kind check, not the pre-existing
+// socket-level MaxBytesReader one (TestMediaSendRejectsABodyOverTheConfiguredLimit,
+// above). The rejection message must name the kind, the actual size and
+// that kind's limit.
+func TestMediaSendRejectsAFileOverItsKindsPerKindLimitButUnderTheGlobalCeiling(t *testing.T) {
+	backend := &fakeGatewayBackend{name: "fake"}
+	srv, s, apiClients, _, _ := newMediaTestServer(t, mediaTestConfig{
+		backend:               backend,
+		mediaMaxBytes:         10 * 1024 * 1024, // generous global ceiling
+		mediaMaxBytesImage:    2048,
+		mediaMaxBytesVideo:    4096,
+		mediaMaxBytesAudio:    4096,
+		mediaMaxBytesDocument: 8192,
+	})
+	token := apiToken(t, srv, apiClients, "media-perkind-reject")
+
+	for _, tc := range mediaKindBoundaryCases {
+		t.Run(tc.kind, func(t *testing.T) {
+			over := tc.limit + 1
+			data := fillTo(t, tc.magic, over)
+			fields := map[string]string{"kind": tc.kind, "to": "628123456789"}
+			body, ct := buildMultipartMedia(t, fields, data)
+			rec := postMultipartMedia(srv, token, "/api/v1/sessions/"+s.ID+"/messages/media", ct, body)
+			if rec.Code != http.StatusRequestEntityTooLarge {
+				t.Fatalf("%s upload one byte over its %d-byte limit (global ceiling 10MiB): status = %d, want %d; body = %s",
+					tc.kind, tc.limit, rec.Code, http.StatusRequestEntityTooLarge, rec.Body.String())
+			}
+			var resp map[string]string
+			if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+				t.Fatalf("decode error body: %v", err)
+			}
+			msg := resp["error"]
+			if !strings.Contains(msg, tc.kind) {
+				t.Errorf("error message %q does not name the kind %q", msg, tc.kind)
+			}
+			if wantSize := formatMediaBytes(int64(over)); !strings.Contains(msg, wantSize) {
+				t.Errorf("error message %q does not state the actual size %q", msg, wantSize)
+			}
+			if wantLimit := formatMediaBytes(int64(tc.limit)); !strings.Contains(msg, wantLimit) {
+				t.Errorf("error message %q does not state the kind's limit %q", msg, wantLimit)
+			}
+		})
+	}
+}
+
 // TestMediaSendRejectsAMimeTypeThatDoesNotMatchTheDeclaredKind pins the 415
 // path: a PNG declared as "audio" must be rejected, because the SNIFFED
 // bytes — not the declared kind — decide.

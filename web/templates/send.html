@@ -66,13 +66,23 @@
             id="media-send-form" novalidate>
         <label class="textfield">
           <span class="textfield-label">Kind</span>
-          <select name="kind" class="select" required>
-            <option value="image">Image</option>
-            <option value="video">Video</option>
-            <option value="audio">Audio</option>
-            <option value="document">Document</option>
+          <!-- data-max-bytes on each option is the source media-upload.js reads
+               from on "change", so the dropzone's own data-max-bytes (below)
+               always tracks the SELECTED kind's limit rather than one global
+               number — see mediaKindDisplays' doc comment (api_media.go) for
+               why these come from .MediaLimits (server config) rather than
+               being hardcoded here. -->
+          <select name="kind" id="media-kind-select" class="select" required>
+            {{range .MediaLimits}}<option value="{{.Kind}}" data-max-bytes="{{.Bytes}}">{{.Label}}</option>{{end}}
           </select>
         </label>
+        <!-- Visible before a file is chosen, per the operator's own request:
+             "show the limits for every kind". data-media-limit on each span
+             is what media-upload.js toggles ".is-active" on to follow the
+             Kind select above. -->
+        <p class="media-limits" id="media-limits">
+          {{range $i, $l := .MediaLimits}}{{if $i}} · {{end}}<span class="media-limit" data-media-limit="{{$l.Kind}}">{{$l.Label}} {{$l.Human}}</span>{{end}}
+        </p>
         <label class="textfield">
           <span class="textfield-label">Routing</span>
           <select name="routing" class="select">
@@ -91,6 +101,11 @@
           <span class="textfield-label">To (international format)</span>
           <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
         </label>
+        <!-- Initial value is the overall ceiling (MediaMaxBytes), not yet a
+             per-kind one: media-upload.js overwrites this from the "kind"
+             select's OWN selected option (each carries its per-kind
+             data-max-bytes, above) as soon as it runs, and again on every
+             "kind" change — see media-upload.js's syncKind. -->
         <div class="media-dropzone" data-media-dropzone data-max-bytes="{{.MediaMaxBytes}}">
           <label class="textfield">
             <span class="textfield-label">File</span>
