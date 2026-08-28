@@ -467,6 +467,7 @@ func TestEveryNewTableIsWrappedInTableScroll(t *testing.T) {
 	for _, path := range []string{
 		"web/templates/calls.html",
 		"web/templates/sessions/webhooks.html",
+		"web/templates/verify.html",
 	} {
 		t.Run(path, func(t *testing.T) {
 			b, err := fs.ReadFile(wsm.FS, path)

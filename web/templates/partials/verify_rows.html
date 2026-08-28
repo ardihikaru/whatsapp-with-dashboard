@@ -1,0 +1,24 @@
+{{define "verify_rows"}}
+{{if .Error}}
+<tr><td colspan="3"><div class="alert alert-error">{{.Error}}</div></td></tr>
+{{else if not .Verdicts}}
+<tr><td colspan="3">No numbers checked yet.</td></tr>
+{{end}}
+{{range .Verdicts}}
+<tr>
+  <td class="mono">{{.Input}}</td>
+  <td>
+    <span class="badge badge-{{.Status}}">{{if eq .Status "registered"}}Registered
+      {{- else if eq .Status "not_registered"}}Not registered
+      {{- else if eq .Status "invalid"}}Invalid
+      {{- else}}Unknown{{end}}</span>
+  </td>
+  <td>
+    {{if eq .Status "registered"}}{{if .JID}}<span class="mono">{{.JID}}</span>{{else}}<span class="muted">&mdash;</span>{{end}}
+    {{- else if eq .Status "invalid"}}<span class="muted">{{.Error}}</span>
+    {{- else if eq .Status "unknown"}}<span class="muted">no verdict returned for this number &mdash; not the same as "not on WhatsApp"</span>
+    {{- else}}<span class="muted">&mdash;</span>{{end}}
+  </td>
+</tr>
+{{end}}
+{{end}}

@@ -61,6 +61,10 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/calls.html"),
 		root:  "base",
 	},
+	"verify": {
+		files: append(chrome(), "templates/verify.html"),
+		root:  "base",
+	},
 	"session-ops": {
 		files: append(chrome(), "templates/sessions/ops.html"),
 		root:  "base",
@@ -115,6 +119,7 @@ var partialFiles = []string{
 	"templates/partials/log_rows.html",
 	"templates/partials/system_log_rows.html",
 	"templates/partials/call_rows.html",
+	"templates/partials/verify_rows.html",
 	"templates/partials/session_ops_panel.html",
 	"templates/partials/webhook_rows.html",
 	"templates/partials/webhook_dlq_rows.html",

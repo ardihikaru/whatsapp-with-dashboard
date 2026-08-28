@@ -1,0 +1,170 @@
+/* /verify — number verification. ELEVENTH stylesheet, loaded LAST, after
+   media.css, in both base.html and login.html (see base.html's load-order
+   comment: media.css is the tenth, this is the eleventh, and login.html
+   duplicates base.html's whole <head> — CLAUDE.md's hazard note on that).
+   Tokens only — every colour below is a :root variable from base.css, with
+   a [data-theme="dark"] counterpart wherever the light value is not
+   already theme-neutral. media.css is the model copied here, not
+   forms.css/base.css (both still carry legacy raw hex). */
+
+/* ---------- verify status badges (verify_rows.html) ------------------------
+   "unknown" deliberately uses --info-*, not --warning-*/--error-* — it must
+   read as "we don't have an answer", not as a problem. See
+   contactVerdict's doc comment (contacts_check.go) for why that distinction
+   exists at all. */
+.badge-registered     { color: var(--success-dark); background: rgba(34, 197, 94, 0.16); }
+.badge-not_registered { color: var(--grey-600);     background: rgba(145, 158, 171, 0.16); }
+.badge-invalid         { color: var(--error-dark);   background: rgba(255, 86, 48, 0.16); }
+.badge-unknown         { color: var(--info-dark);    background: rgba(0, 184, 217, 0.16); }
+
+[data-theme="dark"] .badge-registered     { color: var(--success-light); }
+[data-theme="dark"] .badge-not_registered { color: var(--grey-400); }
+[data-theme="dark"] .badge-invalid        { color: var(--error-light); }
+[data-theme="dark"] .badge-unknown        { color: var(--info-light); }
+
+/* ---------- chip field (verify.html's "Phone numbers") ---------------------
+   Structure: .chip-field wraps the real <textarea name="phones"> (the
+   server contract, unconditionally present) and, once phone-chips.js has
+   run, a .chip-input-wrap it inserts holding the chip <ul> and the typing
+   <input>. [data-chip-js] is set on .chip-field itself by that script —
+   the container flag CLAUDE.md's JS conventions call for, same idea as
+   nav-drawer.js's data-nav-js on <html>, scoped to just this field instead
+   because nothing else on the page needs to know the chip editor is
+   active. */
+.chip-field { display: block; margin-bottom: 20px; }
+
+.chip-field .chip-source {
+  width: 100%;
+  min-height: 96px;
+  border: 1px solid rgba(145, 158, 171, 0.32);
+  border-radius: var(--radius-btn);
+  padding: 12px 14px;
+  font: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  resize: vertical;
+}
+
+.chip-field .chip-source:focus { outline: none; border-color: var(--text-primary); }
+
+/* Once the chip editor exists it fully replaces the textarea as the
+   operator-facing surface; the textarea keeps carrying the form value
+   (phone-chips.js writes into it on every change) but is no longer shown. */
+.chip-field[data-chip-js] .chip-source { display: none; }
+
+.chip-input-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-height: 48px;
+  padding: 7px 10px;
+  border: 1px solid rgba(145, 158, 171, 0.32);
+  border-radius: var(--radius-btn);
+  background: transparent;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+.chip-input-wrap:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-lighter);
+}
+
+/* display: contents lets the <li> chips sit as flex items of
+   .chip-input-wrap directly, alongside the typing <input> — one wrapping
+   flex row instead of a list-inside-a-row layout. */
+.chip-list { display: contents; }
+
+.chip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 999px;
+  background: var(--primary-lighter);
+  color: var(--primary-darker);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  white-space: nowrap;
+  animation: chip-in 160ms ease;
+}
+
+.chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: 50%;
+  background: rgba(145, 158, 171, 0.24);
+  color: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.chip-remove:hover { background: rgba(145, 158, 171, 0.4); }
+.chip-remove:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Rejection feedback for a duplicate: the offending EXISTING chip shakes
+   briefly rather than the input silently refusing to do anything. */
+.chip-duplicate { animation: chip-reject 320ms ease; }
+
+.chip-input {
+  flex: 1 1 160px;
+  min-width: 160px;
+  border: none;
+  outline: none;
+  background: transparent;
+  font: inherit;
+  color: var(--text-primary);
+  padding: 6px 4px;
+}
+
+.chip-counter {
+  margin: 6px 2px 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+  transition: color 160ms ease;
+}
+
+.chip-counter-over { color: var(--error-dark); font-weight: 700; }
+[data-theme="dark"] .chip-counter-over { color: var(--error-light); }
+
+@keyframes chip-in {
+  from { opacity: 0; transform: scale(0.85); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes chip-reject {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+
+/* Disabled-submit transition: fades rather than snapping, so crossing the
+   0/100 boundary reads as a state change instead of the button just
+   disappearing mid-click. Restates .btn's own background-color/box-shadow
+   transition (components.css) alongside the new opacity one — a bare
+   `transition: opacity …` here would otherwise replace that list outright,
+   since this selector is more specific. */
+.form-actions .btn-primary {
+  transition: background-color 120ms ease, box-shadow 120ms ease, opacity 160ms ease;
+}
+.form-actions .btn-primary:disabled { opacity: 0.5; }
+
+@media (prefers-reduced-motion: reduce) {
+  .chip,
+  .chip-duplicate,
+  .chip-input-wrap,
+  .chip-counter,
+  .form-actions .btn-primary {
+    animation: none;
+    transition: none;
+  }
+}

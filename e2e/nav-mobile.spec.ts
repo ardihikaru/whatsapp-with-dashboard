@@ -7,6 +7,7 @@ const DESTINATIONS = [
   "Dashboard",
   "Sessions",
   "Send Message",
+  "Verify Number",
   "Message Log",
   "API Clients",
   "API Docs",
