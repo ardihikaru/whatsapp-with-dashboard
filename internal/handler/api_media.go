@@ -313,12 +313,19 @@ func parseFormBool(v string) bool {
 
 // mediaSendRequest is decodeMediaSendRequest's parsed, validated result —
 // everything sendMedia needs to archive, upload and dispatch.
+//
+// AllowMaster governs automatic routing only (PostAPISendMediaAuto); the
+// explicit-session route ignores it. Unlike every other allow_master field
+// in this package, it arrives as a MULTIPART FORM FIELD ("allow_master"),
+// not a JSON body key — this endpoint is multipart end to end (see
+// parseMediaSendRequest below) and has no JSON body to add a key to.
 type mediaSendRequest struct {
 	Data        []byte
 	Kind        wa.MediaKind
 	Digits      string
 	Caption     string
 	PTT         bool
+	AllowMaster bool
 	Filename    string
 	ContentType string
 	Attr        message.Attribution
@@ -433,6 +440,7 @@ func (h *handlers) parseMediaSendRequest(w http.ResponseWriter, r *http.Request)
 		Digits:      digits,
 		Caption:     strings.TrimSpace(r.FormValue("caption")),
 		PTT:         parseFormBool(r.FormValue("ptt")),
+		AllowMaster: parseFormBool(r.FormValue("allow_master")),
 		Filename:    sanitizeFilename(header.Filename), // step 7
 		ContentType: contentType,
 		Attr: message.Attribution{
@@ -478,9 +486,9 @@ func (h *handlers) PostAPISendMediaAuto(w http.ResponseWriter, r *http.Request) 
 	if !ok {
 		return
 	}
-	s, _, ok := h.Manager.SelectConnected(r.Context())
+	s, _, ok := h.Manager.SelectConnected(r.Context(), req.AllowMaster)
 	if !ok {
-		writeError(w, http.StatusConflict, "no connected session available")
+		writeError(w, http.StatusConflict, noAutoRouteMessage(h.Manager.Snapshots(), req.AllowMaster))
 		return
 	}
 	h.sendMedia(w, r, s, req)

@@ -72,6 +72,16 @@ type ManagedSession struct {
 	// permanentDown, each of which already persists active=0.
 	active bool
 
+	// isMaster mirrors wa_sessions.is_master: ROUTING intent, distinct from
+	// active's CONNECTION intent above. It excludes this session from
+	// automatic selection (load_balance.go's SelectConnected /
+	// SelectSnapshotForSend) unless a caller explicitly opts in; it does
+	// NOT affect whether the session connects, reconnects, or can be sent
+	// through directly by naming its id. Set by SetMaster below, which
+	// touches only this field and its persisted column — never state, the
+	// socket, or active.
+	isMaster bool
+
 	// stalled/stalledReason mark "needs operator attention" — the
 	// reconnect supervisor (reconnect.go) has called Backend.Connect
 	// ReconnectStallThreshold times in a row without the session ever
@@ -117,6 +127,10 @@ type Snapshot struct {
 	// Go error string.
 	Stalled       bool
 	StalledReason string
+
+	// IsMaster mirrors ManagedSession.isMaster — see that field's doc
+	// comment. Read by load_balance.go's exclusion predicate.
+	IsMaster bool
 }
 
 // Snapshot copies the live status. Connected asks the backend's Live (a
@@ -133,6 +147,7 @@ func (s *ManagedSession) Snapshot() Snapshot {
 		QueueLen:       len(s.sendQ),
 		Stalled:        s.stalled,
 		StalledReason:  s.stalledReason,
+		IsMaster:       s.isMaster,
 	}
 	if !s.jid.IsEmpty() {
 		snap.JID = s.jid.String()
@@ -267,6 +282,26 @@ func (s *ManagedSession) Deactivate(ctx context.Context) error {
 	_ = s.mgr.backend.Disconnect(ctx, s)
 	_ = s.mgr.repo.SetActive(s.mgr.persistCtx, s.ID, false)
 	_ = s.mgr.repo.UpdateStatus(s.mgr.persistCtx, s.ID, string(StateDisconnected))
+	return nil
+}
+
+// SetMaster flips the ROUTING-intent flag (see isMaster's doc comment) and
+// persists it. Unlike Activate/Deactivate this never touches state, the
+// socket, or active — a master session stays connected and remains directly
+// sendable; the flag only removes it from automatic selection's candidate
+// pool.
+func (s *ManagedSession) SetMaster(ctx context.Context, master bool) error {
+	s.mu.Lock()
+	s.isMaster = master
+	s.mu.Unlock()
+	if err := s.mgr.repo.SetMaster(s.mgr.persistCtx, s.ID, master); err != nil {
+		return err
+	}
+	if master {
+		s.ring("flagged as a master session — excluded from automatic send routing")
+	} else {
+		s.ring("unflagged as a master session — eligible for automatic send routing again")
+	}
 	return nil
 }
 

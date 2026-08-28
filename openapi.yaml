@@ -129,6 +129,7 @@ paths:
               properties:
                 name: {type: string}
                 phone: {type: string, description: 'International format, e.g. +62 812-0000-0000'}
+                is_master: {type: boolean, description: 'Optional; flags the new session as a master immediately instead of a separate PUT .../master call. Defaults to false.'}
       responses:
         '201':
           description: Created.
@@ -231,6 +232,45 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/master:
+    put:
+      summary: Flag or unflag a session as a master (routing-exclusion) sender
+      description: >
+        WSM-native routing state, not a backend capability — works
+        identically on whatsmeow and waxum, unlike the operations/ endpoints
+        below which 501 on whatsmeow. A master session stays fully
+        connected and directly sendable
+        (POST /api/v1/sessions/{id}/messages); the flag only removes it from
+        AUTOMATIC selection (POST /api/v1/messages,
+        /api/v1/messages/group, /api/v1/messages/media,
+        /api/v1/contacts/check) unless the caller opts in with
+        allow_master on that request.
+      operationId: setSessionMaster
+      tags: [sessions]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [is_master], properties: {is_master: {type: boolean}}}
+      responses:
+        '200':
+          description: Snapshot after the toggle.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Session'}
+        '400':
+          description: Malformed JSON body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/sessions/{id}/pairing:
     get:
       summary: Live pairing snapshot (raw QR payload for machine clients)
@@ -279,6 +319,7 @@ paths:
                 client_ref: {type: string, description: 'Optional laundry client uid; surfaces in the message log per-client breakdown'}
                 tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
                 category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
+                allow_master: {type: boolean, description: 'Automatic routing only; ignored when a session id is in the path. Opts into a master-flagged session for this one request.'}
       responses:
         '200':
           description: Terminal outcome within 15s; includes selected session metadata.
@@ -296,7 +337,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '409':
-          description: No connected session exists.
+          description: >
+            No connected session exists to auto-route through. If the only
+            connected session(s) are flagged is_master, the message names that
+            (see PUT /api/v1/sessions/{id}/master) and suggests allow_master.
+            Note GET /api/v1/health and Manager.Counts() still count a master
+            session as connected, so an operator can legitimately see
+            connected: 1 here and still get this 409.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -330,6 +377,7 @@ paths:
                 client_ref: {type: string, description: 'Optional laundry client uid; surfaces in the message log per-client breakdown'}
                 tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
                 category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
+                allow_master: {type: boolean, description: 'Automatic routing only; ignored when a session id is in the path. Opts into a master-flagged session for this one request.'}
       responses:
         '200':
           description: Terminal outcome within 15s; includes selected session metadata.
@@ -349,7 +397,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '409':
-          description: No connected session exists.
+          description: >
+            No connected session exists to auto-route through. If the only
+            connected session(s) are flagged is_master, the message names that
+            (see PUT /api/v1/sessions/{id}/master) and suggests allow_master.
+            Note GET /api/v1/health and Manager.Counts() still count a master
+            session as connected, so an operator can legitimately see
+            connected: 1 here and still get this 409.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -490,6 +544,7 @@ paths:
                 client_ref: {type: string}
                 tenant_ref: {type: string}
                 category: {type: string, enum: [otp, notification, alert, manual]}
+                allow_master: {type: boolean, description: 'A MULTIPART FORM FIELD, not a JSON key — this endpoint has no JSON body. Automatic routing only; ignored on this explicit-session route (a session id is already in the path).'}
       responses:
         '200':
           description: Terminal outcome within 15s.
@@ -548,6 +603,7 @@ paths:
                 client_ref: {type: string}
                 tenant_ref: {type: string}
                 category: {type: string, enum: [otp, notification, alert, manual]}
+                allow_master: {type: boolean, description: 'A MULTIPART FORM FIELD, not a JSON key — this endpoint has no JSON body. Automatic routing only.'}
       responses:
         '200':
           description: Terminal outcome within 15s.
@@ -565,7 +621,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '409':
-          description: No connected session exists.
+          description: >
+            No connected session exists to auto-route through. If the only
+            connected session(s) are flagged is_master, the message names that
+            (see PUT /api/v1/sessions/{id}/master) and suggests allow_master.
+            Note GET /api/v1/health and Manager.Counts() still count a master
+            session as connected, so an operator can legitimately see
+            connected: 1 here and still get this 409.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -1417,6 +1479,7 @@ paths:
                   type: array
                   items: {type: string}
                   description: 'International format accepted with human formatting, e.g. "+62 812-0000-0000" or "6289900000000"'
+                allow_master: {type: boolean, description: 'Automatic routing only; ignored when a session id is in the path. Opts into a master-flagged session for this one request.'}
       responses:
         '200':
           description: One verdict per input line, in input order.
@@ -1429,7 +1492,13 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
         '409':
-          description: No connected session exists.
+          description: >
+            No connected session exists to auto-route through. If the only
+            connected session(s) are flagged is_master, the message names that
+            (see PUT /api/v1/sessions/{id}/master) and suggests allow_master.
+            Note GET /api/v1/health and Manager.Counts() still count a master
+            session as connected, so an operator can legitimately see
+            connected: 1 here and still get this 409.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -1555,6 +1624,7 @@ components:
         state: {type: string, enum: [new, pairing, connected, disconnected, logged_out]}
         connected: {type: boolean, description: 'Live socket check, not just state'}
         queue_len: {type: integer}
+        is_master: {type: boolean, description: 'Routing-exclusion flag; still connected and directly sendable, just skipped by automatic selection unless allow_master is set. See PUT /api/v1/sessions/{id}/master.'}
     SendResponse:
       type: object
       properties:

@@ -97,6 +97,43 @@ func writeWAError(w http.ResponseWriter, err error) {
 	}
 }
 
+// noRouteMessage is the plain 409 body every automatic-routing endpoint
+// answers when SelectConnected finds nothing. Kept as its own constant so
+// noAutoRouteMessage's "unchanged normally" guarantee below is checkable
+// against the literal string, not just its shape.
+const noRouteMessage = "no connected session available"
+
+// masterExclusionHint is appended to noRouteMessage ONLY when
+// noAutoRouteMessage determines a connected master session exists and was
+// excluded — see that function's doc comment.
+const masterExclusionHint = " (the only connected session(s) are master sessions; set allow_master to route through one)"
+
+// noAutoRouteMessage builds the 409 body for every automatic-routing send
+// endpoint (PostAPISendMessageAuto, PostAPISendGroupMessage,
+// PostAPISendMediaAuto, PostAPIContactsCheckAuto). It is a PURE function
+// over the caller's own snapshot list plus the request's allow_master flag
+// — no Manager call inside it — so it is unit-testable without a live
+// session.
+//
+// The plain noRouteMessage is returned unchanged in two cases: a genuinely
+// empty/disconnected gateway (must still read as an outage, not a master
+// puzzle) and allowMaster == true (the caller already opted in, so a master
+// being excluded is not what happened). Only when snaps contains at least
+// one Connected && IsMaster entry AND allowMaster is false does the hint
+// get appended — that is the one case where the plain message would send an
+// operator hunting a phantom outage instead of the real, fixable cause.
+func noAutoRouteMessage(snaps []wa.Snapshot, allowMaster bool) string {
+	if allowMaster {
+		return noRouteMessage
+	}
+	for _, snap := range snaps {
+		if snap.Connected && snap.IsMaster {
+			return noRouteMessage + masterExclusionHint
+		}
+	}
+	return noRouteMessage
+}
+
 // PostAPILogin authenticates an API client and returns a bearer access token.
 func (h *handlers) PostAPILogin(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest

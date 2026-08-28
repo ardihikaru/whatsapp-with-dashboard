@@ -34,6 +34,11 @@ func (m *Manager) StartAll(ctx context.Context) error {
 			// would otherwise strand a row.Active==true session that failed
 			// to reconnect at boot exactly the way it stranded post-boot.
 			active: row.Active,
+			// isMaster hydrates from the persisted routing flag — without
+			// this, the flag survives in the database but every restart
+			// silently un-flags the session in memory, failing OPEN and
+			// putting the master back into automatic-selection rotation.
+			isMaster: row.IsMaster,
 		}
 		switch {
 		case row.JID == "":

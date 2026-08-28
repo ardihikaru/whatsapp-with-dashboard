@@ -44,16 +44,26 @@ type rowSession struct {
 	QueueLen      int
 	Stalled       bool
 	StalledReason string
+	IsMaster      bool
 }
 
 type rowsData struct{ Sessions []rowSession }
 
 func TestPartialURLsCarryTheMount(t *testing.T) {
-	data := rowsData{Sessions: []rowSession{{ID: "abc", Name: "Kasir", Phone: "628", JID: "628@s", State: "connected"}}}
+	data := rowsData{Sessions: []rowSession{{ID: "abc", Name: "Kasir", Phone: "628", JID: "628@s", State: "connected", IsMaster: true}}}
 
 	mounted := renderPartial(t, "/wsm", "session_rows", data)
 	if !strings.Contains(mounted, `/wsm/sessions/abc/`) {
 		t.Errorf("mounted session_rows has no /wsm/sessions/abc/ URL:\n%s", mounted)
+	}
+	// The master toggle is a sixth URL sharing this same prefixing risk —
+	// a fixture with IsMaster:true is required to even reach it, since it
+	// only renders on the {{if .IsMaster}} branch.
+	if !strings.Contains(mounted, `/wsm/sessions/abc/master`) {
+		t.Errorf("mounted session_rows has no /wsm/sessions/abc/master URL:\n%s", mounted)
+	}
+	if !strings.Contains(mounted, `badge-master`) {
+		t.Errorf("mounted session_rows dropped the master badge:\n%s", mounted)
 	}
 	// The failure this guards: a URL that kept its root-relative form. On a
 	// shared origin `/sessions/abc/delete` is not a 404 — it is a POST at the

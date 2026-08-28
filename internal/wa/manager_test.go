@@ -171,6 +171,30 @@ func TestStartAllReconciliation(t *testing.T) {
 	m.Close() // must join cleanly with zero goroutines spawned
 }
 
+// TestStartAllHydratesTheMasterFlagFromTheStoredRow proves the boot
+// reconciliation carries wa_sessions.is_master into the in-memory
+// ManagedSession. Losing this hydration fails OPEN: the flag would still be
+// true in the database, but every restart would silently un-flag the
+// session in memory and put the master back into automatic-selection
+// rotation.
+func TestStartAllHydratesTheMasterFlagFromTheStoredRow(t *testing.T) {
+	repo := newStubSessions(
+		wasession.Session{ID: "m", Name: "m", Phone: "62899", JID: "", LastStatus: "new", IsMaster: true},
+	)
+	m := newTestManager(repo, newStubMsgs())
+	if err := m.StartAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s, ok := m.Get("m")
+	if !ok {
+		t.Fatal("session m missing after StartAll")
+	}
+	if snap := s.Snapshot(); !snap.IsMaster {
+		t.Error("Snapshot().IsMaster = false, want true (StartAll must hydrate is_master from the stored row)")
+	}
+	m.Close()
+}
+
 func TestNewIDShapeAndUniqueness(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 100; i++ {

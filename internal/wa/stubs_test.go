@@ -15,12 +15,13 @@ type stubSessions struct {
 	rows     []wasession.Session
 	statuses map[string][]string
 	active   map[string][]bool
+	master   map[string][]bool
 	deleted  []string
 }
 
 func newStubSessions(rows ...wasession.Session) *stubSessions {
 	return &stubSessions{rows: rows,
-		statuses: map[string][]string{}, active: map[string][]bool{}}
+		statuses: map[string][]string{}, active: map[string][]bool{}, master: map[string][]bool{}}
 }
 
 func (s *stubSessions) All(context.Context) ([]wasession.Session, error) {
@@ -54,6 +55,13 @@ func (s *stubSessions) SetActive(_ context.Context, id string, active bool) erro
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.active[id] = append(s.active[id], active)
+	return nil
+}
+
+func (s *stubSessions) SetMaster(_ context.Context, id string, master bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.master[id] = append(s.master[id], master)
 	return nil
 }
 

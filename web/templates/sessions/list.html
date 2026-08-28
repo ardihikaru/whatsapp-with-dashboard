@@ -3,7 +3,9 @@
   <h4>WhatsApp Sessions</h4>
   <a class="btn btn-primary" href="{{u "/sessions/new"}}">New session</a>
 </div>
-<p>Automatic routing sends through the connected session with the lowest queue.</p>
+<p>Automatic routing sends through the connected session with the lowest queue,
+   skipping any session flagged Master (a caller can opt in per request with
+   <code>allow_master</code>) — direct sends naming a session by id are unaffected.</p>
 <div class="card">
   <!-- .table-scroll is not optional: a JID column plus the action buttons make
        this table ~755px, which on a phone dragged the whole DOCUMENT sideways

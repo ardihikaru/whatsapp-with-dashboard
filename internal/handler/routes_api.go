@@ -49,6 +49,10 @@ func (h *handlers) mountAPI(mux *http.ServeMux) {
 	mux.Handle("DELETE /api/v1/sessions/{id}", api(http.HandlerFunc(h.DeleteAPISession)))
 	mux.Handle("POST /api/v1/sessions/{id}/activate", api(http.HandlerFunc(h.PostAPISessionActivate)))
 	mux.Handle("POST /api/v1/sessions/{id}/deactivate", api(http.HandlerFunc(h.PostAPISessionDeactivate)))
+	// WSM-native routing state, not a backend capability — works on both
+	// backends, unlike the Phase 6b §1 block below which all 501 on
+	// whatsmeow. See PutAPISessionMaster's doc comment.
+	mux.Handle("PUT /api/v1/sessions/{id}/master", api(http.HandlerFunc(h.PutAPISessionMaster)))
 	mux.Handle("GET /api/v1/sessions/{id}/pairing", api(http.HandlerFunc(h.GetAPISessionPairing)))
 	mux.Handle("POST /api/v1/messages", api(http.HandlerFunc(h.PostAPISendMessageAuto)))
 	mux.Handle("POST /api/v1/messages/group", api(http.HandlerFunc(h.PostAPISendGroupMessage)))
