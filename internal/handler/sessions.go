@@ -39,6 +39,10 @@ func (h *handlers) GetSessionNew(w http.ResponseWriter, r *http.Request) {
 
 // PostSessionCreate validates and inserts the session, then bounces the
 // operator straight to the pairing page. Validation errors render inline.
+// Manager.Create's signature stays untouched (every other caller, including
+// cmd/e2eseed and the API's PostAPISessions, is unaffected): a checked
+// "is_master" form field is applied as a second step via SetMaster, the
+// same shape PostAPISessions already uses for the REST equivalent.
 func (h *handlers) PostSessionCreate(w http.ResponseWriter, r *http.Request) {
 	s, err := h.Manager.Create(r.Context(), r.FormValue("name"), r.FormValue("phone"))
 	if err != nil {
@@ -51,6 +55,11 @@ func (h *handlers) PostSessionCreate(w http.ResponseWriter, r *http.Request) {
 		}
 		h.Renderer.RenderPartial(w, "form_error", struct{ Error string }{msg})
 		return
+	}
+	if parseFormBool(r.FormValue("is_master")) {
+		if err := s.SetMaster(r.Context(), true); err != nil {
+			slog.Error("set master on create", "session", s.ID, "err", err)
+		}
 	}
 	target := h.BasePath + "/sessions/" + s.ID + "/pair"
 	if r.Header.Get("HX-Request") == "true" {
@@ -67,6 +76,19 @@ func (h *handlers) PostSessionActivate(w http.ResponseWriter, r *http.Request) {
 	if s, ok := h.Manager.Get(r.PathValue("id")); ok {
 		if err := s.Activate(r.Context()); err != nil {
 			slog.Warn("activate", "session", s.ID, "err", err)
+		}
+	}
+	h.GetSessionRows(w, r)
+}
+
+// PostSessionSetMaster flips the routing-intent flag from the row toggle.
+// One route serves both directions: the button posts master=true|false via
+// hx-vals, mirroring PostSessionActivate/PostSessionDeactivate's shape but
+// without a state/socket change — SetMaster touches routing intent only.
+func (h *handlers) PostSessionSetMaster(w http.ResponseWriter, r *http.Request) {
+	if s, ok := h.Manager.Get(r.PathValue("id")); ok {
+		if err := s.SetMaster(r.Context(), parseFormBool(r.FormValue("master"))); err != nil {
+			slog.Warn("set master", "session", s.ID, "err", err)
 		}
 	}
 	h.GetSessionRows(w, r)

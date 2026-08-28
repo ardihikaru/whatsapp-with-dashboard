@@ -112,23 +112,27 @@ func run() error {
 }
 
 // Deliberately awkward content: a name long enough to test truncation, and a
-// status mix so the badge colours all render.
+// status mix so the badge colours all render. One session is flagged
+// IsMaster: without a seeded master row, the master badge (session_rows.html)
+// and the "— master" picker suffix (send.html/calls.html/verify.html) render
+// nowhere in the browser suite or any evidence screenshot — see CLAUDE.md's
+// "an e2e run against empty tables proves very little".
 var seedSessionDefs = []struct {
 	ID, Name, Phone, JID, Status string
-	Active                       bool
+	Active, IsMaster             bool
 }{
 	{"e2e-sess-0001", "Nomor Utama Kasir Kemang Selatan", "6285190679041",
-		"6285190679041:12@s.whatsapp.net", "connected", true},
+		"6285190679041:12@s.whatsapp.net", "connected", true, true},
 	{"e2e-sess-0002", "Cadangan Outlet Pondok Indah", "6281234567890",
-		"6281234567890:3@s.whatsapp.net", "disconnected", true},
-	{"e2e-sess-0003", "Sesi Uji Coba", "6289900112233", "", "new", false},
+		"6281234567890:3@s.whatsapp.net", "disconnected", true, false},
+	{"e2e-sess-0003", "Sesi Uji Coba", "6289900112233", "", "new", false, false},
 }
 
 func seedSessions(ctx context.Context, repo *wasession.SQLRepository, base time.Time) error {
 	for i, d := range seedSessionDefs {
 		s := &wasession.Session{
 			ID: d.ID, Name: d.Name, Phone: d.Phone, JID: d.JID,
-			Active: d.Active, LastStatus: d.Status,
+			Active: d.Active, IsMaster: d.IsMaster, LastStatus: d.Status,
 			CreatedAt: base.Add(-time.Duration(i+1) * 24 * time.Hour),
 			UpdatedAt: base,
 		}

@@ -72,3 +72,60 @@ func TestANonStalledSessionRowSaysNothingAboutAttention(t *testing.T) {
 		t.Errorf("a non-stalled session's row says it needs attention; body:\n%s", body)
 	}
 }
+
+// TestAMasterSessionRowShowsTheMasterBadge is the UI half of the master
+// routing-exclusion flag (wa.Snapshot.IsMaster, internal/wa/load_balance.go's
+// predicate): this proves session_rows.html actually renders it, rather
+// than silently dropping the flag on the floor the way a template-only
+// change is easy to get wrong without a test watching it. Same technique as
+// TestAStalledSessionRowNeedsAttention above: a literal []wa.Snapshot fed
+// straight to the partial, not a live Manager.
+func TestAMasterSessionRowShowsTheMasterBadge(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := sessionRowsData{Sessions: []wa.Snapshot{
+		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected, IsMaster: true},
+	}}
+	res := httptest.NewRecorder()
+	rend.RenderPartial(res, "session_rows", data)
+	body := res.Body.String()
+
+	if !strings.Contains(body, `class="badge badge-master"`) {
+		t.Errorf("a master session's row does not carry the badge-master pill; body:\n%s", body)
+	}
+	if !strings.Contains(body, "Master") {
+		t.Errorf("a master session's row does not say \"Master\" anywhere; body:\n%s", body)
+	}
+}
+
+// TestANonMasterSessionRowShowsNoMasterBadge is the test that stops
+// TestAMasterSessionRowShowsTheMasterBadge above passing against a template
+// that renders the master badge unconditionally.
+func TestANonMasterSessionRowShowsNoMasterBadge(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := sessionRowsData{Sessions: []wa.Snapshot{
+		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected, IsMaster: false},
+	}}
+	res := httptest.NewRecorder()
+	rend.RenderPartial(res, "session_rows", data)
+	body := res.Body.String()
+
+	if strings.Contains(body, "badge-master") {
+		t.Errorf("a non-master session's row carries the badge-master pill; body:\n%s", body)
+	}
+}

@@ -459,6 +459,32 @@ func TestSessionWebhookDLQReplayRemovesTheEntry(t *testing.T) {
 	}
 }
 
+// TestTogglingMasterRerendersTheRowsWithTheBadge drives the UI toggle
+// (POST {BasePath}/sessions/{id}/master, hx-vals master=true|false) end to
+// end: session created through Manager.Create (newSessionAdminTestServer
+// already does this — see its doc comment on why a hand-made id 404s on
+// Manager.Get), toggled on, badge present in the rerendered rows partial,
+// toggled back off, badge gone.
+func TestTogglingMasterRerendersTheRowsWithTheBadge(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+
+	on := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/master", url.Values{"master": {"true"}})
+	if on.Code != http.StatusOK {
+		t.Fatalf("POST /sessions/%s/master (on) = %d: %s", s.ID, on.Code, on.Body.String())
+	}
+	if !strings.Contains(on.Body.String(), "badge-master") {
+		t.Fatalf("rows do not carry badge-master after setting master; got:\n%s", on.Body.String())
+	}
+
+	off := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/master", url.Values{"master": {"false"}})
+	if off.Code != http.StatusOK {
+		t.Fatalf("POST /sessions/%s/master (off) = %d: %s", s.ID, off.Code, off.Body.String())
+	}
+	if strings.Contains(off.Body.String(), "badge-master") {
+		t.Fatalf("rows still carry badge-master after unsetting master; got:\n%s", off.Body.String())
+	}
+}
+
 // TestEveryNewTableIsWrappedInTableScroll guards the JID-column hazard
 // (CLAUDE.md, and datatable.css's own comment): every table this phase
 // adds must sit inside a .table-scroll wrapper, or a wide table drags the

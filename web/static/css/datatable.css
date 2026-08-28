@@ -76,6 +76,11 @@
 .badge-active   { color: var(--success-dark); background: rgba(34, 197, 94, 0.16); }
 .badge-inactive { color: var(--grey-600);     background: rgba(145, 158, 171, 0.16); }
 
+/* /sessions' own routing-exclusion flag (session_rows.html) — distinct from
+   the badge-{{.State}} chip it sits beside, so it gets its own info-toned
+   colour rather than reusing a state colour. */
+.badge-master   { color: var(--info-dark);    background: rgba(0, 184, 217, 0.16); }
+
 /* The badge inks above are tuned for the light surface; lift them on dark. */
 [data-theme="dark"] .badge-queued,
 [data-theme="dark"] .badge-pairing      { color: var(--warning-light); }
@@ -86,6 +91,13 @@
 [data-theme="dark"] .badge-disconnected { color: var(--error-light); }
 [data-theme="dark"] .badge-inactive,
 [data-theme="dark"] .badge-new          { color: var(--grey-400); }
+[data-theme="dark"] .badge-master       { color: var(--info-light); }
+
+/* Status cell can carry both the state badge and the master badge
+   (session_rows.html) — space them apart like webhook rows' pair above,
+   scoped to this table so it doesn't reach into any other badge-bearing
+   list. */
+#session-rows .badge + .badge { margin-left: 4px; }
 
 /* one-time secret reveal */
 .secret-box { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }

@@ -5,6 +5,7 @@
   <td class="mono">{{.Phone}}</td>
   <td class="mono">{{.JID}}</td>
   <td><span class="badge badge-{{.State}}">{{.State}}</span>
+      {{if .IsMaster}}<span class="badge badge-master">Master</span>{{end}}
       {{if gt .QueueLen 0}}<small>({{.QueueLen}} queued)</small>{{end}}
       {{if .Stalled}}<br><small class="muted" title="{{.StalledReason}}">needs attention — automatic reconnect stopped, see title / Activate to retry</small>{{end}}</td>
   <td class="row-actions">
@@ -18,6 +19,13 @@
       <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/pair">Pairing…</a>
     {{else}}
       <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/pair">Pair</a>
+    {{end}}
+    {{if .IsMaster}}
+      <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.ID}}/master" hx-vals='{"master": "false"}'
+              hx-target="#session-rows" hx-swap="innerHTML">Unset master</button>
+    {{else}}
+      <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.ID}}/master" hx-vals='{"master": "true"}'
+              hx-target="#session-rows" hx-swap="innerHTML">Set master</button>
     {{end}}
     <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/ops">Ops</a>
     <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/webhooks">Webhooks</a>

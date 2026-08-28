@@ -25,7 +25,7 @@
       <span class="textfield-label">Session</span>
       <select name="session_id" class="select">
         <option value="">Automatic</option>
-        {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+        {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}}){{if .IsMaster}} — master{{end}}</option>{{end}}
       </select>
     </label>
     <!-- Progressive enhancement: this is a plain textarea, one number per
