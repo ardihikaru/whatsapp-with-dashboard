@@ -150,6 +150,14 @@ type mediaTestConfig struct {
 	objects       storage.ObjectStore
 	callsEnabled  bool
 	mediaMaxBytes int64
+	// mediaMaxBytes{Image,Video,Audio,Document}, when non-zero, feed
+	// Deps.MediaMaxBytes{Image,Video,Audio,Document} directly — otherwise
+	// left at zero, which handlers.mediaKindLimit (api_media.go) falls
+	// back to mediaMaxBytes for, exactly as an untouched Deps literal does.
+	mediaMaxBytesImage    int64
+	mediaMaxBytesVideo    int64
+	mediaMaxBytesAudio    int64
+	mediaMaxBytesDocument int64
 }
 
 // newMediaTestServer wires a full handler.New(Deps{...}) server around a
@@ -206,6 +214,10 @@ func newMediaTestServer(t *testing.T, cfg mediaTestConfig) (http.Handler, *wa.Ma
 		Calls:                  callRepo,
 		Objects:                cfg.objects,
 		MediaMaxBytes:          maxBytes,
+		MediaMaxBytesImage:     cfg.mediaMaxBytesImage,
+		MediaMaxBytesVideo:     cfg.mediaMaxBytesVideo,
+		MediaMaxBytesAudio:     cfg.mediaMaxBytesAudio,
+		MediaMaxBytesDocument:  cfg.mediaMaxBytesDocument,
 		MediaUploadTimeout:     5 * time.Second,
 		MediaUploadConcurrency: 2,
 		MediaArchive:           cfg.objects != nil,

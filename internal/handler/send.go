@@ -25,6 +25,13 @@ type sendPageData struct {
 	// parseMediaSendRequest is the real limit; this only avoids uploading
 	// a doomed file over a slow connection first).
 	MediaMaxBytes int64
+	// MediaLimits drives both the "Image 5 MB · Video 16 MB · …" summary
+	// line and the "kind" select's per-option data-max-bytes attributes —
+	// see mediaKindDisplays' doc comment for why this is built from
+	// handlers.mediaKindLimit (api_media.go) rather than duplicated as
+	// literal numbers here, which could silently drift from what the
+	// server actually enforces.
+	MediaLimits []mediaKindDisplay
 }
 
 type sendResultData struct {
@@ -53,7 +60,7 @@ func (h *handlers) GetSend(w http.ResponseWriter, r *http.Request) {
 			connected = append(connected, s)
 		}
 	}
-	data := sendPageData{Connected: connected, MediaMaxBytes: h.MediaMaxBytes}
+	data := sendPageData{Connected: connected, MediaMaxBytes: h.MediaMaxBytes, MediaLimits: h.mediaKindDisplays()}
 	data.PageBase = h.newPageBase(r, "Send Message", "/send")
 	h.Renderer.RenderPage(w, "send", data)
 }

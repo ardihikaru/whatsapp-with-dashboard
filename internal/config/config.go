@@ -218,6 +218,15 @@ type Config struct {
 	MediaUploadConcurrency int
 	MediaArchive           bool
 
+	// MediaMaxBytes{Image,Video,Audio,Document} are the per-kind caps a
+	// media send is checked against, on top of (never above) MediaMaxBytes
+	// — see media.go's loadMedia doc comment for the WhatsApp-published
+	// defaults and why they are per-kind at all.
+	MediaMaxBytesImage    int64
+	MediaMaxBytesVideo    int64
+	MediaMaxBytesAudio    int64
+	MediaMaxBytesDocument int64
+
 	// CallsEnabled gates the /calls/* endpoints — false (the default) makes
 	// every one of them answer 501 and place nothing. See media.go's
 	// DefaultCallsEnabled doc comment.

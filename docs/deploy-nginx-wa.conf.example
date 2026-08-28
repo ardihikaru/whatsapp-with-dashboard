@@ -52,6 +52,19 @@ server {
     ssl_session_cache   shared:SSL:10m;
     ssl_session_timeout 1d;
 
+    # nginx's OWN default here is 1 MiB, and it answers a bare 413 BEFORE
+    # proxying anything — the app never sees the request, logs nothing, and
+    # writes no wa_messages row (see CLAUDE.md's hazard note on this file for
+    # the incident that found it: a 1.6 MB video send failed exactly this
+    # way, and every send that had ever worked before it was, by coincidence,
+    # under 1 MiB). Set deliberately ABOVE the app's own WSM_MEDIA_MAX_BYTES
+    # (100 MiB in production) so the APP's specific, kind-aware error always
+    # wins over nginx's bare 413 — this edge should never be the binding
+    # limit. 110m, not 100m: real headroom for the multipart envelope around
+    # the file (boundaries, the other form fields — see internal/handler/
+    # api_media.go's mediaUploadSlack for the same reasoning one layer down).
+    client_max_body_size 110m;
+
     # An empty map result means this vhost was reached for a host it does not serve.
     # 444 closes without a response rather than proxying to a blank upstream.
     if ($wa_backend = "") { return 444; }

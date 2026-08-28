@@ -47,6 +47,32 @@
 }
 
 /* ---------- media upload (send.html's Media tab) --------------------------- */
+/* Per-kind size-limit summary above the Kind select (send.html) — "Image
+   5.0 MB · Video 16.0 MB · …". .is-active is toggled by media-upload.js's
+   syncKind to follow the Kind select, so the operator can see at a glance
+   which number the client-side pre-check is using. Tokens only: --primary/
+   --primary-lighter/--text-secondary already carry a [data-theme="dark"]
+   counterpart in base.css, so no separate dark-mode block is needed here. */
+.media-limits {
+  margin: 4px 0 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.media-limit {
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+
+.media-limit.is-active {
+  color: var(--primary-dark);
+  background: var(--primary-lighter);
+  font-weight: 700;
+}
+
+[data-theme="dark"] .media-limit.is-active { color: var(--primary-darker); }
+
 .media-dropzone { margin-bottom: 20px; }
 
 .media-file-chip {

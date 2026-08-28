@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -59,6 +60,110 @@ func parseMediaKind(v string) (wa.MediaKind, bool) {
 	default:
 		return "", false
 	}
+}
+
+// mediaKindLimit resolves the per-kind size ceiling a decoded upload of the
+// given kind must not exceed: Deps.MediaMaxBytes{Image,Video,Audio,Document}
+// (internal/config/media.go's loadMedia — WhatsApp's own published limits
+// differ per kind, so one global number either under-restricts a document
+// or over-permits a video past what WhatsApp will accept). Falls back to
+// Deps.MediaMaxBytes when the per-kind field is unset (<=0) — the same
+// "zero-value Deps must not deadlock/reject everything" rule
+// mediaUploadConcurrency (routes.go) already follows, needed because most
+// of this package's handler tests build a Deps literal that predates these
+// fields.
+func (h *handlers) mediaKindLimit(kind wa.MediaKind) int64 {
+	var limit int64
+	switch kind {
+	case wa.MediaImage:
+		limit = h.MediaMaxBytesImage
+	case wa.MediaVideo:
+		limit = h.MediaMaxBytesVideo
+	case wa.MediaAudio:
+		limit = h.MediaMaxBytesAudio
+	case wa.MediaDocument:
+		limit = h.MediaMaxBytesDocument
+	}
+	if limit <= 0 || limit > h.MediaMaxBytes {
+		limit = h.MediaMaxBytes
+	}
+	return limit
+}
+
+// mediaKindDisplayOrder is the four kinds in the order both the "kind"
+// <select> and the limits summary line show them on /send — image, video,
+// audio, document, matching send.html's original hand-written option
+// order.
+var mediaKindDisplayOrder = []struct {
+	kind  wa.MediaKind
+	label string
+}{
+	{wa.MediaImage, "Image"},
+	{wa.MediaVideo, "Video"},
+	{wa.MediaAudio, "Audio"},
+	{wa.MediaDocument, "Document"},
+}
+
+// mediaKindDisplay is one row of /send's per-kind size-limit summary and
+// one <option> of its "kind" select — see sendPageData.MediaLimits.
+type mediaKindDisplay struct {
+	Kind  string // "image" — the <option value> and data-media-limit key
+	Label string // "Image"
+	Bytes int64
+	Human string // "5.0 MB" — formatMediaBytes(Bytes)
+}
+
+// mediaKindDisplays builds send.html's MediaLimits straight from
+// mediaKindLimit — the SAME function parseMediaSendRequest's size check
+// calls — so the number shown to the operator can never drift from the
+// number the server actually enforces. See
+// TestMediaKindDisplaysReadsFromDepsConfigNotAConstant and
+// TestSendPageRendersEveryKindsConfiguredLimit (media_send_ui_test.go),
+// which together pin exactly that: the limits come from Deps config, not
+// literals baked into this function or into send.html.
+func (h *handlers) mediaKindDisplays() []mediaKindDisplay {
+	out := make([]mediaKindDisplay, 0, len(mediaKindDisplayOrder))
+	for _, k := range mediaKindDisplayOrder {
+		limit := h.mediaKindLimit(k.kind)
+		out = append(out, mediaKindDisplay{
+			Kind: string(k.kind), Label: k.label, Bytes: limit, Human: formatMediaBytes(limit),
+		})
+	}
+	return out
+}
+
+// formatMediaBytes renders a byte count the way an operator reads it —
+// mirrors media-upload.js's own formatBytes exactly, so the client-side
+// pre-check and this server-side rejection never disagree about what "16
+// MB" means.
+func formatMediaBytes(n int64) string {
+	switch {
+	case n >= 1024*1024:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1024*1024))
+	case n >= 1024:
+		return fmt.Sprintf("%.1f KB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
+// mediaOversizeMessage builds parseMediaSendRequest's per-kind rejection
+// text: the kind, the actual size and that kind's limit, always — plus a
+// concrete next step. A video/audio/image too large for its own kind may
+// still fit as a document (the document limit is typically far higher, see
+// DefaultMediaMaxBytesDocument), so that suggestion is only made when
+// THIS DEPLOYMENT'S configured document limit is actually bigger than the
+// limit that was just missed — never assumed.
+func (h *handlers) mediaOversizeMessage(kind wa.MediaKind, size, limit int64) string {
+	msg := fmt.Sprintf("%s upload is %s, over the %s limit configured for %s on this deployment.",
+		kind, formatMediaBytes(size), formatMediaBytes(limit), kind)
+	if kind == wa.MediaDocument {
+		return msg + " Compress it before sending."
+	}
+	if docLimit := h.mediaKindLimit(wa.MediaDocument); docLimit > limit {
+		return msg + fmt.Sprintf(" Compress it, or send it as a document instead (document limit %s on this deployment) if that fits your use case.", formatMediaBytes(docLimit))
+	}
+	return msg + " Compress it before sending."
 }
 
 // hasFtypBox reports whether data opens with an ISO-base-media "ftyp" box
@@ -290,6 +395,19 @@ func (h *handlers) parseMediaSendRequest(w http.ResponseWriter, r *http.Request)
 	if !ok {
 		return mediaSendRequest{}, &mediaDecodeError{http.StatusBadRequest, "kind must be one of image, video, audio, document"}
 	}
+
+	// Step 5b: per-kind size check, ahead of the sniff below. Placed right
+	// after "kind" resolves — the earliest point that limit is knowable —
+	// rather than at the very top: the socket-level MaxBytesReader check
+	// (step 1) is the one check that MUST run before the kind is even
+	// read, but this one wants the kind, and running it before the
+	// (comparatively expensive, on a large file) sniff below means a file
+	// that is oversized for its kind never pays for a sniff it cannot use.
+	if size, limit := int64(len(data)), h.mediaKindLimit(kind); size > limit {
+		log.Printf("media upload: rejected as %s, %d bytes exceeds the %d byte limit for that kind", kind, size, limit)
+		return mediaSendRequest{}, &mediaDecodeError{http.StatusRequestEntityTooLarge, h.mediaOversizeMessage(kind, size, limit)}
+	}
+
 	digits, err := wa.NormalizePhone(r.FormValue("to"))
 	if err != nil {
 		return mediaSendRequest{}, &mediaDecodeError{http.StatusBadRequest, err.Error()}
