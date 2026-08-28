@@ -107,3 +107,28 @@ RFC1918, ULA, CGNAT or link-local — a `url` pointing at a private address
 rejected, not silently accepted. Use a publicly-resolvable callback URL, or
 consume events over the SSE-backed pump this app already runs instead of a
 webhook.
+
+Check whether numbers are registered on WhatsApp, auto-routed to a
+connected session:
+
+```sh
+curl -sS -X POST "$BASE/api/v1/contacts/check" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"phones":["+6281200000000","6289900000000"]}'
+```
+
+Same, against an explicit session:
+
+```sh
+curl -sS -X POST "$BASE/api/v1/sessions/$SID/contacts/check" \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"phones":["+6281200000000","6289900000000"]}'
+```
+
+Each entry in the response's `results` gets its own `status`
+(`registered`/`not_registered`/`invalid`/`unknown`) in the same order as the
+`phones` sent — `unknown` means waxum simply did not answer about that
+number, which is a different thing from `not_registered` and is reported as
+such rather than guessed.

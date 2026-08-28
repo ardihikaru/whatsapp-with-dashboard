@@ -34,10 +34,11 @@ import (
 type fakeGatewayBackend struct {
 	name string
 
-	uploadFn func(ctx context.Context, sessionID string, kind wa.MediaKind, filename, mimetype string, data []byte) (wa.MediaDescriptor, error)
-	ttsFn    func(to wa.JID, text, voice string) (wa.CallOutcome, error)
-	playFn   func(to wa.JID, audioURL string) (wa.CallOutcome, error)
-	termFn   func(peer wa.JID, callID, reason string) error
+	uploadFn        func(ctx context.Context, sessionID string, kind wa.MediaKind, filename, mimetype string, data []byte) (wa.MediaDescriptor, error)
+	ttsFn           func(to wa.JID, text, voice string) (wa.CallOutcome, error)
+	playFn          func(to wa.JID, audioURL string) (wa.CallOutcome, error)
+	termFn          func(peer wa.JID, callID, reason string) error
+	checkContactsFn func(ctx context.Context, sessionID string, phones []string) ([]wa.ContactCheck, error)
 }
 
 func (f *fakeGatewayBackend) Name() string { return f.name }
@@ -95,6 +96,21 @@ func (f *fakeGatewayBackend) DownloadMedia(context.Context, string, wa.MediaDesc
 }
 
 var _ wa.MediaStore = (*fakeGatewayBackend)(nil)
+
+// CheckContacts gives fakeGatewayBackend wa.ContactDirectory's method set
+// unconditionally, the same nil-hook-means-ErrUnsupported convention as
+// every other hook on this fake — see UploadMedia's doc comment. This must
+// leave whatsmeowShapedBackend() (a bare &fakeGatewayBackend{name: ...},
+// session_admin_pages_test.go) still exercising the unsupported/501 path,
+// since it never sets checkContactsFn.
+func (f *fakeGatewayBackend) CheckContacts(ctx context.Context, sessionID string, phones []string) ([]wa.ContactCheck, error) {
+	if f.checkContactsFn != nil {
+		return f.checkContactsFn(ctx, sessionID, phones)
+	}
+	return nil, wa.ErrUnsupported
+}
+
+var _ wa.ContactDirectory = (*fakeGatewayBackend)(nil)
 
 // callLog is a small mutex-protected call-order recorder, shared between a
 // fakeObjectStore and a fakeGatewayBackend so

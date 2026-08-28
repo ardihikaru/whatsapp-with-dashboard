@@ -96,4 +96,11 @@ func (h *handlers) mountAPI(mux *http.ServeMux) {
 
 	// Phase 6b §3: gateway health — authenticated, unlike /api/v1/health.
 	mux.Handle("GET /api/v1/gateway/health", api(http.HandlerFunc(h.GetAPIGatewayHealth)))
+
+	// Number verification (wa.ContactDirectory) — 501 on a whatsmeow
+	// backend, same as every other optional-capability route above. Auto
+	// vs explicit-session mirrors /api/v1/messages'/
+	// /api/v1/sessions/{id}/messages' own split.
+	mux.Handle("POST /api/v1/contacts/check", api(http.HandlerFunc(h.PostAPIContactsCheckAuto)))
+	mux.Handle("POST /api/v1/sessions/{id}/contacts/check", api(http.HandlerFunc(h.PostAPIContactsCheck)))
 }
