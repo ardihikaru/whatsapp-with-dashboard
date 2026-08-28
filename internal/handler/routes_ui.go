@@ -81,6 +81,10 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("POST "+bp+"/send", page(http.HandlerFunc(h.PostSend)))
 	mux.Handle("POST "+bp+"/send/media", page(http.HandlerFunc(h.PostSendMedia)))
 
+	// Verify Number page.
+	mux.Handle("GET "+bp+"/verify", page(http.HandlerFunc(h.GetVerify)))
+	mux.Handle("POST "+bp+"/verify", page(http.HandlerFunc(h.PostVerify)))
+
 	// Calls page.
 	mux.Handle("GET "+bp+"/calls", page(http.HandlerFunc(h.GetCalls)))
 	mux.Handle("GET "+bp+"/calls/rows", page(http.HandlerFunc(h.GetCallRows)))

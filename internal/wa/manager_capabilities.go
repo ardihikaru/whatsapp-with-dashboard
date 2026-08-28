@@ -73,6 +73,19 @@ func (m *Manager) SessionOps() (SessionOps, error) {
 	return ops, nil
 }
 
+// ContactDirectory returns the backend's contact-verification operations,
+// if it has any.
+func (m *Manager) ContactDirectory() (ContactDirectory, error) {
+	if m.backend == nil {
+		return nil, ErrUnsupported
+	}
+	cd, ok := m.backend.(ContactDirectory)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return cd, nil
+}
+
 // WebhookAdmin returns the backend's webhook management operations, if it
 // has any.
 func (m *Manager) WebhookAdmin() (WebhookAdmin, error) {

@@ -31,16 +31,17 @@ import (
 //
 // So gateway administration instead lives behind OPTIONAL capability
 // interfaces (capabilities.go: MediaStore, SessionOps, WebhookAdmin,
-// GatewayHealth), reached through a type assertion on Backend — the way
-// http.Flusher works, not the way Backend's core methods work. waxumBackend
-// implements every one of them; meowBackend implements none (see
-// TestTheWhatsmeowBackendSatisfiesNoCapabilityInterface — a stray stub
-// there would silently enable a gateway-admin path that has nothing behind
-// it). Manager exposes them via manager_capabilities.go's accessors
-// (GatewayHealth/MediaStore/SessionOps/WebhookAdmin), which do the type
-// assertion once and return ErrUnsupported on failure — that assertion IS
-// "wired to whichever backend lacks it" for this half of the surface,
-// exactly like the four Backend methods below are for media/calls.
+// GatewayHealth, ContactDirectory), reached through a type assertion on
+// Backend — the way http.Flusher works, not the way Backend's core methods
+// work. waxumBackend implements every one of them; meowBackend implements
+// none (see TestTheWhatsmeowBackendSatisfiesNoCapabilityInterface — a
+// stray stub there would silently enable a gateway-admin path that has
+// nothing behind it). Manager exposes them via manager_capabilities.go's
+// accessors (GatewayHealth/MediaStore/SessionOps/WebhookAdmin/
+// ContactDirectory), which do the type assertion once and return
+// ErrUnsupported on failure — that assertion IS "wired to whichever
+// backend lacks it" for this half of the surface, exactly like the four
+// Backend methods below are for media/calls.
 //
 // Why media/calls got the heavier (Backend-method) treatment while
 // everything else got the lighter (capability-interface) one: media and

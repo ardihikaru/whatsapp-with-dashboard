@@ -45,6 +45,12 @@ const PAGES = [
   // layout does not overflow a phone viewport, which is a real risk
   // independent of whether the underlying feature is reachable here.
   "/calls",
+  // /verify renders its own "not supported by this backend" copy under
+  // WSM_WA_BACKEND=whatsmeow (scripts/e2e-env.sh) — see verify_ui.go's
+  // GetVerify — for the same reason /calls and the two session-scoped
+  // pages below do: this suite only cares that the degraded layout does
+  // not overflow a phone viewport.
+  "/verify",
   `/sessions/${SESSION_ID}/ops`,
   `/sessions/${SESSION_ID}/webhooks`,
 ];

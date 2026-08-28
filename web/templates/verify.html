@@ -1,0 +1,68 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Verify Number</h4>
+</div>
+
+{{if not .Supported}}
+<div class="card">
+  <p>Number verification is <strong>not supported by this backend</strong>. It requires
+     <span class="mono">WSM_WA_BACKEND=waxum</span>.</p>
+</div>
+{{else}}
+<div class="card form-card">
+  {{if .Connected}}
+  <form hx-post="{{u "/verify"}}" hx-target="#verify-rows" hx-swap="innerHTML"
+        hx-sync="this:drop" hx-disabled-elt="find button"
+        action="{{u "/verify"}}" method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Routing</span>
+      <select name="routing" class="select">
+        <option value="auto" selected>Automatic routing</option>
+        <option value="explicit">Select a session</option>
+      </select>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Session</span>
+      <select name="session_id" class="select">
+        <option value="">Automatic</option>
+        {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+      </select>
+    </label>
+    <!-- Progressive enhancement: this is a plain textarea, one number per
+         line, and it works with no JS at all. phone-chips.js (if it runs)
+         hides it and mirrors a chip editor's contents back into it on
+         every change, so the field the server reads never changes shape —
+         see that file's header comment. -->
+    <div class="chip-field" data-phone-chips>
+      <span class="textfield-label" id="verify-phones-label">Phone numbers</span>
+      <textarea name="phones" id="verify-phones" class="chip-source" rows="6"
+                aria-labelledby="verify-phones-label"
+                placeholder="One number per line, e.g.&#10;+62 812-0000-0000&#10;+1 415-555-0100"></textarea>
+    </div>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">
+        <span class="btn-label">Check numbers</span>
+        <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+        <span class="htmx-indicator">Checking...</span>
+      </button>
+    </div>
+  </form>
+  {{else}}
+  <p>No connected sessions. <a href="{{u "/sessions"}}">Pair or activate a session</a> first. Automatic routing becomes available when at least one session is connected.</p>
+  {{end}}
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Number</th><th>Status</th><th>Details</th></tr>
+      </thead>
+      <tbody id="verify-rows">
+        <tr><td colspan="3">Numbers you check will appear here.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
+{{end}}

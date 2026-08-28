@@ -1392,6 +1392,107 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/contacts/check:
+    post:
+      summary: Check whether numbers are registered on WhatsApp, using automatic session routing
+      description: >
+        waxum-only (wa.ContactDirectory) — 501 on a whatsmeow backend. Every
+        input is normalised individually; an unparseable entry becomes its
+        own "invalid" row rather than failing the whole request. Capped at
+        100 numbers per request (after blank lines are dropped) — bulk
+        usync against a paired device identity that has no second copy
+        anywhere is a ban vector.
+      operationId: checkContactsAuto
+      tags: [contacts]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phones]
+              properties:
+                phones:
+                  type: array
+                  items: {type: string}
+                  description: 'International format accepted with human formatting, e.g. "+62 812-0000-0000" or "6289900000000"'
+      responses:
+        '200':
+          description: One verdict per input line, in input order.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContactsCheckResponse'}
+        '400':
+          description: Malformed JSON, missing/empty phones, or more than 100 numbers.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: No connected session exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Active backend has no ContactDirectory support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Backend is rate-limiting this request; retry shortly.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/contacts/check:
+    post:
+      summary: Check whether numbers are registered on WhatsApp, through this session
+      description: >
+        Same behaviour as POST /api/v1/contacts/check, against an explicit
+        session id rather than automatic routing. Does not require a live
+        socket check of its own beyond what the backend itself enforces.
+      operationId: checkContacts
+      tags: [contacts]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [phones]
+              properties:
+                phones:
+                  type: array
+                  items: {type: string}
+                  description: 'International format accepted with human formatting, e.g. "+62 812-0000-0000" or "6289900000000"'
+      responses:
+        '200':
+          description: One verdict per input line, in input order.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContactsCheckResponse'}
+        '400':
+          description: Malformed JSON, missing/empty phones, or more than 100 numbers.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Active backend has no ContactDirectory support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Backend is rate-limiting this request; retry shortly.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 components:
   securitySchemes:
     bearerAuth:
@@ -1586,3 +1687,27 @@ components:
         last_error: {type: string}
         attempts: {type: integer}
         failed_at: {type: integer, format: int64}
+    ContactVerdict:
+      type: object
+      description: >
+        One checked line, in the same order it was submitted. "unknown"
+        means the backend simply did not answer about this number — it is
+        NOT evidence the number is unregistered, and is reported distinctly
+        rather than guessed.
+      properties:
+        input: {type: string, description: 'Exactly what was submitted for this line, including anything rejected as invalid'}
+        phone: {type: string, description: 'Normalised/canonicalised digits; omitted when input is invalid'}
+        jid: {type: string, description: 'WhatsApp JID, present only alongside status=registered'}
+        status: {type: string, enum: [registered, not_registered, invalid, unknown]}
+        error: {type: string, description: 'Set only when status=invalid'}
+    ContactsCheckResponse:
+      type: object
+      properties:
+        session:
+          type: object
+          properties:
+            id: {type: string}
+            name: {type: string}
+        results:
+          type: array
+          items: {$ref: '#/components/schemas/ContactVerdict'}

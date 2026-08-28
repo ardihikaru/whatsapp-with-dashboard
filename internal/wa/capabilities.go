@@ -164,6 +164,28 @@ type DLQEntry struct {
 	FailedAt   int64
 }
 
+// ContactCheck is one entry of ContactDirectory.CheckContacts' result,
+// mirroring waxum.ContactCheck field-for-field — see that type's doc
+// comment for why JID is a plain string (not a pointer) despite waxum's
+// own field being Option<String>, and why Phone is not guaranteed to echo
+// the input verbatim.
+type ContactCheck struct {
+	Phone        string
+	JID          string
+	IsRegistered bool
+}
+
+// ContactDirectory is whether a phone number is a registered WhatsApp
+// account — whatsmeow has no analogue at all (it can only discover this as
+// a side effect of actually messaging a number), so meowBackend implements
+// none of it, the same as every other interface in this file. sessionID is
+// a plain string, not *ManagedSession, for the same reason as MediaStore's
+// doc comment: reached from a dedicated HTTP handler keyed off the URL
+// path id, with no ManagedSession in hand.
+type ContactDirectory interface {
+	CheckContacts(ctx context.Context, sessionID string, phones []string) ([]ContactCheck, error)
+}
+
 // WebhookAdmin is the 6 webhook-management operations scoped to one session
 // plus the one fleet-level operation (ReenableAllWebhooks, which is NOT
 // scoped to a session — mirroring waxum.ReenableAllWebhooks's own doc

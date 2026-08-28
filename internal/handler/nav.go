@@ -39,6 +39,10 @@ const (
 	// (a text message) so the sidebar itself hints these dispatch two
 	// different kinds of thing before an operator reads the label.
 	iconCalls template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M6.6 10.8c1.4 2.8 3.8 5.2 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.4.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1C10.6 21 3 13.4 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.2.2 2.5.6 3.6.1.4 0 .8-.2 1L6.6 10.8z"/></svg>`
+	// checkmark inside a badge/shield outline — "confirm this number before
+	// sending to it", distinct from iconSend's paper-plane and iconCalls'
+	// handset: this dispatches nothing, it only answers a question.
+	iconVerify template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12 2 4 5v6c0 5.1 3.4 9.7 8 11 4.6-1.3 8-5.9 8-11V5l-8-3zm-1.1 14.2-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z"/></svg>`
 )
 
 // platformLink is the sidebar footer's way back out to the platform backoffice.
@@ -72,6 +76,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 			{Title: "Sessions", Path: "/sessions", Icon: iconSessions},
 			{Title: "Send Message", Path: "/send", Icon: iconSend},
 			{Title: "Voice Calls", Path: "/calls", Icon: iconCalls},
+			{Title: "Verify Number", Path: "/verify", Icon: iconVerify},
 			{Title: "Message Log", Path: "/logs", Icon: iconLogs},
 		}},
 		{Subheader: "Admin", Items: []NavItem{
