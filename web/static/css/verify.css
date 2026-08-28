@@ -8,10 +8,13 @@
    forms.css/base.css (both still carry legacy raw hex). */
 
 /* ---------- verify status badges (verify_rows.html) ------------------------
-   "unknown" deliberately uses --info-*, not --warning-*/--error-* — it must
-   read as "we don't have an answer", not as a problem. See
+   "unknown" deliberately uses --info-* tokens, not --warning-* or --error-*
+   ones — it must read as "we don't have an answer", not as a problem. See
    contactVerdict's doc comment (contacts_check.go) for why that distinction
-   exists at all. */
+   exists at all. (Do not put a star directly before a slash anywhere in
+   this comment — that pair closes it early no matter how it's spelled, and
+   once did here: it silently dropped .badge-registered below, see
+   internal/renderer/verify_badges_test.go.) */
 .badge-registered     { color: var(--success-dark); background: rgba(34, 197, 94, 0.16); }
 .badge-not_registered { color: var(--grey-600);     background: rgba(145, 158, 171, 0.16); }
 .badge-invalid         { color: var(--error-dark);   background: rgba(255, 86, 48, 0.16); }
