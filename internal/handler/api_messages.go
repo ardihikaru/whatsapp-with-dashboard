@@ -21,57 +21,72 @@ func (h *handlers) PostAPISendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "session not found")
 		return
 	}
-	digits, text, attr, ok := decodeSendRequest(w, r)
+	req, ok := decodeSendRequest(w, r)
 	if !ok {
 		return
 	}
-	h.postAPISendThrough(w, r, s, wa.ToJID(digits), digits, text, attr)
+	h.postAPISendThrough(w, r, s, wa.ToJID(req.Digits), req.Digits, req.Text, req.Attr)
 }
 
 func (h *handlers) PostAPISendMessageAuto(w http.ResponseWriter, r *http.Request) {
-	digits, text, attr, valid := decodeSendRequest(w, r)
+	req, valid := decodeSendRequest(w, r)
 	if !valid {
 		return
 	}
-	s, _, ok := h.Manager.SelectConnected(r.Context())
+	s, _, ok := h.Manager.SelectConnected(r.Context(), req.AllowMaster)
 	if !ok {
-		writeError(w, http.StatusConflict, "no connected session available")
+		writeError(w, http.StatusConflict, noAutoRouteMessage(h.Manager.Snapshots(), req.AllowMaster))
 		return
 	}
-	h.postAPISendThrough(w, r, s, wa.ToJID(digits), digits, text, attr)
+	h.postAPISendThrough(w, r, s, wa.ToJID(req.Digits), req.Digits, req.Text, req.Attr)
+}
+
+// textSendRequest is decodeSendRequest's parsed, validated result. A named
+// struct rather than a growing positional-return tuple — a fifth return
+// value would put two adjacent bools (AllowMaster and the ok success flag)
+// in the signature, which go vet cannot protect against a swap.
+type textSendRequest struct {
+	Digits      string
+	Text        string
+	Attr        message.Attribution
+	AllowMaster bool
 }
 
 // decodeSendRequest parses the send body, including the optional attribution the
 // log page breaks down by. category defaults to "notification"; api_client_id is
 // NOT read here — it comes from the bearer principal in sendThroughJID.
-func decodeSendRequest(w http.ResponseWriter, r *http.Request) (string, string, message.Attribution, bool) {
+// allow_master governs AUTOMATIC routing only (PostAPISendMessageAuto); the
+// explicit-session route (PostAPISendMessage) ignores it — naming a session
+// id already bypasses the exclusion.
+func decodeSendRequest(w http.ResponseWriter, r *http.Request) (textSendRequest, bool) {
 	var req struct {
-		To        string `json:"to"`
-		Text      string `json:"text"`
-		ClientRef string `json:"client_ref"`
-		TenantRef string `json:"tenant_ref"`
-		Category  string `json:"category"`
+		To          string `json:"to"`
+		Text        string `json:"text"`
+		ClientRef   string `json:"client_ref"`
+		TenantRef   string `json:"tenant_ref"`
+		Category    string `json:"category"`
+		AllowMaster bool   `json:"allow_master"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return "", "", message.Attribution{}, false
+		return textSendRequest{}, false
 	}
 	req.Text = strings.TrimSpace(req.Text)
 	if req.Text == "" || len(req.Text) > maxTextChars {
 		writeError(w, http.StatusBadRequest, "text is required, max 4096 characters")
-		return "", "", message.Attribution{}, false
+		return textSendRequest{}, false
 	}
 	digits, err := wa.NormalizePhone(req.To)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return "", "", message.Attribution{}, false
+		return textSendRequest{}, false
 	}
 	attr := message.Attribution{
 		ClientRef: strings.TrimSpace(req.ClientRef),
 		TenantRef: strings.TrimSpace(req.TenantRef),
 		Category:  message.NormalizeCategory(req.Category, message.CategoryNotification),
 	}
-	return digits, req.Text, attr, true
+	return textSendRequest{Digits: digits, Text: req.Text, Attr: attr, AllowMaster: req.AllowMaster}, true
 }
 
 // postAPISendThrough is the shared JSON tail of every machine send path — phone

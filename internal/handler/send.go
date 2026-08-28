@@ -234,7 +234,12 @@ func (h *handlers) dispatchSend(
 func (h *handlers) selectSendSession(r *http.Request) (*wa.ManagedSession, string) {
 	s, ok := h.Manager.Get(r.FormValue("session_id"))
 	if r.FormValue("routing") == "auto" || r.FormValue("session_id") == "" {
-		s, _, ok = h.Manager.SelectConnected(r.Context())
+		// Always false: the UI's "Automatic routing" picker never opts into
+		// a master session (unlike the API's allow_master flag) — an
+		// operator who genuinely wants to send from a master session
+		// selects it explicitly from the session dropdown instead, which IS
+		// the direct-send path (session_id set, routing != "auto").
+		s, _, ok = h.Manager.SelectConnected(r.Context(), false)
 		if !ok {
 			return nil, "no connected sessions available"
 		}

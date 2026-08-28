@@ -24,33 +24,13 @@ import (
 // This is the endpoint deploy/production/netdata/wa-notify.sh was written against
 // months before it existed.
 func (h *handlers) PostAPISendGroupMessage(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		GroupJID  string `json:"group_jid"`
-		Text      string `json:"text"`
-		ClientRef string `json:"client_ref"`
-		TenantRef string `json:"tenant_ref"`
-		Category  string `json:"category"`
-	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid JSON body")
-		return
-	}
-	req.Text = strings.TrimSpace(req.Text)
-	if req.Text == "" || len(req.Text) > maxTextChars {
-		writeError(w, http.StatusBadRequest, "text is required, max 4096 characters")
-		return
-	}
-	jid, err := wa.ParseGroupJID(req.GroupJID)
-	if err != nil {
-		// Specifically catches a user JID sent here by mistake. Delivering that
-		// to a private chat and returning 200 would be the worst outcome: an
-		// alert that reports success and reaches nobody who is on call.
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	s, _, ok := h.Manager.SelectConnected(r.Context())
+	req, jid, ok := decodeGroupSendRequest(w, r)
 	if !ok {
-		writeError(w, http.StatusConflict, "no connected session available")
+		return
+	}
+	s, _, ok := h.Manager.SelectConnected(r.Context(), req.AllowMaster)
+	if !ok {
+		writeError(w, http.StatusConflict, noAutoRouteMessage(h.Manager.Snapshots(), req.AllowMaster))
 		return
 	}
 	// Group sends are alerts by default (the alerter's WA_ALERT_GROUP_JID path).
@@ -60,6 +40,47 @@ func (h *handlers) PostAPISendGroupMessage(w http.ResponseWriter, r *http.Reques
 		Category:  message.NormalizeCategory(req.Category, message.CategoryAlert),
 	}
 	h.postAPISendThrough(w, r, s, jid, jid.String(), req.Text, attr)
+}
+
+// groupSendRequest is decodeGroupSendRequest's parsed body. Kept as its OWN
+// struct rather than sharing textSendRequest (api_messages.go): a group
+// send has a group_jid, not a phone number, and no Digits field at all —
+// forcing it into the phone-send shape would leave a field that is never
+// meaningful for this endpoint.
+type groupSendRequest struct {
+	GroupJID    string `json:"group_jid"`
+	Text        string `json:"text"`
+	ClientRef   string `json:"client_ref"`
+	TenantRef   string `json:"tenant_ref"`
+	Category    string `json:"category"`
+	AllowMaster bool   `json:"allow_master"`
+}
+
+// decodeGroupSendRequest reads and validates the group-send body, returning
+// the already-parsed group JID alongside it so the one call site does not
+// have to parse it twice. Extracted from PostAPISendGroupMessage purely so
+// the allow_master flag has a unit-testable seam of its own, matching
+// decodeSendRequest/decodeContactsCheckRequest's shape.
+func decodeGroupSendRequest(w http.ResponseWriter, r *http.Request) (groupSendRequest, wa.JID, bool) {
+	var req groupSendRequest
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return groupSendRequest{}, wa.JID{}, false
+	}
+	req.Text = strings.TrimSpace(req.Text)
+	if req.Text == "" || len(req.Text) > maxTextChars {
+		writeError(w, http.StatusBadRequest, "text is required, max 4096 characters")
+		return groupSendRequest{}, wa.JID{}, false
+	}
+	jid, err := wa.ParseGroupJID(req.GroupJID)
+	if err != nil {
+		// Specifically catches a user JID sent here by mistake. Delivering that
+		// to a private chat and returning 200 would be the worst outcome: an
+		// alert that reports success and reaches nobody who is on call.
+		writeError(w, http.StatusBadRequest, err.Error())
+		return groupSendRequest{}, wa.JID{}, false
+	}
+	return req, jid, true
 }
 
 // GetAPISessionGroups lists the groups this device belongs to, so an operator can

@@ -18,6 +18,10 @@ type apiSession struct {
 	State     string `json:"state"`
 	Connected bool   `json:"connected"`
 	QueueLen  int    `json:"queue_len"`
+	// IsMaster mirrors wa.Snapshot.IsMaster — routing intent, not
+	// connection intent. Carried here so PUT .../master can report back
+	// the value it just set, and GET .../sessions can show it.
+	IsMaster bool `json:"is_master"`
 }
 
 type apiEvent struct {
@@ -27,7 +31,8 @@ type apiEvent struct {
 
 func apiFromSnapshot(s wa.Snapshot) apiSession {
 	return apiSession{ID: s.ID, Name: s.Name, Phone: s.Phone, JID: s.JID,
-		State: string(s.State), Connected: s.Connected, QueueLen: s.QueueLen}
+		State: string(s.State), Connected: s.Connected, QueueLen: s.QueueLen,
+		IsMaster: s.IsMaster}
 }
 
 // GetAPISessions lists all sessions as live snapshots.
@@ -41,8 +46,18 @@ func (h *handlers) GetAPISessions(w http.ResponseWriter, r *http.Request) {
 }
 
 // PostAPISessions creates a session (state=new); pairing is a separate call.
+//
+// The request struct carries explicit json tags on ALL THREE fields
+// deliberately, not just IsMaster: Go's encoding/json matches an untagged
+// field name case-INSENSITIVELY, so an untagged IsMaster would silently
+// bind "ismaster" but NOT the documented "is_master" — the same trap this
+// struct used to be one field away from walking into.
 func (h *handlers) PostAPISessions(w http.ResponseWriter, r *http.Request) {
-	var req struct{ Name, Phone string }
+	var req struct {
+		Name     string `json:"name"`
+		Phone    string `json:"phone"`
+		IsMaster bool   `json:"is_master"`
+	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
 		return
@@ -56,6 +71,17 @@ func (h *handlers) PostAPISessions(w http.ResponseWriter, r *http.Request) {
 		}
 		writeError(w, http.StatusInternalServerError, "could not create session")
 		return
+	}
+	// Manager.Create's signature stays untouched (9 test call sites + 2
+	// production, per the plan) — flag it as master AFTER creation instead,
+	// the same pattern PostSessionCreate would use for the UI form. A new
+	// row's is_master column already defaults to 0, so the unflagged case
+	// needs nothing further.
+	if req.IsMaster {
+		if err := s.SetMaster(r.Context(), true); err != nil {
+			writeWAError(w, err)
+			return
+		}
 	}
 	writeJSON(w, http.StatusCreated, apiFromSnapshot(s.Snapshot()))
 }
@@ -107,6 +133,30 @@ func (h *handlers) apiToggle(w http.ResponseWriter, r *http.Request, op func(*wa
 		return
 	}
 	if err := op(s); err != nil {
+		writeWAError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, apiFromSnapshot(s.Snapshot()))
+}
+
+// PutAPISessionMaster is PUT /api/v1/sessions/{id}/master — {is_master}.
+// Follows PutAPISessionAutoReconnect's shape (api_ops.go) minus the
+// opsOr501 guard: unlike auto-reconnect/history-sync/pause/resume, is_master
+// is WSM-native routing state, not a backend capability, so it must work
+// identically on whatsmeow and waxum.
+func (h *handlers) PutAPISessionMaster(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	var req struct {
+		IsMaster bool `json:"is_master"`
+	}
+	if !decodeOpsBody(w, r, &req) {
+		return
+	}
+	if err := s.SetMaster(r.Context(), req.IsMaster); err != nil {
 		writeWAError(w, err)
 		return
 	}
