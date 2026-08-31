@@ -13,6 +13,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 )
@@ -47,6 +48,19 @@ type Config struct {
 	// attempts since the session was last seen eligible or last manually
 	// Activated — see ManagedSession.markStalled/Activate.
 	ReconnectStallThreshold int
+
+	// Inbound* mirror internal/config's WSM_INBOUND_* group verbatim
+	// (config.Config.Inbound*) — cmd/app/main.go copies them straight
+	// across when building this Config, matching WaxumConfig's own
+	// "plain values, not a config type from outside internal/wa"
+	// convention. See inbound.go's ensureInboundPump/inboundPump for how
+	// each is used; a zero InboundPollInterval falls back to a safe
+	// default there rather than spinning a tight loop, but production
+	// always gets a validated positive value from
+	// internal/config.loadInbound.
+	InboundEnabled      bool
+	InboundPollInterval time.Duration
+	InboundStampWindow  time.Duration
 }
 
 // Manager owns the id → ManagedSession map and every goroutine the package
@@ -60,6 +74,17 @@ type Manager struct {
 	repo    wasession.Repository
 	msgs    message.Repository
 	cfg     Config
+
+	// inbound is the customer-reply store the inbound pump (inbound.go)
+	// writes to. Optional — nil means "no ingest": the pump (started from
+	// the same Start(*Manager) hook the SSE event pump uses) checks it and
+	// no-ops rather than requiring every existing Manager-building test to
+	// wire one up. It cannot live on Backend/waxumBackend instead: newBackend
+	// (backend construction) runs before appDB is open, and the waxum branch
+	// there is explicit that it opens no store of its own — see that doc
+	// comment. cmd/app/main.go is the only production call site that passes
+	// a non-nil one.
+	inbound inbound.Repository
 
 	rootCtx    context.Context // signal ctx from main; parent of every session ctx
 	persistCtx context.Context // rootCtx without cancelation: repo writes must land during teardown
@@ -93,6 +118,24 @@ type Manager struct {
 	// backend, which may be nil in tests) so ManagedSession.ring never
 	// needs a nil check.
 	sysRing *Ring
+
+	// inboundPumpOnce/inboundPoke/inboundLastSeen belong to inbound.go's
+	// fleet-wide reply-ingest pump — see that file's package doc comment.
+	// Allocated unconditionally (like sysRing above), even when the pump
+	// itself never starts (m.inbound nil, or WSM_INBOUND_ENABLED=false),
+	// so pokeInbound never needs a nil check on inboundPoke.
+	inboundPumpOnce sync.Once
+	inboundPoke     chan struct{}
+	// inboundLastSeen is sessionID -> the highest waxum message row id
+	// (waxum.InboundMessage.ID, its OWN keyset-cursor id, not our
+	// wa_inbound_messages.id) this pump has already walked past — see
+	// processSessionInbound's doc comment for how it bounds pagination. A
+	// sync.Map, not a plain map+mutex, for the same reason waxumBackend's
+	// own sessions field is one (backend_waxum.go): read/written by a
+	// single pump goroutine per key in practice, but a sync.Map costs
+	// nothing extra here and matches this package's existing convention
+	// for an id-keyed map with no bulk-iteration need.
+	inboundLastSeen sync.Map
 }
 
 // sysRingSize is the app-wide diagnostic ring's capacity — bigger than one
@@ -107,20 +150,25 @@ const sysRingSize = 500
 // persisted sessions, and Close (after http.Server.Shutdown) to tear down.
 // backend may be nil in tests that never activate a session (see Snapshot's
 // nil guard); production always passes one (wa.NewWhatsmeowBackend today).
+// inbound may ALSO be nil — see the Manager.inbound field's doc comment —
+// and every existing caller that has no use for the inbound-message pump
+// (every test in this package and internal/handler) passes nil for it.
 func NewManager(rootCtx context.Context, backend Backend,
-	repo wasession.Repository, msgs message.Repository, cfg Config) *Manager {
+	repo wasession.Repository, msgs message.Repository, inb inbound.Repository, cfg Config) *Manager {
 	supCtx, supCancel := context.WithCancel(rootCtx)
 	m := &Manager{
-		sessions:   make(map[string]*ManagedSession),
-		backend:    backend,
-		repo:       repo,
-		msgs:       msgs,
-		cfg:        cfg,
-		rootCtx:    rootCtx,
-		persistCtx: context.WithoutCancel(rootCtx),
-		supCtx:     supCtx,
-		supCancel:  supCancel,
-		sysRing:    NewRing(sysRingSize),
+		sessions:    make(map[string]*ManagedSession),
+		backend:     backend,
+		repo:        repo,
+		msgs:        msgs,
+		inbound:     inb,
+		cfg:         cfg,
+		rootCtx:     rootCtx,
+		persistCtx:  context.WithoutCancel(rootCtx),
+		supCtx:      supCtx,
+		supCancel:   supCancel,
+		sysRing:     NewRing(sysRingSize),
+		inboundPoke: make(chan struct{}, 1),
 	}
 	// Nothing to reconnect without a backend (Snapshot/Close already guard
 	// the same way) — every test that constructs a nil-backend Manager

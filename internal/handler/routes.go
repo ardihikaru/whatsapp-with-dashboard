@@ -9,6 +9,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/storage"
@@ -30,6 +31,12 @@ type Deps struct {
 	// Calls is the wa_calls persistence seam (Phase 6's placed-call
 	// handlers write through it; nothing calls it yet in this phase).
 	Calls call.Repository
+	// Inbound is the read side of wa_inbound_messages for GET
+	// /api/v1/inbound (GetAPIInbound, api_inbound.go). nil is legal — every
+	// test server that predates this endpoint leaves it unset — and means
+	// the endpoint answers 503 "inbound log unavailable" rather than
+	// panicking, the same convention Calls/Objects use.
+	Inbound inbound.Repository
 	// Objects is the media-archival seam onto MinIO (Phase 6's media-send
 	// handler uploads through it before enqueuing; nothing calls it yet in
 	// this phase). An interface, not *minio.Client, so handler tests can

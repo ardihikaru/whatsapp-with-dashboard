@@ -231,6 +231,14 @@ type Config struct {
 	// every one of them answer 501 and place nothing. See media.go's
 	// DefaultCallsEnabled doc comment.
 	CallsEnabled bool
+
+	// Inbound* configure internal/wa's inbound-message pump (see
+	// inbound.go's loadInbound doc comment). InboundEnabled true (the
+	// default) is the ingest-side counterpart of the GET /api/v1/inbound
+	// endpoint this config feeds (docs/brief-inbound-api.md).
+	InboundEnabled      bool
+	InboundPollInterval time.Duration
+	InboundStampWindow  time.Duration
 }
 
 // Load resolves the configuration and fails fast on an invalid env value.
@@ -319,6 +327,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if err := loadMedia(cfg); err != nil {
+		return nil, err
+	}
+	if err := loadInbound(cfg); err != nil {
 		return nil, err
 	}
 	return cfg, nil

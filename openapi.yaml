@@ -1454,6 +1454,48 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/inbound:
+    get:
+      summary: Fleet-level read of customer replies, oldest first
+      description: >
+        A read endpoint, not a webhook: this gateway is shared by several
+        products, and pushing would make it a fan-out router holding a URL,
+        a secret, a retry policy and a DLQ per subscriber. Results are
+        always oldest first — a consumer resolving a reply against the open
+        question it answers must not let a later message close a question
+        an earlier one already answered. since is required so a caller that
+        forgot it fails loudly instead of silently reading the whole table.
+      operationId: listInbound
+      tags: [inbound]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - name: since
+          in: query
+          required: true
+          schema: {type: string, format: date-time}
+          description: RFC3339 timestamp; only arrivals at or after this instant are returned.
+        - name: limit
+          in: query
+          schema: {type: integer, default: 200, maximum: 500}
+      responses:
+        '200':
+          description: Arrivals at or after since, oldest first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/InboundMessage'
+        '400':
+          description: since missing or not valid RFC3339.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Inbound log unavailable on this deployment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/contacts/check:
     post:
       summary: Check whether numbers are registered on WhatsApp, using automatic session routing
@@ -1675,6 +1717,22 @@ components:
         mimetype: {type: string}
         size: {type: integer}
         data_base64: {type: string, description: 'Decrypted bytes, base64-encoded'}
+    InboundMessage:
+      type: object
+      description: >
+        One customer reply from GET /api/v1/inbound. client_ref/tenant_ref
+        are the tier stamp: copied from the most recent outbound message to
+        the same phone within a bounded window. A consumer MUST ignore any
+        row whose client_ref it cannot resolve locally — one gateway serves
+        several products and environments, and an empty value means
+        un-attributed, which is the safe outcome, never a guess.
+      properties:
+        id: {type: string, description: 'The WhatsApp message id; the natural idempotency key.'}
+        from_phone: {type: string, description: 'Normalized digits.'}
+        body: {type: string}
+        received_at: {type: string, format: date-time}
+        client_ref: {type: string, description: 'Tier stamp; empty means no product may claim this message.'}
+        tenant_ref: {type: string, description: 'Tier stamp; empty means no product may claim this message.'}
     Call:
       type: object
       properties:

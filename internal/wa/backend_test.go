@@ -49,7 +49,7 @@ func TestWhatsmeowBackendIsTheOnlyBackendWiredToday(t *testing.T) {
 // fake here proves the wiring without needing a real whatsmeow store.
 func TestManagerHoldsWhateverBackendItWasGiven(t *testing.T) {
 	fake := &fakeBackend{name: "fake-for-test"}
-	m := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(),
+	m := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(), nil,
 		Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 
 	s, err := m.Create(context.Background(), "gw", "+62 812-0000-1111")

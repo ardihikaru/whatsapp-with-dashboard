@@ -79,7 +79,7 @@ func newPairingTestHandlers(t *testing.T, backend wa.Backend) (*handlers, *wa.Ma
 		t.Fatal(err)
 	}
 	mgr := wa.NewManager(context.Background(), backend, wasession.NewRepository(pool),
-		message.NewRepository(pool), wa.Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
+		message.NewRepository(pool), nil, wa.Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-9999")
 	if err != nil {
 		t.Fatal(err)

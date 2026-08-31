@@ -1,6 +1,9 @@
 package wa
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // This file holds the optional capability interfaces gateway ADMINISTRATION
 // is exposed through — see backend.go's ErrUnsupported doc comment for why
@@ -198,4 +201,47 @@ type WebhookAdmin interface {
 	WebhookDLQ(ctx context.Context, sessionID string) ([]DLQEntry, error)
 	ReplayWebhookDLQEntry(ctx context.Context, sessionID, entryID string) error
 	ReenableAllWebhooks(ctx context.Context) error
+}
+
+// InboundMessage is one row of a MessageHistory page, mirroring
+// waxum.InboundMessage field-for-field except Timestamp, which stays a
+// wa-level name (ReceivedAt would collide with nothing here, but Timestamp
+// matches the wire field's own name for a type this close to the source) —
+// this exists at all so internal/wa/inbound.go (the pump, Stage 2 of
+// GET /api/v1/inbound — docs/brief-inbound-api.md) never imports
+// internal/waxum types directly, the same "no waxum type crosses the seam"
+// rule MediaDescriptor follows (backend_waxum_media.go's toWaxumDescriptor/
+// fromWaxumDescriptor).
+type InboundMessage struct {
+	ID        int64
+	MessageID string
+	ChatJID   string
+	SenderJID string
+	Direction string // "in" or "out" — waxum maps is_from_me to "out"
+	Body      *string
+	Timestamp time.Time
+}
+
+// MessagePage mirrors waxum.SessionMessagesPage field-for-field, across the
+// same seam.
+type MessagePage struct {
+	Messages   []InboundMessage
+	NextCursor *int64
+}
+
+// MessageHistory is the customer-reply-reading half of the waxum surface —
+// whatsmeow has no analogue (it consumes *events.Message off its own
+// socket, not a queryable history endpoint), so meowBackend implements
+// none of it, the same as every other interface in this file (see
+// TestTheWhatsmeowBackendSatisfiesNoCapabilityInterface).
+//
+// RecentMessages mirrors waxum.Client.SessionMessages' contract exactly
+// (after/limit, newest-first, NextCursor pages backwards) — see that
+// method's doc comment. ResolvePhone mirrors waxum.Client.ResolveLID,
+// returning just the bare-digit PhoneNumber field the inbound pump needs;
+// see that method's doc comment for the ErrNotFound case (an unmappable
+// contact) callers must handle.
+type MessageHistory interface {
+	RecentMessages(ctx context.Context, sessionID string, after *int64, limit int) (MessagePage, error)
+	ResolvePhone(ctx context.Context, sessionID, jid string) (string, error)
 }

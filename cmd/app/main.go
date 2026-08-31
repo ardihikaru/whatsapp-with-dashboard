@@ -30,6 +30,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/handler"
@@ -164,10 +165,18 @@ func run() error {
 	// dashboard read path (its analytics methods).
 	msgRepo := message.NewRepository(appDB)
 	callRepo := call.NewRepository(appDB)
+	// inboundRepo is nil-able on Manager (see Manager.inbound's doc
+	// comment) but always real in production — WSM_INBOUND_ENABLED only
+	// gates whether internal/wa's pump actually polls waxum for it, not
+	// whether the repository itself is wired.
+	inboundRepo := inbound.NewRepository(appDB)
 
 	manager := wa.NewManager(ctx, backend, wasession.NewRepository(appDB),
-		msgRepo, wa.Config{
+		msgRepo, inboundRepo, wa.Config{
 			SendRate: cfg.SendRate, SendBurst: cfg.SendBurst, ReconcilePar: cfg.ReconcilePar,
+			InboundEnabled:      cfg.InboundEnabled,
+			InboundPollInterval: cfg.InboundPollInterval,
+			InboundStampWindow:  cfg.InboundStampWindow,
 		})
 	if err := manager.StartAll(ctx); err != nil { // boot reconciliation; never blocks
 		return err
@@ -210,6 +219,7 @@ func run() error {
 			MessageStats:           msgRepo,
 			APIClients:             apiClients,
 			Calls:                  callRepo,
+			Inbound:                inboundRepo,
 			Objects:                objectStore,
 			MediaMaxBytes:          cfg.MediaMaxBytes,
 			MediaUploadTimeout:     cfg.MediaUploadTimeout,

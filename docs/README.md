@@ -6,6 +6,7 @@ API for machine callers.
 - [Auth and API clients](auth-and-api-clients.md)
 - [Load-balanced sends](load-balancing.md)
 - [Curl examples](curl-examples.md)
+- [Reading customer replies (inbound API)](inbound-api.md)
 - [E2E evidence](e2e-evidence.md)
 
 Browser admin pages use the local admin login cookie. JSON REST endpoints under

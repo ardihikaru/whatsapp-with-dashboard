@@ -43,7 +43,7 @@ func newSystemLogTestServer(t *testing.T) (http.Handler, *auth.Store, *wa.Manage
 		t.Fatal(err)
 	}
 	msgRepo := message.NewRepository(pool)
-	manager := wa.NewManager(ctx, nil, wasession.NewRepository(pool), msgRepo,
+	manager := wa.NewManager(ctx, nil, wasession.NewRepository(pool), msgRepo, nil,
 		wa.Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 	sessions := auth.NewStore(time.Hour)
 	t.Cleanup(sessions.Close)

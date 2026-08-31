@@ -217,7 +217,7 @@ func TestManagerCloseTerminatesTheEventPump(t *testing.T) {
 	b := &waxumBackend{client: client, eventsEnabled: true, pollInterval: time.Hour}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := NewManager(ctx, b, newStubSessions(), newStubMsgs(),
+	mgr := NewManager(ctx, b, newStubSessions(), newStubMsgs(), nil,
 		Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 
 	waitForCondition(t, "the event pump dials the stream", func() bool { return calls.events.Load() >= 1 })
@@ -296,6 +296,28 @@ func TestTheEventPumpIsDisabledByWSMWaxumEvents(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	if got := calls.events.Load(); got != 0 {
 		t.Fatalf("events endpoint dialed %d time(s) with eventsEnabled=false, want 0", got)
+	}
+}
+
+// TestAMessageEventPokesTheInboundPumpsChannelWithoutTouchingSessionState
+// guards the SSE nudge inbound.go's pump relies on (handleEvent's new
+// branch): a "message" event must wake m.inboundPoke, and must NOT go
+// anywhere near session state — "message" is deliberately absent from
+// pokeableEventKinds, so this must NOT also poke the (untracked) session's
+// status pump. See this file's own package doc comment (lines 21-49) for
+// why an event must never write session state, and inbound.go's
+// pokeInbound doc comment for why this call is compatible with that rule
+// despite living right next to pokeSession.
+func TestAMessageEventPokesTheInboundPumpsChannelWithoutTouchingSessionState(t *testing.T) {
+	b := &waxumBackend{pollInterval: time.Hour}
+	mgr := newTestManager(newStubSessions(), newStubMsgs())
+
+	b.handleEvent(mgr, waxum.Event{Type: "message", Data: []byte(`{"session_id":"sess-not-tracked"}`)})
+
+	select {
+	case <-mgr.inboundPoke:
+	default:
+		t.Fatal(`handleEvent with a "message" event did not poke the inbound pump's channel (m.inboundPoke)`)
 	}
 }
 

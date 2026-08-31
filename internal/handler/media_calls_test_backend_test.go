@@ -208,7 +208,7 @@ func newMediaTestServer(t *testing.T, cfg mediaTestConfig) (http.Handler, *wa.Ma
 	callRepo := call.NewRepository(pool)
 
 	mgr := wa.NewManager(context.Background(), cfg.backend, wasession.NewRepository(pool),
-		msgRepo, wa.Config{SendRate: 100, SendBurst: 5, ReconcilePar: 2})
+		msgRepo, nil, wa.Config{SendRate: 100, SendBurst: 5, ReconcilePar: 2})
 	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-9999")
 	if err != nil {
 		t.Fatal(err)
