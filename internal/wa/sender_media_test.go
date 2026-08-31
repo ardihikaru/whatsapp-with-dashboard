@@ -56,7 +56,7 @@ func TestEnqueueMediaIsRejectedWhenTheQueueIsFull(t *testing.T) {
 // was given — not a text send, not a mutated copy.
 func TestAMediaJobCarriesItsDescriptorToTheBackend(t *testing.T) {
 	fake := &fakeBackend{name: "fake", sendMediaID: "wamid.media"}
-	mgr := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(),
+	mgr := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(), nil,
 		Config{SendRate: 100, SendBurst: 5, ReconcilePar: 2})
 	s := testSession(mgr, StateConnected)
 	s.startSenderLocked()
@@ -92,7 +92,7 @@ func TestAMediaJobCarriesItsDescriptorToTheBackend(t *testing.T) {
 func TestAFailedMediaSendIsMarkedFailedInWaMessagesWithItsError(t *testing.T) {
 	msgs := newStubMsgs()
 	fake := &fakeBackend{name: "fake"} // sendMediaID left empty: SendMedia answers ErrUnsupported
-	mgr := NewManager(context.Background(), fake, newStubSessions(), msgs,
+	mgr := NewManager(context.Background(), fake, newStubSessions(), msgs, nil,
 		Config{SendRate: 100, SendBurst: 5, ReconcilePar: 2})
 	s := testSession(mgr, StateConnected)
 	s.startSenderLocked()
@@ -127,7 +127,7 @@ func TestAFailedMediaSendIsMarkedFailedInWaMessagesWithItsError(t *testing.T) {
 // exercises completely unchanged for the media job.
 func TestSendMediaGoesThroughTheSameTokenBucketAsText(t *testing.T) {
 	fake := &fakeBackend{name: "fake", sendMediaID: "wamid.media"}
-	mgr := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(),
+	mgr := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(), nil,
 		Config{SendRate: 1, SendBurst: 1, ReconcilePar: 2})
 	s := testSession(mgr, StateConnected)
 	s.startSenderLocked()
@@ -179,7 +179,7 @@ func TestAMediaSendIsRetriedWithoutReUploading(t *testing.T) {
 		}
 		return nil // third attempt succeeds
 	}
-	mgr := NewManager(context.Background(), fake, newStubSessions(), msgs,
+	mgr := NewManager(context.Background(), fake, newStubSessions(), msgs, nil,
 		Config{SendRate: 100, SendBurst: 5, ReconcilePar: 2})
 	s := testSession(mgr, StateConnected)
 	s.startSenderLocked()

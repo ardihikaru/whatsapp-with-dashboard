@@ -211,6 +211,28 @@ var schema = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_wa_calls_session
 	  ON wa_calls(session_id, created_at DESC)`,
+	// 0006: customer replies. Deliberately NO FK to wa_sessions (unlike
+	// wa_calls above) — an arrival whose session was later deleted must
+	// still persist; see migrations/0006_inbound_messages.sql's header.
+	`CREATE TABLE IF NOT EXISTS wa_inbound_messages (
+	  id                    TEXT PRIMARY KEY,
+	  session_id            TEXT NOT NULL,
+	  from_phone            TEXT NOT NULL,
+	  from_jid              TEXT NOT NULL,
+	  from_lid              TEXT,
+	  body                  TEXT,
+	  received_at           TEXT NOT NULL,
+	  client_ref            TEXT,
+	  tenant_ref            TEXT,
+	  replies_to_message_id TEXT,
+	  created_at            TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_inbound_received
+	  ON wa_inbound_messages(received_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_inbound_from
+	  ON wa_inbound_messages(from_phone, received_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_inbound_client
+	  ON wa_inbound_messages(client_ref, received_at)`,
 }
 
 // EnsureSchema creates the app tables and index if missing, inside one

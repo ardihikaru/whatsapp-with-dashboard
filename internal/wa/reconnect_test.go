@@ -86,7 +86,7 @@ func TestASessionThatKeepsFailingToConnectIsMarkedAsNeedingAttention(t *testing.
 	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfigWithStallThreshold(3))
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfigWithStallThreshold(3))
 
 	s := testSession(mgr, StateDisconnected)
 	s.jid = pairedTestJID()
@@ -115,7 +115,7 @@ func TestAStalledSessionStopsBeingRetried(t *testing.T) {
 	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfigWithStallThreshold(2))
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfigWithStallThreshold(2))
 
 	s := testSession(mgr, StateDisconnected)
 	s.jid = pairedTestJID()
@@ -145,7 +145,7 @@ func TestAManualActivateClearsTheStalledStateAndResumesRetrying(t *testing.T) {
 	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfigWithStallThreshold(2))
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfigWithStallThreshold(2))
 
 	s := testSession(mgr, StateDisconnected)
 	s.jid = pairedTestJID()
@@ -178,7 +178,7 @@ func TestStalledIsNotConfusedWithLoggedOut(t *testing.T) {
 	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfigWithStallThreshold(2))
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfigWithStallThreshold(2))
 
 	s := testSession(mgr, StateDisconnected)
 	s.jid = pairedTestJID()
@@ -210,7 +210,7 @@ func TestAnActiveDisconnectedSessionIsReconnectedAutomatically(t *testing.T) {
 	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfig())
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfig())
 
 	s := testSession(mgr, StateDisconnected)
 	s.jid = pairedTestJID()
@@ -230,7 +230,7 @@ func TestADeactivatedSessionIsNeverReconnected(t *testing.T) {
 	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfig())
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfig())
 
 	s := testSession(mgr, StateDisconnected)
 	s.jid = pairedTestJID()
@@ -259,7 +259,7 @@ func TestALoggedOutSessionIsNeverReconnectedAutomatically(t *testing.T) {
 	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfig())
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfig())
 
 	s := testSession(mgr, StateLoggedOut)
 	s.jid = pairedTestJID()
@@ -306,7 +306,7 @@ func TestManagerCloseReturnsPromptlyWithAReconnectSupervisorRunning(t *testing.T
 	}}
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfig())
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfig())
 
 	s := testSession(mgr, StateDisconnected)
 	s.jid = pairedTestJID()

@@ -40,7 +40,7 @@ func TestEnqueueAdmitsAConnectedSessionWithNoWhatsmeowClientAttached(t *testing.
 // Backend.SendText regardless of which backend answers.
 func TestTrySendRoutesThroughTheBackendWithoutRequiringAWhatsmeowClient(t *testing.T) {
 	fake := &fakeBackend{name: "fake-for-test", sendTextID: "wamid.fake"}
-	mgr := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(),
+	mgr := NewManager(context.Background(), fake, newStubSessions(), newStubMsgs(), nil,
 		Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 	s := testSession(mgr, StateConnected) // s.client left nil
 

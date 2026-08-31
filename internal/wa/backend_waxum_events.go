@@ -123,8 +123,16 @@ const eventPumpFailureForgetWindow = 60 * time.Second
 // that is reachable from a bare ctx. A no-op when WSM_WAXUM_EVENTS=0
 // (b.eventsEnabled false), leaving statusPump exactly as it behaved before
 // this phase.
+//
+// Also starts inbound.go's reply-ingest pump (m.ensureInboundPump) — see
+// that method's own doc comment for why it shares this hook rather than a
+// bespoke one. ensureInboundPump is its own no-op when there is nothing
+// for it to do (m.inbound nil, or WSM_INBOUND_ENABLED=false), so this is
+// safe to call unconditionally, the same way ensureEventPump above already
+// is.
 func (b *waxumBackend) Start(m *Manager) {
 	b.ensureEventPump(m)
+	m.ensureInboundPump()
 }
 
 // ensureEventPump starts the fleet-wide SSE consumer exactly once.
@@ -219,6 +227,21 @@ func (b *waxumBackend) handleEvent(m *Manager, ev waxum.Event) {
 		}
 	} else {
 		m.RecordEvent("info", note)
+	}
+
+	// A "message" event nudges the inbound-message pump (inbound.go) to
+	// poll sooner than its own timer — a SEPARATE poke from pokeSession
+	// below, on a SEPARATE, session-less channel (m.pokeInbound, not
+	// waxumSessionState.poke): the inbound pump is fleet-wide, not
+	// per-session, so there is no single session's poke channel to reuse
+	// even if it wanted one. This does NOT call applyStatus, does NOT
+	// construct a State, and does NOT poke statusPump — see this file's
+	// package doc comment (lines 21-49) for why an event must never write
+	// session state, and inbound.go's pokeInbound doc comment for why
+	// this call is compatible with that rule despite living right next to
+	// pokeSession.
+	if eventKind(ev.Type) == "message" {
+		m.pokeInbound()
 	}
 
 	if env.SessionID == "" || !pokeableEventKinds[eventKind(ev.Type)] {

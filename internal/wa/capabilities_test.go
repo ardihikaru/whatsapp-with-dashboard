@@ -61,10 +61,9 @@ func TestWhatsmeowBackendReportsMediaAndCallsUnsupported(t *testing.T) {
 
 // TestTheWaxumBackendSatisfiesEveryCapabilityInterface guards the whole
 // point of capabilities.go: waxumBackend must implement GatewayHealth,
-// MediaStore, SessionOps and WebhookAdmin, all four, or a gateway-admin
-// HTTP handler built against one of them (a later phase) would compile
-// against the interface and then get ErrUnsupported from every real waxum
-// deployment.
+// MediaStore, SessionOps, WebhookAdmin and MessageHistory, all five, or a
+// handler built against one of them would compile against the interface
+// and then get ErrUnsupported from every real waxum deployment.
 func TestTheWaxumBackendSatisfiesEveryCapabilityInterface(t *testing.T) {
 	client, _ := newWaxumFakeServer(t, waxumFakeOpts{})
 	backend := NewWaxumBackend(client, WaxumConfig{})
@@ -77,6 +76,9 @@ func TestTheWaxumBackendSatisfiesEveryCapabilityInterface(t *testing.T) {
 	}
 	if _, ok := backend.(SessionOps); !ok {
 		t.Error("waxumBackend does not satisfy SessionOps")
+	}
+	if _, ok := backend.(MessageHistory); !ok {
+		t.Error("waxumBackend does not satisfy MessageHistory")
 	}
 	if _, ok := backend.(WebhookAdmin); !ok {
 		t.Error("waxumBackend does not satisfy WebhookAdmin")
@@ -126,6 +128,20 @@ func TestTheWhatsmeowBackendSatisfiesNoCapabilityInterface(t *testing.T) {
 	}
 	if _, ok := backend.(WebhookAdmin); ok {
 		t.Error("meowBackend unexpectedly satisfies WebhookAdmin")
+	}
+	if _, ok := backend.(MessageHistory); ok {
+		t.Error("meowBackend unexpectedly satisfies MessageHistory")
+	}
+}
+
+// TestMessageHistoryIsUnavailableOnTheWhatsmeowBackend is the
+// Manager-accessor-level counterpart of the negative test above — see that
+// test's own doc comment, and TestSessionOpsIsUnavailableOnTheWhatsmeowBackend
+// immediately below for why both layers are worth asserting.
+func TestMessageHistoryIsUnavailableOnTheWhatsmeowBackend(t *testing.T) {
+	m := newWaxumTestManager(t, newTestWhatsmeowBackend(t))
+	if _, err := m.MessageHistory(); !errors.Is(err, ErrUnsupported) {
+		t.Fatalf("MessageHistory() error = %v, want ErrUnsupported", err)
 	}
 }
 

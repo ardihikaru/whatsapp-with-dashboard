@@ -123,6 +123,6 @@ func (m *stubMsgs) failedCount() int {
 // newTestManager builds a Manager without a whatsmeow container — enough for
 // every lifecycle path that stops before pairing I/O.
 func newTestManager(repo wasession.Repository, msgs message.Repository) *Manager {
-	return NewManager(context.Background(), nil, repo, msgs,
+	return NewManager(context.Background(), nil, repo, msgs, nil,
 		Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 }

@@ -98,3 +98,21 @@ func (m *Manager) WebhookAdmin() (WebhookAdmin, error) {
 	}
 	return wh, nil
 }
+
+// MessageHistory returns the backend's customer-reply-reading operations,
+// if it has any. inbound.go's pump calls this once per tick, per session,
+// to check whether the current backend supports ingest at all before
+// polling — the whatsmeow backend never does (meowBackend implements no
+// capability interface — TestTheWhatsmeowBackendSatisfiesNoCapabilityInterface),
+// so this is how the pump stays a no-op there without a backend-name
+// switch.
+func (m *Manager) MessageHistory() (MessageHistory, error) {
+	if m.backend == nil {
+		return nil, ErrUnsupported
+	}
+	mh, ok := m.backend.(MessageHistory)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return mh, nil
+}

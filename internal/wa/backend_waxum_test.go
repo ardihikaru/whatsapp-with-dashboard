@@ -202,7 +202,7 @@ func newWaxumTestManager(t *testing.T, backend Backend) *Manager {
 	t.Helper()
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
-	return NewManager(ctx, backend, newStubSessions(), newStubMsgs(),
+	return NewManager(ctx, backend, newStubSessions(), newStubMsgs(), nil,
 		Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 }
 
@@ -519,7 +519,7 @@ func TestManagerCloseReturnsPromptlyWithAPairingPumpRunning(t *testing.T) {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	mgr := NewManager(ctx, b, newStubSessions(), newStubMsgs(),
+	mgr := NewManager(ctx, b, newStubSessions(), newStubMsgs(), nil,
 		Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 
 	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-1111")
@@ -940,7 +940,7 @@ func TestPairingNeverPersistsAJIDWithAnEmptyUser(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repo := newStubSessions()
-	mgr := NewManager(ctx, b, repo, newStubMsgs(), Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
+	mgr := NewManager(ctx, b, repo, newStubMsgs(), nil, Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 	s := testSession(mgr, StatePairing)
 	s.Phone = "6280000000000" // deliberately different from realPhone, so the assertion below can tell which source won
 	ps := &PairingState{mode: PairModeQR}
@@ -995,7 +995,7 @@ func TestPairingFallsBackToTheConfiguredPhoneWhenWaxumNeverReportsOne(t *testing
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	repo := newStubSessions()
-	mgr := NewManager(ctx, b, repo, newStubMsgs(), Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
+	mgr := NewManager(ctx, b, repo, newStubMsgs(), nil, Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
 	s := testSession(mgr, StatePairing)
 	s.Phone = configuredPhone
 	ps := &PairingState{mode: PairModeQR}
@@ -1438,7 +1438,7 @@ func TestTheReconnectAttemptCounterSurvivesATransientLoggedOutFlap(t *testing.T)
 	t.Cleanup(cancel)
 	// A high stall threshold: this test only needs a handful of attempts
 	// to fire, and must not have the supervisor give up and stall mid-test.
-	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), fastReconnectConfigWithStallThreshold(10))
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfigWithStallThreshold(10))
 
 	s := testSession(mgr, StateDisconnected)
 	s.jid = pairedTestJID()

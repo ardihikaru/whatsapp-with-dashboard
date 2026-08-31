@@ -101,6 +101,11 @@ func (h *handlers) mountAPI(mux *http.ServeMux) {
 	// Phase 6b §3: gateway health — authenticated, unlike /api/v1/health.
 	mux.Handle("GET /api/v1/gateway/health", api(http.HandlerFunc(h.GetAPIGatewayHealth)))
 
+	// Inbound: a fleet-level read of customer replies (wa_inbound_messages)
+	// for a polling consumer — see docs/brief-inbound-api.md and
+	// api_inbound.go's doc comment. 503 when Deps.Inbound is unset.
+	mux.Handle("GET /api/v1/inbound", api(http.HandlerFunc(h.GetAPIInbound)))
+
 	// Number verification (wa.ContactDirectory) — 501 on a whatsmeow
 	// backend, same as every other optional-capability route above. Auto
 	// vs explicit-session mirrors /api/v1/messages'/
