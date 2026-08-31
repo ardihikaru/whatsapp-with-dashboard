@@ -467,3 +467,103 @@ Notes:
   whatsmeow, so `/send`'s media tab stays structurally unreachable here) is
   unchanged and still correctly documented in `e2e/media.spec.ts` and the
   Phase 9 entry above.
+
+---
+
+## 2026-08-31 — `GET /api/v1/inbound` shipped to production
+
+Closes the incident in `docs/brief-inbound-api.md`: the Clino consumer's
+`confirm-receipts` cron had been logging
+`wsmclient: list inbound: status 404: 404 page not found` on every run
+since it moved to this central gateway.
+
+### The brief's design was wrong, and live verification is what caught it
+
+The brief specified persisting replies from waxum's `message` SSE event and
+flagged that payload shape as UNVERIFIED. It cannot work.
+`/api/v1/events/tail` serializes a `ConsoleEvent` whose payload field is
+truncated to 160 characters (`src/state.rs`, `push_event`) — a truncated
+slice of JSON is not parseable, and the message body is simply not in the
+stream. The SSE stream stays a nudge, never an authority, exactly as
+`internal/wa/backend_waxum_events.go` already documented itself.
+
+The real source is `GET /api/v1/sessions/{id}/messages` (full rows, keyset
+cursor, newest first). Two further facts, both from probing the live
+deployment (image `ardihikaru/waxum:0.12.2-uploaded-media`, from inside the
+waxum container) and neither documented anywhere before:
+
+- **Every inbound `sender_jid` is a `@lid`**, many with a device suffix.
+  Across 60 live rows: `sender_jid` `@lid` 100% (41 with `:NN`), `chat_jid`
+  `@lid` for DMs, plus `@g.us` and `status@broadcast`. A LID is not a phone
+  number, so `NormalizePhone` on it yields digits that can never match
+  `wa_messages.to_phone` — **every tier stamp would have been NULL**, the
+  consumer would have correctly ignored all of it, and the feature would
+  have looked shipped while delivering nothing. Resolved via
+  `GET /sessions/{id}/contacts/{jid}/lid` (verified `HTTP 200`, returns a
+  bare MSISDN), cached per sender.
+- **`msg_timestamp` carries no zone marker** (`"2026-08-31 07:46:44"`), so
+  it needs `ParseInLocation(..., time.UTC)`; `time.Parse` would shift every
+  `received_at` by the host's offset.
+
+### Deploy
+
+| Step | Result |
+|---|---|
+| `go build ./...`, `go vet ./...` | clean |
+| `go test ./...` | pass, all packages |
+| `go test ./internal/wa/ ./internal/handler/ -race` | pass |
+| `gofmt -l` over every changed file | clean |
+| migration `0006_inbound_messages.sql` on production MySQL | `OK 0006_inbound_messages.sql (66.43ms)`, `successfully migrated database to version: 6` |
+| app container rebuilt + restarted (waxum untouched) | `Up`, `listening on http://localhost:8800` |
+| `GET /api/v1/inbound` unauthenticated | `401 {"error":"unauthorized"}` — route registered (a genuinely absent route still returns `404`, checked alongside) |
+
+**A stale-image trap worth recording:** the first `--profile migrate run up`
+answered `goose: no migrations to run. current version: 5` and looked like
+success. `Dockerfile.migrate` bakes `migrations/` in at BUILD time, so the
+cached image still held only 0001–0005. `docker compose --profile migrate
+build migrate` first, then `up`. A migration that reports "nothing to do"
+right after you added one is the failure, not the outcome.
+
+### The app restart wedged the WhatsApp session — the 2026-08-27 hazard, again
+
+After the restart, `GET /sessions/{id}/status` returned
+`{"status":"connecting","is_logged_in":true,"socket_alive":false}` and
+`GET .../messages` answered `503 Client not connected`. WSM's supervisor
+looped `auto-reconnect attempt 1/5, 2/5, 3/5` without clearing it, exactly
+as CLAUDE.md's entry predicts. It was healthy ~13 minutes earlier.
+
+`docker compose restart waxum` (the waxum PROCESS only — never `down -v`,
+the volume is the paired device's identity) cleared it within one poll:
+`{"status":"logged_in","is_logged_in":true,"socket_alive":true}`. **No
+re-pairing was needed**, matching the 2026-08-27 recovery. `/api/v1/health`
+then reported `{"backend":{"name":"waxum","reachable":true},"connected":1,
+"sessions":1,"status":"ok"}`.
+
+### End-to-end proof, from the consumer's own logs
+
+```
+09:06  WARN confirm-receipts: reply poll failed … status 404: 404 page not found
+       done polled=0 …
+09:08  done polled=0 …                     ← WARN gone; app restarted 09:06:59
+09:14  done polled=0 …                     ← session still wedged
+09:16  done polled=140 matched=0 ambiguous=0 foreign_tier=1 unmatched=139 …
+```
+
+and, on this side, `GET /api/v1/inbound -> 200 (59ms)`.
+
+`foreign_tier=1` is the part that matters most: one ingested row carried a
+`client_ref` this consumer could not resolve in its own database, and it
+skipped the row rather than acting on it. That is the security property the
+brief calls "the tier stamp" working in both halves at once — this gateway
+stamped honestly, and the consumer ignored what was not its own. It also
+proves LID→phone resolution succeeded, since an unresolved sender can never
+be stamped at all.
+
+`matched=0` / `unmatched=139` is expected: the pump's first ticks drained
+waxum's existing history, which is backlog, not answers to currently-open
+receipt questions.
+
+Not verified here: a live customer replying "sudah" to a delivered order and
+moving it to `Sudah Diambil` with `confirm_source = customer_reply`. That
+needs a real reply to a real open question and cannot be manufactured from
+this side.
