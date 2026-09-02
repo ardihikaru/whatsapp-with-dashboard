@@ -174,6 +174,34 @@ but waxum's own registry sits partly in MySQL and partly under
 read-only — the instance lock forbids a second process pointed at one storage
 dir, so there is no rolling-restart story for it either.
 
+**Deleting a session does NOT unlink the device — on waxum, nothing can.**
+`meowBackend.Logout` calls `cli.Logout(ctx)`, a real WhatsApp unlink.
+`waxumBackend.Logout` calls waxum's `DeleteSession`, and waxum's API has no
+unlink call to offer: `connect`, `disconnect`, `reconnect`, `pair`, `qr`,
+`DELETE` — that is the whole teardown surface (checked 2026-09-02 against the
+live OpenAPI document of `0.12.2-uploaded-media`). Since
+`config.DefaultWABackend` is `waxum`, the default behaviour is that a deleted
+session disappears from the dashboard while the device stays in the handset's
+**Linked devices** list forever.
+
+WhatsApp caps an account's linked companion devices at a small number, so this
+leaks a slot per create-pair-delete cycle, and the failure it eventually
+produces looks nothing like its cause: a freshly paired device connects,
+syncs contacts and app-state normally for seconds to half a minute, then
+WhatsApp sends `LoggedOut` — and does it again on every retry. Locally
+everything is healthy (device row present in the session's `whatsapp.db`,
+prekeys uploaded, diesel migrations applied, clock NTP-synced), so it reads as
+"pairing is broken on this host" when the account is simply full. Observed on
+`wa-phkg` 2026-09-02, where two pair-then-delete cycles inside one minute
+preceded exactly that.
+
+`session_rows.html`'s delete confirmation now says this to the operator; it
+used to claim the opposite, and
+`TestTheDeleteConfirmationDoesNotPromiseAnUnlinkTheWaxumBackendCannotDo` keeps
+it from coming back. **Before concluding anything about a session that pairs
+and is then logged out, count the handset's linked devices and clear the
+orphans** — no amount of evidence gathered on the host can see them.
+
 **Rollback from waxum to whatsmeow is asymmetric.** Setting
 `WSM_WA_BACKEND=whatsmeow` restores the old in-process transport at the next
 boot, but a device paired *through waxum* has its credentials in waxum's

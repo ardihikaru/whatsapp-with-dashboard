@@ -343,10 +343,30 @@ func (b *waxumBackend) Disconnect(ctx context.Context, s *ManagedSession) error 
 	return nil
 }
 
-// Logout revokes the paired device: waxum's DeleteSession, which already
-// treats 404 as success (internal/waxum.Client.DeleteSession's doc
-// comment) — a session waxum never heard of, or already forgot, logs out
-// cleanly. This backend's own bookkeeping for id is dropped too, so a
+// Logout tears the session down LOCALLY. It is deliberately named for the
+// Backend interface method it satisfies, but on this backend it does NOT do
+// what meowBackend.Logout does, and the difference is operationally
+// expensive: whatsmeow's version calls cli.Logout(ctx), a real WhatsApp
+// unlink that removes the entry from the handset's "Linked devices" list.
+// waxum has no such call to make — its API exposes connect, disconnect,
+// reconnect, pair, qr and DELETE, and NOTHING that unlinks (verified
+// 2026-09-02 against the live 0.12.2-uploaded-media OpenAPI document on
+// wa-phkg). DeleteSession purges waxum's own storage and registry; the
+// paired device stays linked on the phone, forever, invisible from here.
+//
+// The consequence is a slot leak. WhatsApp caps an account at a small
+// number of linked companion devices, so every create-pair-delete cycle
+// burns one permanently, and once the cap is reached a freshly paired
+// device is logged out by WhatsApp within seconds of connecting — which
+// reads as "pairing is broken on this host", not as "the account is full".
+// session_rows.html's delete confirmation says so to the operator; it used
+// to claim the opposite ("This unlinks the device from WhatsApp"), which is
+// true only under WSM_WA_BACKEND=whatsmeow and false under the default.
+//
+// DeleteSession already treats 404 as success (internal/waxum.Client.
+// DeleteSession's doc comment) — a session waxum never heard of, or already
+// forgot, tears down cleanly. This backend's own bookkeeping for id is
+// dropped too, so a
 // deleted-then-recreated session (same wa_sessions row reused is not
 // possible — ids are crypto/rand — but a long-lived process deleting many
 // sessions over its lifetime) does not leak sync.Map entries forever.

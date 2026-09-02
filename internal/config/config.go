@@ -187,11 +187,15 @@ type Config struct {
 	MinioTimeout       time.Duration
 	MinioShareDuration time.Duration
 
-	// WABackend selects the WhatsApp transport: "whatsmeow" (default, the
-	// in-process whatsmeow library) or "waxum" (a REST client to a separate
-	// waxum process, wa.NewWaxumBackend — see cmd/app/main.go's boot-order
-	// comment for why the whatsmeow sqlite store is never opened in this
-	// mode).
+	// WABackend selects the WhatsApp transport: "waxum" (DefaultWABackend —
+	// a REST client to a separate waxum process, wa.NewWaxumBackend; see
+	// cmd/app/main.go's boot-order comment for why the whatsmeow sqlite
+	// store is never opened in this mode) or "whatsmeow" (the in-process
+	// whatsmeow library). This comment used to name whatsmeow as the
+	// default, contradicting DefaultWABackend a hundred lines above it —
+	// which matters because the two backends differ in what Logout does
+	// (wa.waxumBackend.Logout's doc comment: only whatsmeow can actually
+	// unlink a device from the handset).
 	WABackend string
 
 	// Waxum* configure the internal/waxum HTTP client. URL/Token are
