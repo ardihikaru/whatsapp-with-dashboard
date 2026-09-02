@@ -1,0 +1,47 @@
+-- Bootstrap ONE schema + ONE least-privilege user on the MySQL server that
+-- serves wa-phkg.  Run as root, ONCE PER SCHEMA — this deployment needs TWO:
+--
+--   app    __DB__ / __USER__ = the value of WSM_MYSQL_DATABASE   / WSM_MYSQL_USER
+--   waxum  __DB__ / __USER__ = the value of WAXUM_MYSQL_DATABASE / WAXUM_MYSQL_USER
+--
+-- wa-phkg has NO mysql client and no `make`, so this is applied from a machine
+-- that has one, pointed at the same host:port the app will use:
+--
+--   sed -e "s/__DB__/…/g" -e "s/__USER__/…/g" -e "s/__PASSWORD__/…/g" \
+--       bootstrap-db.sql.tmpl \
+--     | MYSQL_PWD="$ROOT_PW" mysql --protocol=TCP -h HOST -P PORT -uroot
+--
+-- Never put the password on the command line: MYSQL_PWD keeps it out of the
+-- process list, and the sed substitution keeps it out of shell history if the
+-- values come from a file rather than typed inline.
+--
+-- HOUSE RULE: one schema + one least-privilege user per product.  NEVER grant
+-- on *.* — assume this server is shared until proven otherwise, and a GRANT on
+-- *.* cannot be walked back once something depends on it.
+--
+-- COLLATION: every table in migrations/0001_app_tables.sql declares
+-- utf8mb4_0900_ai_ci explicitly.  We pin the DATABASE default to match the
+-- tables rather than leave a schema default nothing actually uses — which
+-- would be a trap for whoever adds the next table.
+
+CREATE DATABASE IF NOT EXISTS `__DB__`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_0900_ai_ci;
+
+-- '%' rather than 'localhost': the app reaches mysqld from inside a container
+-- on compose's bridge network, which is not 'localhost' from mysqld's point of
+-- view no matter where the server actually runs.
+CREATE USER IF NOT EXISTS '__USER__'@'%' IDENTIFIED BY '__PASSWORD__';
+ALTER  USER '__USER__'@'%' IDENTIFIED BY '__PASSWORD__';
+
+-- Schema-scoped only.  The DDL verbs are there because goose owns the schema:
+--   REFERENCES  — 0001 creates two foreign keys
+--   ALTER/INDEX — 0002 adds the attribution columns and five indexes
+--   CREATE/DROP — goose_db_version, and a `migrate down`
+-- Deliberately no GRANT OPTION, no SUPER, no PROCESS, nothing on *.*.
+GRANT SELECT, INSERT, UPDATE, DELETE,
+      CREATE, DROP, ALTER, INDEX, REFERENCES,
+      CREATE TEMPORARY TABLES
+  ON `__DB__`.* TO '__USER__'@'%';
+
+FLUSH PRIVILEGES;

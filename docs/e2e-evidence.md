@@ -567,3 +567,628 @@ Not verified here: a live customer replying "sudah" to a delivered order and
 moving it to `Sudah Diambil` with `confirm_source = customer_reply`. That
 needs a real reply to a real open question and cannot be manufactured from
 this side.
+
+## 2026-09-01 PHKG deploy bundle — image transfer to `wa-phkg`
+
+Preparing a second, independent deployment on `wa-phkg` (`192.168.20.10`,
+`/home/sim/devel/projects/whatsapp-service`) **without copying source code**.
+The images that production is running were saved on `rnd-v2-vpn`, carried
+through this laptop, and loaded on the target; the deployment bundle
+(`deploy/phkg/`) was written and rsynced alongside them.
+
+### What production was running, and what arrived
+
+`docker ps` / `docker image inspect` on `rnd-v2-vpn`, then
+`docker images` on `wa-phkg` after `load-images.sh`:
+
+| Image | Prod ID | ID on `wa-phkg` | tar.gz |
+|---|---|---|---|
+| `whatsapp-with-dashboard:local` | `d7b40a798051` | `d7b40a798051` | 11,426,610 B |
+| `whatsapp-with-dashboard-migrate:latest` | `7c09964d975f` | `7c09964d975f` | 28,324,997 B |
+| `ardihikaru/waxum:0.12.2-uploaded-media` | `e7c51aa15c99` | `e7c51aa15c99` | 63,703,097 B |
+
+`sha256sum -c SHA256SUMS` returned `OK` for all three files on the laptop
+**and** on `wa-phkg`, against sums computed on the production host — so the
+check covers `docker save`, both `scp` hops and the target's disk. The
+production scratch directory was removed afterwards. Nothing on production was
+started, stopped or rebuilt: `docker save` and `docker image inspect` are the
+only commands that touched it.
+
+`load-images.sh` also applied the dated aliases
+`whatsapp-with-dashboard:phkg-20260901` and
+`whatsapp-with-dashboard-migrate:phkg-20260901`, which is what
+`deploy/phkg/docker-compose.yml` names — `:local` and `:latest` identify
+nothing on a host with neither this repo nor a registry.
+
+### The bundle parses, and resolves to those exact images
+
+On `wa-phkg`, with every guarded variable given a throwaway value in a temp
+directory:
+
+```
+docker compose config --quiet     -> no output (valid)
+docker compose config --services  -> waxum, app
+docker compose config --volumes   -> wsm-sqlite, waxum-sessions
+docker compose --profile migrate config --images
+  -> ardihikaru/waxum:0.12.2-uploaded-media
+     whatsapp-with-dashboard-migrate:phkg-20260901
+     whatsapp-with-dashboard:phkg-20260901
+```
+
+Only the `--quiet` form was ever run. `docker compose config` without it
+renders the whole `.env` inline for every service, which is how a MySQL root
+password has reached a plaintext log here before.
+
+### What is deliberately NOT done
+
+`docker compose up` was **not** run, and this deployment cannot start yet. Two
+things are still missing and both are hard boot requirements:
+
+- **MySQL** — `WSM_MYSQL_*` and `WAXUM_MYSQL_*`. Schema must also be migrated
+  first; the binary never migrates on boot.
+- **MinIO** — `WSM_MINIO_ENDPOINT/ACCESS_KEY/SECRET_KEY/BUCKET`. Not optional:
+  `cmd/app` runs a live `storage.EnsureBuckets` before serving and
+  `log.Fatalf`s if MinIO is unreachable or the credential is wrong. There is
+  no degraded mode, and `WSM_MEDIA_ARCHIVE=false` does not relax it.
+
+With `.env` copied from the template and still empty, `docker compose config
+--quiet` on `wa-phkg` fails and names each one, e.g.
+
+```
+error while interpolating services.app.environment.WSM_MINIO_ENDPOINT:
+  required variable WSM_MINIO_ENDPOINT is missing a value: isi WSM_MINIO_ENDPOINT di .env
+```
+
+That is the intended state: the guards fire at config time, before a container
+starts, rather than as a crash loop on a host where nobody has the source.
+
+No production credential was copied. `WAXUM_TOKEN`, the database passwords, the
+MinIO keys and the admin hash are all left empty for PHKG to generate — the
+production `WAXUM_TOKEN` in particular is a root credential for every session
+on the production waxum instance.
+
+No WhatsApp identity was copied either: both volumes start empty and the
+handset will be paired by QR on `wa-phkg`. The session is a hard singleton, so
+duplicating a store across two hosts logs the session out rather than cloning
+it.
+
+### Repo side
+
+`go vet ./...` clean; `go test ./...` all packages `ok`, including the new
+`compose_deploy_phkg_test.go`. Each of its claims was checked red-on-revert by
+temporarily reintroducing the mistake it guards — a `build:` key and a `:local`
+tag, an external network declaration, a published waxum port, a deleted
+`migrate` service, a secret value in `.env.template`, and a missing
+`load-images.sh` — every one failed with the intended message, and the suite
+went green again on restore.
+
+### 2026-09-01, lanjutan: MySQL untuk PHKG
+
+The MySQL for this deployment is the HIS v3 server (credentials read
+programmatically from `~/.config/staging-his-v3-db/`, never echoed and never
+written anywhere). It is a shared box: `SHOW DATABASES` lists ~35 schemas
+across several unrelated products, so the house rule applies in full — one
+schema, one least-privilege user, nothing on `*.*`.
+
+Created with the repo's own `scripts/bootstrap-db.sql.tmpl`, run twice:
+
+| Schema | User | Grants |
+|---|---|---|
+| `wa_dashboard_phkg` | `wa_dashboard_phkg`@`%` | `SELECT, INSERT, UPDATE, DELETE, CREATE, DROP, REFERENCES, INDEX, ALTER, CREATE TEMPORARY TABLES` on that schema only |
+| `waxum_phkg` | `waxum_phkg`@`%` | same, on `waxum_phkg` only |
+
+The `_phkg` suffix follows the convention already on that server
+(`pec_dev_phkg_20250811`) and leaves room for a second WA deployment later.
+
+The root credential from the file was used ONLY to create these two and never
+reaches any `.env`. Isolation checked by logging in as the app user itself:
+
+```
+SHOW DATABASES   -> information_schema, performance_schema, wa_dashboard_phkg
+SELECT … FROM his_v3.migrations
+  -> ERROR 1142 (42000): SELECT command denied to user 'wa_dashboard_phkg'@…
+```
+
+Reachability from `wa-phkg` itself (not from this laptop — the app runs there):
+the server's port answers and returns a MySQL handshake banner reading
+`8.0.33`.
+
+> Correction worth recording: the first reachability test reported NOT
+> REACHABLE and was wrong. `ssh host 'bash -s' <<EOF` reads the SCRIPT from
+> stdin, so the piped host/port were consumed as script lines and `read` got
+> garbage. A test whose inputs never arrive fails closed and reads exactly like
+> a firewall block. Put the values in the script body, not a second stdin.
+
+Migrations were then applied FROM `wa-phkg`, as the least-privilege user, which
+also proves that user can do everything the schema needs:
+
+```
+docker run --rm --env-file .env whatsapp-with-dashboard-migrate:phkg-20260901 up
+  -> OK 0001_app_tables … 0006_inbound_messages
+  -> goose: successfully migrated database to version: 6
+```
+
+`SHOW TABLES` as the app user: `api_access_tokens`, `api_clients`,
+`goose_db_version`, `wa_calls`, `wa_inbound_messages`, `wa_messages`,
+`wa_sessions`. `waxum_phkg` is still empty by design — waxum creates its own
+tables on first boot.
+
+Not `docker compose --profile migrate run`: compose interpolates EVERY service
+before running one, so `app`'s `${WSM_MINIO_*:?}` guards block a migration that
+legitimately precedes MinIO. `deploy/phkg/README.md` now documents the direct
+`docker run` form for exactly that window.
+
+Still blocking `up`: `WSM_MINIO_*`, `WAXUM_TOKEN`, `WSM_ADMIN_USER` /
+`WSM_ADMIN_PASSWORD_HASH`. The generated database passwords exist in exactly
+one place, `/home/sim/devel/projects/whatsapp-service/.env` on `wa-phkg`, mode
+600; the working copy on this laptop was shredded.
+
+### 2026-09-01, lanjutan: MinIO untuk PHKG
+
+The credential offered for this (`~/.config/minio/mfardiansyah.json`,
+`https://s3.mfardiansyah.id`) turned out to be **`minioadmin` — the MinIO root
+account**. `mc admin info` and `mc admin accesskey ls` both answered, and it
+could `stat` every unrelated bucket on that server: `animora-prod`,
+`clino-backup-prod`, `clinical-documents`, `his-temp`, `penpot-assets`, and a
+dozen more. Putting it in `.env` on the PHKG host would have given a WhatsApp
+gateway root over all of them.
+
+Its `bucketName` field is also still the literal placeholder
+`<you-define-yourself>`, and its `tempBucketName` is `temp` — a real shared
+scratch bucket holding unrelated HTML reports, and the same bucket the
+PRODUCTION WA deployment already writes into.
+
+So the MySQL pattern was applied again: dedicated buckets, one dedicated user,
+scoped policy, root used only to create them and never written anywhere.
+
+| Bucket | Policy `whatsapp-phkg`, user `whatsapp-phkg` |
+|---|---|
+| `whatsapp-phkg` | `s3:ListBucket, GetBucketLocation, CreateBucket` on the bucket; `s3:GetObject, PutObject` on `/*` |
+| `whatsapp-phkg-temp` | same |
+
+The action list is exactly what `internal/storage` calls — `BucketExists`,
+`MakeBucket`, `PutObject`, `GetObject`, `PresignedGetObject`. No delete, no
+object listing: the code never does either.
+
+Verified positively and negatively with that key:
+
+```
+mc ls                      -> whatsapp-phkg/, whatsapp-phkg-temp/   (only these two)
+mc cp / mc cat             -> OK on both buckets
+mc share download 168h     -> presigned URL issued, Expire: 7 days
+mc cat  clinical-documents -> permission denied
+mc cp   temp/              -> permission denied
+mc cp   whatsapp-ardi/     -> permission denied   (production WA's bucket)
+mc cat  clino-backup-prod  -> permission denied
+mc mb   should-fail-bucket -> Access Denied
+```
+
+End-to-end from the deploy host itself: a presigned POST issued with the PHKG
+key was executed **on `wa-phkg`** and returned `HTTP 204`, and the object read
+back carried the text that host had written. Network path and credential
+authority are therefore both proven from where the app will actually run, not
+only from this laptop. `https://s3.mfardiansyah.id/minio/health/live` answers
+`HTTP 200` from `wa-phkg` with a valid certificate in 0.59s. Test objects were
+removed afterwards with the admin key — the PHKG key cannot delete, by design.
+
+> Two process corrections worth recording. First, an `mc` verification pass ran
+> with an EMPTY `MC_HOST_wa` because the secrets file was sourced without
+> `set -a`, so `mc` silently treated `wa/...` as a LOCAL PATH: it "succeeded" at
+> every positive check and "created" a bucket that should have been denied,
+> while really just making directories under the repo. An alias that does not
+> resolve does not fail — it falls back to the filesystem. Assert the host
+> variable is non-empty before trusting a single line of the output, and read
+> the error text (`Requested path /home/... not found` was the tell). The stray
+> directories were removed. Second, the first end-to-end attempt reported
+> `HTTP 403`: `mc share upload` emits a POST-policy form, and only the URL had
+> been extracted and replayed as a `PUT`. That was the harness being wrong, not
+> the policy.
+
+`WSM_MINIO_TEMP_BUCKET` is deliberately `whatsapp-phkg-temp`, overriding the
+template's `temp`, so this deployment shares a scratch bucket with nobody.
+
+Still blocking `up`: `WAXUM_TOKEN`, `WSM_ADMIN_USER`,
+`WSM_ADMIN_PASSWORD_HASH`.
+
+### 2026-09-01, lanjutan: `.env` lengkap, compose valid
+
+`WAXUM_TOKEN` generated fresh (`openssl rand -hex 32`) — never production's,
+which is a root credential for every session on the production waxum instance.
+
+`WSM_ADMIN_USER` / `WSM_ADMIN_PASSWORD_HASH` come from
+`~/.config/waxum/phkg.json`. The password was piped straight into
+`go run ./cmd/hashpw` from python, never through argv, so it reached no shell
+history and no `ps` listing. The resulting hash was checked round-trip before
+being written:
+
+```
+bcrypt cost            : 10
+cocok                  : True
+password salah ditolak : True
+```
+
+Written into `.env` single-quoted, because a bcrypt hash is `$2a$10$…` and
+compose's env_file parser interpolates `$` in an unquoted value — the same trap
+`cmd/hashpw` prints a warning about. Values crossed the ssh boundary base64'd
+so the LOCAL shell could not expand those dollars while building the heredoc.
+
+```
+docker compose config --quiet   -> no output. VALID.
+```
+
+That is the first time this bundle has parsed end to end. `WSM_TRUSTED_PROXIES`
+and `WA_PLATFORM_URL` remain empty on purpose (no proxy in front of this host,
+no platform link to show); both are optional and empty is meaningful for each.
+
+Not yet done: `docker compose up`. Nothing blocks it now.
+
+### 2026-09-01, `docker compose up` — the stack is running on `wa-phkg`
+
+Started by the operator. Both containers up, waxum healthy:
+
+```
+app     whatsapp-with-dashboard:phkg-20260901    Up   127.0.0.1:18801->8800/tcp
+waxum   ardihikaru/waxum:0.12.2-uploaded-media   Up (healthy)   3451/tcp
+```
+
+Three boot claims, each with its own evidence:
+
+- **MinIO** — `minio: connected to https://s3.mfardiansyah.id (bucket=whatsapp-phkg,
+  temp bucket=whatsapp-phkg-temp)`. That line is printed AFTER
+  `storage.EnsureBuckets`, so the scoped `whatsapp-phkg` key demonstrably
+  satisfies the live check that `log.Fatalf`s when it fails.
+- **App MySQL** — served `GET /api/v1/health -> 200`, which reads the store.
+- **waxum MySQL** — `waxum_phkg` now holds 10 tables (`sessions`, `messages`,
+  `contacts`, `tokens`, `webhooks`, `webhook_dlq`, `blast_jobs`,
+  `blast_recipients`, `scheduled_messages`, `token_sessions`), created by waxum
+  itself under the least-privilege `waxum_phkg` user. That user's grants are
+  therefore proven sufficient, not just plausible.
+
+#### `backend.reachable:false` is expected here, and it is worth knowing why
+
+`/api/v1/health` answers
+`{"backend":{"name":"waxum","reachable":false},"connected":0,"sessions":0,"status":"ok"}`
+and keeps answering it. That is NOT a broken link between the two containers:
+
+```
+docker compose exec waxum curl http://waxum:3451/health          -> 200
+docker compose exec waxum curl http://waxum:3451/api/v1/sessions -> 401 (no token; correct)
+/proc/net/tcp inside waxum: 1 ESTABLISHED connection to :3451     <- the SSE stream is OPEN
+```
+
+`backend_waxum_events.go`'s `eventPump` stores `gatewayReachable = true` only
+inside the per-event callback. With zero sessions, waxum emits no events at
+all, so the flag never flips even while the stream sits open and healthy. It
+will flip on the first event after a handset is paired.
+
+The three `connection refused` warnings at 12:50:19–12:50:22 are boot ORDER,
+not boot failure: the app came up at 12:50:18 and waxum finished starting at
+12:50:24. That is precisely why the compose file uses a plain `depends_on`
+rather than `condition: service_healthy` — the pump backed off, reconnected,
+and has logged nothing since.
+
+#### One real gap, unrelated to WSM
+
+waxum logs: `JWT_SECRET is not set; using a random secret generated for this
+process only. Tokens will stop validating after a restart.` WSM never uses
+waxum's JWT — it authenticates with `SUPERADMIN_TOKEN`, which bypasses JWT
+entirely — so this does not affect this app. It does mean any JWT waxum issues
+to some other client would die on the next restart. Neither
+`docker-compose.yml` nor `deploy/phkg/docker-compose.yml` sets `JWT_SECRET`
+today.
+
+Not done yet: pairing. The dashboard is loopback-only; reach it with
+`ssh -L 18801:127.0.0.1:18801 wa-phkg`.
+
+### 2026-09-02 Access control on the published dashboard port
+
+`WSM_BIND_ADDR` was moved from `127.0.0.1` to `192.168.20.10` so the dashboard
+is reachable from the network — deliberately the one LAN interface, not
+`0.0.0.0`, which would also hand it to `docker0` and every other interface on
+the box. Verified: `ss -tln` shows exactly one listener, `192.168.20.10:18801`,
+and `127.0.0.1:18801` now answers nothing. `WA_BASE_URL` moved with it, since
+that variable derives the mount prefix and every absolute URL.
+
+Access is then restricted in the `DOCKER-USER` chain:
+
+| # | Source | Action |
+|---|---|---|
+| 1 | `172.18.0.0/16` | RETURN (container-to-container) |
+| 2 | `192.168.20.0/24` | RETURN (PHKG LAN) |
+| 3 | `10.212.134.0/24` | RETURN (FortiClient pool) |
+| 4 | `0.0.0.0/0` | **DROP** |
+
+All on `tcp dpt:8800` toward `172.18.0.0/16` — the CONTAINER port, because the
+packet is already DNAT'ed by the time it reaches this chain. Matching the whole
+subnet rather than the container's current IP keeps the rules correct across a
+`docker compose up -d` that renumbers it.
+
+**`ufw` cannot do this job and would have failed silently.** It is active on
+this host, but a Docker-published port never traverses ufw's INPUT chain:
+docker DNATs in PREROUTING and the packet is then FORWARDed. `ufw deny 18801`
+would read as applied while the port stayed open to everyone.
+
+The FortiClient pool was derived, not guessed: this laptop's `ppp0` is
+`10.212.134.5`, and `wa-phkg` reports `SSH_CLIENT=10.212.134.5` — identical, so
+there is no NAT between them and the `/24` around it is the pool.
+
+#### The part that actually needed proving
+
+Rules can be installed on a path packets never take, and then the DROP guards
+nothing. First check after install showed all four counters at zero, so nothing
+was concluded. Two requests were then made from this laptop
+(`10.212.134.5` → `http://192.168.20.10:18801`, both `HTTP 200`), and the
+counters moved:
+
+```
+3       13   874 RETURN  10.212.134.0/24  172.18.0.0/16  tcp dpt:8800
+4        0     0 DROP    0.0.0.0/0        172.18.0.0/16  tcp dpt:8800
+```
+
+That is the claim worth having: traffic to the published port really does
+traverse `DOCKER-USER`, so rule 4 is enforcement rather than decoration.
+
+Honest limit: rule 4 is proven **by construction** — traversal is measured, and
+it is the last rule with a `0.0.0.0/0` source — not by observing a real
+connection being dropped. No host exists that is outside both allowed ranges
+AND able to route to `192.168.20.10`, so that test could not be performed from
+here.
+
+Persistence is a systemd unit (`wa-phkg-firewall.service`, `After=docker.service`)
+rather than `iptables-persistent`: the latter restores the whole table at a boot
+stage that can precede docker creating its own chains, making the outcome
+order-dependent. The unit needs no apt and no network.
+
+`deploy/phkg/` now carries `firewall.sh`, `wa-phkg-firewall.service`,
+`install-firewall.sh` and `check-firewall.sh`, all four named in
+`TestPHKGBundleIsComplete` — checked red-on-revert by removing `firewall.sh`.
+
+---
+
+## 2026-09-02 `wa-phkg` dipindah ke MySQL + MinIO internal PHKG
+
+Sampai hari ini `wa-phkg` berjalan di atas dua backing service di luar LAN PHKG:
+MySQL `202.10.39.46:31006` dan MinIO `https://s3.mfardiansyah.id`. Keduanya
+dipindah ke infrastruktur internal — MySQL `192.168.20.15:3306`, MinIO
+`http://192.168.20.12:9000`.
+
+### Kenapa ini cutover konfigurasi, bukan migrasi data
+
+Gerbangnya dijalankan dua kali: sekali saat merencanakan, sekali lagi tepat
+sebelum `docker compose down`. Keduanya nol:
+
+```
+waxum.sessions            0        app.wa_sessions           0
+waxum.tokens              0        app.wa_messages           0
+                                   app.wa_inbound_messages   0
+                                   app.api_clients           0
+MinIO whatsapp-phkg       0 B, 0 objects
+MinIO whatsapp-phkg-temp  0 B, 0 objects
+```
+
+`waxum.sessions = 0` adalah yang paling penting dari daftar itu: belum pernah
+ada handset yang di-pair, jadi memindahkan waxum ke registry MySQL kosong tidak
+membuat isi volume `whatsapp-service-phkg-waxum` yatim. Kalau angka itu bukan
+nol, rencananya adalah berhenti — bukan melanjutkan lalu scan QR ulang.
+
+Tetap dibuat cadangan sebelum apa pun disentuh: `.env.bak-20260902` di host,
+plus `mysqldump` kedua schema lama (7 dan 10 `CREATE TABLE`, `stderr` kosong) ke
+`~/backup/wa-phkg-20260902/` di luar repo.
+
+### Database dibuat oleh `wa_user` sendiri, tanpa root
+
+`bootstrap-db.sql.tmpl` tidak bisa dipakai di `.15`: templat itu butuh root
+untuk `CREATE USER`/`GRANT`, dan yang kita pegang hanya `wa_user`. Grant-nya
+sudah membatasi nama yang mungkin:
+
+```
+GRANT USAGE ON *.* TO `wa_user`@`%`
+GRANT ALL PRIVILEGES ON `waxum`.* TO `wa_user`@`%`
+GRANT ALL PRIVILEGES ON `wa_dashboard`.* TO `wa_user`@`%`
+```
+
+Grant level-database memuat `CREATE`, jadi `wa_user` boleh membuat persis dua
+nama itu dan tidak ada yang lain. Sesudah `CREATE DATABASE`:
+
+```
+wa_dashboard    utf8mb4   utf8mb4_0900_ai_ci
+waxum           utf8mb4   utf8mb4_0900_ai_ci
+```
+
+### Migrasi dan boot
+
+`docker run --rm --env-file .env …migrate:phkg-20260901`: enam migration
+`Pending` → `OK` → `successfully migrated database to version: 6`, sama dengan
+versi schema lama. Sesudah `docker compose up -d`:
+
+```
+SERVICE   STATE     STATUS                   PORTS
+app       running   Up 8 seconds             192.168.20.10:18801->8800/tcp
+waxum     running   Up 8 seconds (healthy)   3451/tcp
+
+app-1 | minio: connected to http://192.168.20.12:9000 (bucket=whatsapp-phkg, temp bucket=whatsapp-phkg-temp)
+app-1 | listening on http://localhost:8800 (docs at /docs)
+```
+
+Baris `minio: connected` itu sendiri sudah bukti: app melakukan cek jaringan
+hidup ke MinIO saat boot dan `log.Fatalf` kalau gagal, jadi proses yang hidup
+tidak mungkin salah alamat. `SHOW TABLES` di `.15` — `wa_dashboard` 7 tabel
+(goose `MAX(version_id)` = 6), `waxum` 10 tabel, sama persis dengan schema lama;
+yang sepuluh itu dibuat waxum sendiri saat boot, tidak ada migrasi tangan.
+
+### `reachable:false` yang bukan kegagalan
+
+`GET /api/v1/health` menjawab 200 dengan
+`{"backend":{"name":"waxum","reachable":false},…}`, dan log app hanya memuat
+SATU baris `waxum event stream ended … connection refused` dari detik pertama
+boot. Itu terbaca seperti app tidak bisa menghubungi waxum. Bukan:
+
+```
+$ docker run --rm --network container:whatsapp-service-app-1 nicolaka/netshoot ss -tnp
+State  Recv-Q Send-Q   Local Address:Port      Peer Address:Port
+ESTAB  0      0           172.18.0.3:42770       172.18.0.2:3451
+```
+
+Dari namespace jaringan app sendiri, koneksi SSE ke waxum **ESTABLISHED**. Baris
+`connection refused` itu satu percobaan pertama yang mendahului listener waxum;
+percobaan berikutnya berhasil dan tidak menghasilkan baris log sama sekali,
+karena hanya kegagalan yang di-log. `reachable` sendiri hanya menjadi `true` di
+dalam callback event (`backend_waxum_events.go`'s `eventPump`), jadi dengan nol
+sesi ter-pair — waxum tidak memancarkan event apa pun — `false` adalah keadaan
+mantap yang benar, bukan gejala. Ini perlu ditulis karena bentuk gejalanya sama
+persis dengan waxum yang benar-benar mati.
+
+### Jalur tulis app → MySQL baru, dibuktikan lewat UI
+
+Boot dan migrasi membuktikan tulis oleh `migrate` dan oleh waxum, bukan oleh app
+sendiri. `GET /api/v1/health` tidak menutup celah itu — handler-nya membaca
+`Manager.Counts()` in-memory dan doc comment-nya menyebut sendiri "No DB ping
+needed". Jadi: login lewat `POST /login` (303 → `/dashboard`), lalu
+
+```
+GET /dashboard             -> 200
+GET /admin/api-clients     -> 200
+GET /sessions/rows         -> 200
+GET /logs/rows             -> 200
+POST /admin/api-clients    -> 200
+```
+
+dan barisnya dibaca langsung dari `192.168.20.15`, bukan dari halaman yang baru
+saja menulisnya:
+
+```
+        id: 0e6e1780ba058b5875c4412ce2a5d782
+      name: cutover-writecheck-20260902
+  login_id: cutover-writecheck-20260902
+    active: 1
+created_at: 2026-09-02T05:51:53Z
+```
+
+Baris itu lalu dihapus lewat UI (`POST …/delete` → 303); `api_clients` dan
+`api_access_tokens` kembali ke 0 baris.
+
+### Bucket, dan bucket yang HAMPIR ditulisi
+
+`EnsureBuckets` membuat keduanya saat boot:
+
+```
+[2026-09-02 12:47:59 WIB]  0B  whatsapp-phkg/
+[2026-09-02 12:47:59 WIB]  0B  whatsapp-phkg-temp/
+```
+
+Yang membuat ini layak dicatat adalah tetangganya. `.12` dipakai bersama produk
+lain, dan `mc du tgt/temp` menjawab **29MiB, 19784 objects** — bucket `temp` di
+sana milik orang lain dan berisi. `config.DefaultMinioTempBucket` adalah persis
+`temp`, dan `WSM_MINIO_ACCESS_KEY` di host ini adalah key **admin** MinIO
+(`mc admin info` berhasil). Jadi `.env` yang kehilangan satu baris
+`WSM_MINIO_TEMP_BUCKET` tidak akan gagal — ia akan menulis media temporer
+WhatsApp ke bucket produk lain, dengan kredensial yang juga bisa menghapus
+isinya, dan tidak ada satu pun error yang muncul. `deploy/phkg/.env.template`
+dulu mengirim `WSM_MINIO_TEMP_BUCKET=temp`; sekarang `whatsapp-phkg-temp`,
+dijaga `TestPHKGEnvTemplateScopesTheMinioTempBucket` — dicek merah-saat-revert
+dengan mengembalikan baris itu ke `temp`:
+
+```
+--- FAIL: TestPHKGEnvTemplateScopesTheMinioTempBucket (0.00s)
+    compose_deploy_phkg_test.go:210: deploy/phkg/.env.template sets
+    WSM_MINIO_TEMP_BUCKET="temp", want a product-scoped bucket …
+```
+
+### Batas jujur
+
+- **Pairing handset dan kirim pesan/media belum dilakukan** — butuh telepon
+  fisik untuk memindai QR. Jadi jalur `app → waxum → WhatsApp` dan jalur
+  `PutObject` ke bucket `.12` **belum** dibuktikan end-to-end; yang terbukti
+  hari ini adalah bahwa app menulis ke MySQL baru dan membuat bucket di MinIO
+  baru.
+- **Penghitung `DOCKER-USER` tidak dibaca ulang** sesudah container dibuat
+  ulang (butuh sudo di host). Aturannya mencocokkan subnet `172.18.0.0/16`,
+  bukan IP container, jadi seharusnya tetap berlaku — tetapi "seharusnya" itu
+  belum diukur, dan catatan 2026-09-02 di atas justru menyuruh membaca kolom
+  `pkts`, bukan sekadar mendaftar aturannya.
+- **`JWT_SECRET` tidak diset di waxum** (`WARN … using a random secret
+  generated for this process only`). Sudah begitu sebelum pemindahan ini dan
+  tidak disentuh, tapi terlihat di log yang sama jadi dicatat di sini.
+
+### 2026-09-02, lanjutan: sesi "BOT IT" di `wa-phkg` pair lalu `Logged_out`
+
+Sesi pertama yang pernah di-pair di host ini masuk ke `Disconnected` lalu
+`Logged_out`. Pemindahan MySQL/MinIO beberapa jam sebelumnya adalah tersangka
+yang jelas, dan **bukan** penyebabnya.
+
+Yang benar-benar terjadi, dari log kedua service:
+
+```
+08:37:03  diesel: 29 migration ter-apply di whatsapp.db sesi 62fbc6…
+08:37:16  waxum: Session 62fbc6…: Connected   (+ contact_update, pin/archive/
+          mute_update, call_log_sync — sinkronisasi normal berjalan)
+08:37:28  event terakhir; socket mati diam-diam, tanpa satu baris log
+08:37:57  3 x HTTP 503 — POST /send menemukan sesi yang sudah mati
+08:38:04  waxum: QR code received            ← klien kembali tak punya kredensial
+08:39:18  waxum: Logged out: LoggedOut       (setelah sempat reconnect + sync)
+```
+
+Store lokalnya sehat, jadi ini bukan storage dan bukan hasil pemindahan:
+
+```
+device            1 baris        prekeys          811
+identities        1              app_state_keys    18
+__diesel_schema_migrations  29 baris, semua 08:37:03
+clock: host & container NTP-synced, selisih <1 s terhadap laptop
+```
+
+Sesi **reconnect dan sync lagi** pukul 08:39:18 sebelum di-`LoggedOut` — jadi
+kredensialnya sampai ke WhatsApp dan **WhatsApp yang menolaknya**. Badge
+`Logged_out` di UI benar: `mapWaxumStatus` point 3 (paired + `waiting_for_qr` +
+`is_logged_in:false`) memang berarti perangkatnya di-unlink dari sisi handset.
+
+Dan pemindahan MySQL/MinIO tidak mungkin jadi sebabnya karena tidak ada
+baseline yang rusak: `waxum_phkg.sessions` = 0 saat perencanaan **dan** tepat
+sebelum `docker compose down`, jadi belum pernah ada sesi yang hidup di host
+ini. Ini pairing pertama yang pernah dicoba di sini.
+
+**Temuan yang bisa diperbaiki di repo ini.** waxum tidak punya endpoint unlink
+sama sekali — seluruh permukaan teardown-nya, dibaca dari dokumen OpenAPI
+live-nya, adalah:
+
+```
+/api/v1/sessions/{session_id}            (DELETE)
+/api/v1/sessions/{session_id}/connect
+/api/v1/sessions/{session_id}/connect/wait
+/api/v1/sessions/{session_id}/disconnect
+/api/v1/sessions/{session_id}/reconnect
+```
+
+Sementara `session_rows.html` selama ini mengonfirmasi penghapusan dengan
+kalimat **"This unlinks the device from WhatsApp."** Itu benar hanya untuk
+`WSM_WA_BACKEND=whatsmeow` (`cli.Logout(ctx)`), dan salah untuk default
+`waxum` (`config.DefaultWABackend`), yang cuma memurnikan storage waxum. Jadi
+setiap siklus create-pair-delete meninggalkan satu perangkat tertaut di
+handset — dan operatornya baru saja diberi tahu bahwa itu sudah dilepas.
+Operator di host ini melakukan dua siklus dalam satu menit (08:36:53 delete,
+08:37:02 buat lagi) tepat sebelum gejalanya muncul.
+
+Diperbaiki: kalimat konfirmasinya sekarang mengatakan yang sebenarnya dan
+menyuruh membuka **Linked devices** di handset; doc comment
+`waxumBackend.Logout` tidak lagi mengklaim "revokes the paired device";
+`config.go` tidak lagi menyebut whatsmeow sebagai default padahal
+`DefaultWABackend = "waxum"` seratus baris di atasnya. Dijaga
+`TestTheDeleteConfirmationDoesNotPromiseAnUnlinkTheWaxumBackendCannotDo`,
+dicek merah-saat-revert dengan mengembalikan kalimat lamanya:
+
+```
+--- FAIL: TestTheDeleteConfirmationDoesNotPromiseAnUnlinkTheWaxumBackendCannotDo
+    sessions_test.go:169: the delete confirmation still promises an unlink …
+```
+
+`go test ./...` dan `go vet ./...` hijau.
+
+**Batas jujur.** Bahwa akunnya sudah mentok batas linked-device WhatsApp adalah
+kesimpulan yang paling cocok dengan bukti — `device_registry` mencatat daftar
+perangkat akun ini sebagai device 0 (handset) plus companion 10, 11, 12, 14
+pada 08:37:14 — tapi **tidak bisa dibuktikan dari host ini**. WhatsApp tidak
+menyebutkan alasan logout-nya, dan jumlah maupun identitas perangkat tertaut
+hanya terlihat di handset. Perbaikan di repo ini menghilangkan kebohongan yang
+membuat orang tidak melihat ke sana; ia tidak memulihkan sesinya. Juga: image
+yang berjalan di `wa-phkg` masih membawa kalimat konfirmasi yang lama sampai
+image baru dibangun dan dimuat ke sana.

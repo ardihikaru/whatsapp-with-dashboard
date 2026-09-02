@@ -1,0 +1,20 @@
+# Aturan DOCKER-USER hilang setiap reboot — iptables tidak menyimpan apa pun
+# sendiri, dan host ini tidak punya netfilter-persistent. Unit ini memasangnya
+# kembali setelah docker siap.
+#
+# Sengaja BUKAN iptables-persistent: paket itu memulihkan seluruh tabel pada
+# tahap boot yang bisa mendahului docker membuat chain-nya sendiri, dan
+# hasilnya bergantung pada urutan. Menjalankan skrip setelah docker.service
+# tidak punya ambiguitas itu, dan tidak butuh apt maupun jaringan.
+[Unit]
+Description=Batasi akses ke dashboard whatsapp-service (DOCKER-USER)
+After=docker.service
+Wants=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/wa-phkg-firewall.sh
+
+[Install]
+WantedBy=multi-user.target

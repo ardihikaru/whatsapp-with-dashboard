@@ -16,6 +16,15 @@ _data/*
 .env
 .env.*
 !.env.example
+# Same exception, same reasoning, for the deploy bundle's template: it ships
+# every key this deployment reads with EMPTY values, and it is the only copy
+# of that list on a host with no repo. `.env.*` above catches it by accident,
+# which would make TestPHKGBundleIsComplete and
+# TestPHKGEnvTemplateScopesTheMinioTempBucket fail on a fresh clone against a
+# file git never took. Safe to track because
+# TestPHKGEnvTemplateCarriesNoSecretValues fails the build if any
+# PASSWORD/SECRET/TOKEN/ACCESS_KEY line in it ever carries a value.
+!deploy/phkg/.env.template
 
 # Compiled binary / local bind-mount data.
 /wsm
@@ -33,3 +42,7 @@ _data/*
 # (docs/e2e-evidence.md) is tracked; the images it describes are reproduced on
 # demand with `make e2e-evidence`, rather than living forever in git history.
 /docs/e2e-evidence/*.png
+
+# Image tarballs saved from a production host on their way to another one.
+# Big, and a copy of a production artefact — never part of the repo.
+_transfer/

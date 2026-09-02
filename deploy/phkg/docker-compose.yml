@@ -1,0 +1,199 @@
+# whatsapp-with-dashboard — PHKG DEPLOY BUNDLE (wa-phkg, 192.168.20.10).
+#
+# This file is NOT the repo's docker-compose.yml. It is the flattened
+# equivalent of `docker-compose.yml + docker-compose.remote-db.yml` for a host
+# that has NO SOURCE CHECKOUT — the images arrive as tar.gz from production
+# (see load-images.sh) and nothing here is ever built.
+#
+# Three deliberate differences from the repo pair, each load-bearing:
+#
+#   1. NO `build:` anywhere. The repo's base file builds `app` and `migrate`
+#      from a context of `.`; that context does not exist on wa-phkg. A
+#      stray `build:` key turns `docker compose up` into a build failure with
+#      a confusing "path not found", not a deploy.
+#   2. NO external network. `master-compose-ai-net` lives on the production
+#      host, not here. The repo's remote-db overlay `!reset`s it away; this
+#      file simply never declares it, and both services share compose's own
+#      default bridge. That bridge is what makes `http://waxum:3451` resolve.
+#   3. Image tags carry provenance. `:local` and `:latest` are meaningless on
+#      a host with no repo to be local to. load-images.sh applies the dated
+#      aliases named below after `docker load`, so the tag in this file
+#      identifies WHICH production build is running.
+#
+# Everything else is verbatim from the repo files, and the comments explaining
+# WHY are kept rather than trimmed: whoever debugs this host will not have the
+# repo to read.
+#
+#   docker compose up -d
+#   docker compose --profile migrate run --rm migrate up
+#   docker compose logs -f app
+
+name: whatsapp-service
+
+volumes:
+  wsm-sqlite:
+    # whatsmeow's crypto/device store. Unused while WSM_WA_BACKEND is waxum
+    # (the default) — cmd/app's newBackend never opens it — but declared so a
+    # rollback to the whatsmeow backend has somewhere durable to land.
+    #
+    # CRYPTOGRAPHIC IDENTITY MATERIAL when it is in use: losing it means
+    # re-pairing the handset by QR, in person.
+    name: whatsapp-service-phkg-sqlite
+  waxum-sessions:
+    # waxum's registry lives in MySQL, but under WHATSAPP_STORAGE_PATH it also
+    # keeps a per-session SQLite whatsapp.db plus an instance-lock file. THIS
+    # IS THE PAIRED DEVICE'S IDENTITY on this host, and there is no second copy
+    # of it anywhere. NEVER `docker compose down -v`.
+    #
+    # The instance lock also forbids two processes pointed at one storage dir,
+    # so waxum cannot be scaled or rolling-restarted even read-only.
+    name: whatsapp-service-phkg-waxum
+
+services:
+  app:
+    image: whatsapp-with-dashboard:phkg-20260901
+    restart: unless-stopped
+
+    # HARD SINGLETON. One device websocket, one store. Two replicas against one
+    # store make WhatsApp log the session out. No deploy.replicas, no rolling
+    # restart.
+
+    env_file:
+      - .env
+    environment:
+      # Neutralise any WSM_APP_DSN left in .env: internal/config lets
+      # WSM_APP_DSN win VERBATIM over the WSM_MYSQL_* parts, and envOr() treats
+      # "" as unset — so an empty string here restores the composed DSN.
+      WSM_APP_DSN: ""
+      # `:?` fails loudly at `config` time instead of letting the app boot and
+      # hang dialling an address nobody filled in.
+      WSM_MYSQL_HOST: ${WSM_MYSQL_HOST:?isi WSM_MYSQL_HOST di .env}
+      WSM_MYSQL_PORT: ${WSM_MYSQL_PORT:?isi WSM_MYSQL_PORT di .env}
+      WSM_MYSQL_USER: ${WSM_MYSQL_USER:?isi WSM_MYSQL_USER di .env}
+      WSM_MYSQL_PASSWORD: ${WSM_MYSQL_PASSWORD:?isi WSM_MYSQL_PASSWORD di .env}
+      WSM_MYSQL_DATABASE: ${WSM_MYSQL_DATABASE:?isi WSM_MYSQL_DATABASE di .env}
+      # MinIO is repeated here ONLY to move its failure earlier. The app
+      # already refuses to boot without these — internal/config rejects an
+      # empty value and cmd/app then runs a live storage.EnsureBuckets before
+      # serving anything — but that failure arrives as a container crash-loop
+      # AFTER `up`, on a host where nobody has the source to read. Guarded
+      # here, `docker compose config --quiet` names the missing variable
+      # before a single container starts.
+      #
+      # WSM_ADMIN_* is deliberately NOT guarded the same way: the app accepts
+      # either WSM_ADMIN_PASSWORD_HASH or WSM_ADMIN_PASSWORD, and a `:?` on
+      # one of them would forbid the other. Its own boot error is specific
+      # enough.
+      WSM_MINIO_ENDPOINT: ${WSM_MINIO_ENDPOINT:?isi WSM_MINIO_ENDPOINT di .env}
+      WSM_MINIO_ACCESS_KEY: ${WSM_MINIO_ACCESS_KEY:?isi WSM_MINIO_ACCESS_KEY di .env}
+      WSM_MINIO_SECRET_KEY: ${WSM_MINIO_SECRET_KEY:?isi WSM_MINIO_SECRET_KEY di .env}
+      WSM_MINIO_BUCKET: ${WSM_MINIO_BUCKET:?isi WSM_MINIO_BUCKET di .env}
+      # The SQLite store on the named volume, never the working directory.
+      WSM_DB_PATH: /data/wsm.db
+      WSM_ADDR: ":8800"
+      # waxum is reachable only on this compose network — see the deliberate
+      # absence of a `ports:` block on that service below.
+      WSM_WAXUM_URL: http://waxum:3451
+      WSM_WAXUM_TOKEN: ${WAXUM_TOKEN:?isi WAXUM_TOKEN di .env}
+      WSM_MEDIA_MAX_BYTES: ${WSM_MEDIA_MAX_BYTES:-104857600}
+      WSM_MEDIA_UPLOAD_TIMEOUT: ${WSM_MEDIA_UPLOAD_TIMEOUT:-60s}
+      WSM_MEDIA_UPLOAD_CONCURRENCY: ${WSM_MEDIA_UPLOAD_CONCURRENCY:-4}
+      WSM_MEDIA_ARCHIVE: ${WSM_MEDIA_ARCHIVE:-true}
+      # false by default: automated outbound calling risks a ban on a paired
+      # device identity that has no second copy anywhere.
+      WSM_CALLS_ENABLED: ${WSM_CALLS_ENABLED:-false}
+      WSM_WAXUM_EVENTS: ${WSM_WAXUM_EVENTS:-true}
+
+    volumes:
+      - wsm-sqlite:/data
+
+    ports:
+      # LOOPBACK BY DEFAULT, and on this host that default is the whole story:
+      # wa-phkg has no reverse proxy and no TLS. This is an admin surface with
+      # a WhatsApp identity behind it. Reach it over an SSH tunnel:
+      #
+      #   ssh -L 18801:127.0.0.1:18801 wa-phkg
+      #
+      # WSM_BIND_ADDR is the opt-out for a host that DOES sit behind a proxy.
+      # Set it to the single interface that proxy reaches this box on, never
+      # 0.0.0.0, and pair it with WA_COOKIE_SECURE=true and WSM_TRUSTED_PROXIES.
+      - "${WSM_BIND_ADDR:-127.0.0.1}:${WSM_EXPOSED_PORT:-18801}:8800"
+
+    # PLAIN depends_on, not `condition: service_healthy`. The app must boot with
+    # waxum down or still starting; internal/wa's status poller converges once
+    # waxum answers. Gating boot on waxum's health makes one container's start
+    # order dictate the other's.
+    depends_on: [waxum]
+
+    # cmd/app tears down as server.Shutdown(5s) -> manager.Close() -> appDB
+    # -> the SQLite store LAST. 15s leaves headroom; a SIGKILL mid-teardown
+    # risks the crypto store.
+    stop_grace_period: 15s
+
+    # No healthcheck: distroless/static has nothing to exec. GET
+    # /api/v1/health is public — probe it from the host:
+    #   curl -sf http://127.0.0.1:18801/api/v1/health
+
+  waxum:
+    image: ardihikaru/waxum:${WAXUM_TAG}
+    # OUR OWN FORK, not upstream's `fdciabdul/waxum`, and that is load-bearing
+    # rather than a preference: stock 0.12.2 cannot send pre-uploaded media at
+    # all. Its `MediaData` is a `#[serde(untagged)]` enum with `Url` declared
+    # first and no `deny_unknown_fields`, so a descriptor body matches `Url`,
+    # the six other fields are silently dropped, and waxum fetches the
+    # descriptor's mmg.whatsapp.net URL — the ENCRYPTED blob, which passes its
+    # own SSRF guard — and sends that. The recipient gets an undecryptable file
+    # while the API answers 200. Reverting this to fdciabdul/waxum silently
+    # breaks every media send.
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: mysql://${WAXUM_MYSQL_USER:?isi WAXUM_MYSQL_USER di .env}:${WAXUM_MYSQL_PASSWORD:?isi WAXUM_MYSQL_PASSWORD di .env}@${WSM_MYSQL_HOST:?isi WSM_MYSQL_HOST di .env}:${WSM_MYSQL_PORT:?isi WSM_MYSQL_PORT di .env}/${WAXUM_MYSQL_DATABASE:?isi WAXUM_MYSQL_DATABASE di .env}
+      SUPERADMIN_TOKEN: ${WAXUM_TOKEN:?isi WAXUM_TOKEN di .env}
+      WHATSAPP_STORAGE_PATH: /data/whatsapp_sessions
+      # RATE_LIMIT_PER_SECOND is NOT a requests-per-second rate, despite the
+      # name: tower_governor's `per_second()` sets the REPLENISH INTERVAL, in
+      # seconds, for ONE token — waxum's own default of 20 means one token
+      # every 20 seconds. A BIGGER number here makes the limiter TIGHTER, not
+      # looser; a value near 1 is the generous setting. Measured on production
+      # before this was tuned: 60 rapid GET /api/v1/sessions from the app
+      # container's own network namespace returned 57 x HTTP 429 to 3 x 200,
+      # and a 429 does not appear in waxum's own logs at all.
+      RATE_LIMIT_PER_SECOND: "1"     # replenish interval in SECONDS -> 1 token/sec
+      RATE_LIMIT_BURST: "200"
+      WEBHOOK_RETRY_MAX_ATTEMPTS: "5"
+      WEBHOOK_DLQ_CAPACITY: "1000"
+    volumes:
+      - waxum-sessions:/data
+
+    # NO ports: block, deliberately. The app reaches waxum at
+    # http://waxum:3451 over this compose network; nothing else may reach it.
+    # SUPERADMIN_TOKEN is a root credential for every WhatsApp session waxum
+    # holds, compared in constant time and bypassing JWT entirely. Publishing
+    # this port would put that credential's blast radius one hop from the LAN
+    # instead of zero.
+
+    healthcheck:
+      # The image ships curl.
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:3451/health"]
+
+    stop_grace_period: 15s
+
+  # One-shot goose runner. The app image deliberately does NOT embed
+  # migrations/ and never migrates on boot: a schema change is an operator
+  # action, not a start-up side effect of a hard singleton. The SQL files are
+  # baked into THIS image, which is why no migrations/ directory needs to be
+  # copied to this host.
+  #
+  #   docker compose --profile migrate run --rm migrate up
+  #   docker compose --profile migrate run --rm migrate status
+  migrate:
+    profiles: ["migrate"]
+    image: whatsapp-with-dashboard-migrate:phkg-20260901
+    env_file:
+      - .env
+    environment:
+      WSM_MYSQL_HOST: ${WSM_MYSQL_HOST:?isi WSM_MYSQL_HOST di .env}
+      WSM_MYSQL_PORT: ${WSM_MYSQL_PORT:?isi WSM_MYSQL_PORT di .env}
+    restart: "no"
