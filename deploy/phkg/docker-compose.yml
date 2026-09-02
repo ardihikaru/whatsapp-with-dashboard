@@ -51,7 +51,13 @@ volumes:
 
 services:
   app:
-    image: whatsapp-with-dashboard:phkg-20260901
+    # 20260902 while `migrate` below stays on 20260901, deliberately: the two
+    # stamps name two different builds, and only this one was rebuilt. The
+    # 0902 build carries the corrected session-delete confirmation (the old
+    # one promised an unlink waxum cannot perform); nothing under migrations/
+    # or Dockerfile.migrate changed, so re-stamping the migrate image would
+    # claim a rebuild that never happened.
+    image: whatsapp-with-dashboard:phkg-20260902
     restart: unless-stopped
 
     # HARD SINGLETON. One device websocket, one store. Two replicas against one
