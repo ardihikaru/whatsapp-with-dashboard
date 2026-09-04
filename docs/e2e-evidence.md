@@ -1329,3 +1329,57 @@ private-route evidence above, not re-measured here.
 sudo cp /etc/nginx/conf.d/wa.conf.bak.20260904140717 /etc/nginx/conf.d/wa.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+### Same day — the redeploy onto `rnd-v2-vpn`, and the waxum wedge for the third time
+
+`git pull` to `9fdcd7c`, then `make up REMOTE_DB=1` (which is `up -d --build`).
+The running stack was confirmed to be in overlay mode first, from the container
+itself rather than assumed:
+
+```
+config_files = docker-compose.yml,docker-compose.remote-db.yml
+networks     = whatsapp-with-dashboard_default
+```
+
+Only `app` was rebuilt and recreated; `waxum` was left running. Volumes
+`whatsapp-with-dashboard-sqlite` and `whatsapp-with-dashboard-waxum` were listed
+before and after and are unchanged. No `down`, no `-v`.
+
+**The app restart wedged the session again** — the 2026-08-27 hazard, now on its
+third recorded occurrence. Before: `connected:1`. For 60s after: `connected:0`,
+with waxum's `/status` oracle reading
+
+```
+{"status":"connecting","is_logged_in":true,"socket_alive":false,…}
+```
+
+while waxum's own logs repeated `Session …: Connected` and emitted a `connected`
+event on every retry — no error, no 429, no logout. `mapWaxumStatus` requires
+`is_logged_in && socket_alive`, so WSM correctly reported it disconnected.
+
+One detail this run adds to the hazard note: **waxum kept receiving live traffic
+throughout**. Real inbound `message`, `receipt`, `chat_presence` and
+`device_list_update` events arrived at 07:15:52, 07:16:17 and 07:16:47 while
+`socket_alive` was still `false`. So the flag can be wedged on a connection that
+is demonstrably carrying data — "socket_alive:false" is not proof the websocket
+is dead, only that WSM will treat the session as unusable.
+
+Recovery was the documented one, `docker compose … restart waxum`:
+
+```
+15s..90s  health -> {"connected":1,"sessions":1,…}
+          /status -> {"status":"logged_in","is_logged_in":true,"socket_alive":true,…}
+```
+
+Stable across six polls at 15s intervals. No re-pairing, volumes untouched.
+
+Public surface re-checked against the freshly built binary — `POST
+/api/v1/messages` (Basic) `-> 400` JSON, `GET /api/v1/inbound -> 200`,
+`/api/v1/health -> 404` nginx, `/api/v1/sessions -> 404` nginx, `/ -> 302`, and
+the session reads `state:"connected"` on the private route.
+
+**Not verified: that this session can actually SEND.** Nothing in this run put a
+message on the wire. Per the hazard note above, `s.state`, `Live()` and
+`s.sendQ != nil` are independent, nothing but `enqueue` reads `sendQ`, and a
+wedged socket and a nil queue present identically — so "connected" here is
+evidence about the first two only.
