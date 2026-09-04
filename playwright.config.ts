@@ -79,8 +79,10 @@ export default defineConfig({
   //     ./scripts/e2e-run.sh e2e/nav-mobile.spec.ts
   //
   // Two things make this necessary rather than optional. The readiness probe
-  // below cannot be reused against the public host, because the edge returns
-  // 404 for /api/v1/* by design. And the target must be HTTPS: production sets
+  // below cannot be reused against the public host: the edge publishes only an
+  // allowlist of /api/v1 routes and /api/v1/health is deliberately not one of
+  // them — it is the single route that takes no authentication at all, so it
+  // stays private and answers 404 publicly. And the target must be HTTPS: production sets
   // WA_COOKIE_SECURE=true, so a browser silently refuses to store the session
   // cookie over plain http and every test fails at login.
   webServer: process.env.WSM_E2E_NO_SERVER ? undefined : {

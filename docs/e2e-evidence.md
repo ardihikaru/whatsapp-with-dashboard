@@ -1192,3 +1192,140 @@ hanya terlihat di handset. Perbaikan di repo ini menghilangkan kebohongan yang
 membuat orang tidak melihat ke sana; ia tidak memulihkan sesinya. Juga: image
 yang berjalan di `wa-phkg` masih membawa kalimat konfirmasi yang lama sampai
 image baru dibangun dan dimuat ke sana.
+
+---
+
+## 2026-09-04 — the public JSON API, published as an allowlist
+
+Until today `https://wa.mfardiansyah.id` answered `404` for every `/api/v1`
+path: the edge carried `location ^~ /api/v1/ { return 404; }` and every
+consumer dialled `10.10.0.4:18801` over WireGuard instead. It now proxies a
+fixed allowlist — auth login/logout, `/messages{,/group,/media}`, `/inbound`,
+`/contacts/check`, and the `/sessions/{id}/` equivalents of the last three —
+and still `404`s everything else.
+
+**The edge is `clino` (103.127.134.25), not `rnd-v2-vpn`.** `rnd-v2-vpn` has no
+nginx installed at all (`which nginx` → nothing); it runs the app container.
+The live file is `/etc/nginx/conf.d/wa.conf` on `clino`, mirrored in
+`docs/deploy-nginx-wa.conf.example` and now asserted by `nginx_edge_test.go`.
+
+Secret handling: the `naufal` credential was read programmatically from
+`~/.config/wsm/naufal.json` into a `curl -K` config file in a scratch dir and
+never echoed. The minted token is recorded below only by its length.
+
+### The deploy attempt that failed first, and why it matters
+
+`nginx -t` rejected the first install outright:
+
+```
+nginx: [emerg] unknown directive "1,64}/(messages|messages/media|contacts/check)$" in /etc/nginx/conf.d/wa.conf:179
+nginx: configuration file /etc/nginx/nginx.conf test failed
+```
+
+nginx's parser treats `{` and `}` as block delimiters **before** a location
+regex is ever compiled, so the repetition quantifier in
+`[A-Za-z0-9_-]{1,64}` ended the location early. Quoting the whole regex is the
+fix. The install script restored the backup and reloaded nothing; verified
+`md5sum /etc/nginx/conf.d/wa.conf` → `050ae6a3…`, byte-identical to the
+original, and `https://wa.mfardiansyah.id/ -> 302` throughout. This matters
+beyond the typo: **the edge is shared with nine other products**, and a failed
+`nginx -t` there is a failed reload for all of them.
+
+Second attempt: `nginx -t` successful, `systemctl reload nginx`, `RELOADED`.
+
+### Published routes — reached the app (JSON bodies, not nginx HTML)
+
+```
+POST /api/v1/auth/login  (correct creds)   -> 200  token minted, 43 chars, expires_at 2026-09-11T07:07:52Z
+POST /api/v1/messages    (bearer, bad to)  -> 400  {"error":"phone number too short — use international format like +62 812-0000-0000"}
+POST /api/v1/messages    (Basic, bad to)   -> 400  same
+GET  /api/v1/inbound     (bearer, since=)  -> 200  [{"id":"3B1359632D90D4F415ED","from_phone":"628232324xxxx",…}]
+GET  /api/v1/inbound     (Basic, no since) -> 400  {"error":"since is required (RFC3339)"}
+POST /api/v1/contacts/check (Basic)        -> 400  {"error":"phones is required"}
+POST /api/v1/sessions/{id}/messages        -> 400  {"error":"phone number too short …}
+POST /api/v1/auth/logout (bearer)          -> 204
+POST /api/v1/messages    (revoked token)   -> 401  {"error":"unauthorized"}
+POST /api/v1/messages    (no credential)   -> 401  {"error":"unauthorized"}
+```
+
+The `400`s are the point: a validation error in JSON proves the request was
+proxied and authenticated. Nothing was sent — no `wa_messages` row was created
+by any of these.
+
+### Unpublished routes — stopped at the edge (nginx HTML, never proxied)
+
+```
+GET    /api/v1/health                       -> 404 nginx
+GET    /api/v1/sessions            (Basic)  -> 404 nginx
+GET    /api/v1/stats               (Basic)  -> 404 nginx
+DELETE /api/v1/sessions/000…000    (Basic)  -> 404 nginx
+POST   /api/v1/sessions/{id}/calls/tts      -> 404 nginx
+GET    /api/v1/sessions/{id}/webhooks       -> 404 nginx
+```
+
+`DELETE` was probed with a bogus all-zero id precisely so that a wrong
+allowlist could not have deleted a real session. The `404` bodies are nginx's
+HTML page, not the app's `{"error":…}` — that distinction is the whole check,
+since the app returns `404` JSON for an unknown session too.
+
+Unchanged: `GET / -> 302` (dashboard), `GET /openapi.yaml -> 200`.
+
+### Rate limits
+
+```
+15 rapid logins, wrong secret  ->  401 x6  then  429 x9      (wa_api_auth, 12r/m burst 5)
+30 rapid sends, valid Basic    ->  400 x24 then  429 x6      (wa_api, 1r/s burst 20)
+```
+
+### The real client IP survives the hop — the reason the headers moved
+
+The proxy headers used to live inside `location / {}`. A location never
+inherits them from a sibling, so the new `/api/v1` blocks would have received
+none — no `X-Forwarded-For` — and `auth.ClientIP` would have fallen back to
+`RemoteAddr`, which is the WireGuard peer `10.10.0.1` for **every** public
+caller alike. The failed-Basic throttle keys on that value, so one attacker
+would have locked out every API client at once. Hoisting them to server level
+is what prevents it; `TestTheEdgeSetsProxyHeadersAtServerLevelSoAPILocationsInheritThem`
+keeps them there.
+
+The app logs no client address, so this was measured through the throttle
+itself. Holding one IP down with failed Basic attempts paced at ~1.05s (fast
+enough to outrun the app's 1-per-3s refill, slow enough to clear the edge's
+1r/s), while probing from a second public IP at the same moment:
+
+```
+laptop  103.161.62.130 : 401 429(Retry-After) 401 429 429 401 429 401 429 429 401 429
+clino   103.127.134.25 : 401 401 401
+```
+
+Those 429s carry `Retry-After`, so they are the APP's throttle, not nginx's.
+A second address getting clean 401s while the first is throttled is only
+possible if the two are keyed separately — i.e. `X-Forwarded-For` is arriving
+and `WSM_TRUSTED_PROXIES=10.10.0.0/24` is trusting the `10.10.0.1` hop that
+sets it.
+
+### Repo side
+
+`nginx_edge_test.go` is new. All four tests confirmed **red** against the
+unmodified config before the change and green after:
+
+```
+--- FAIL: TestTheEdgeDeniesEveryAPIRouteItDoesNotExplicitlyPublish
+--- FAIL: TestTheEdgePublishesOnlyTheSendAndInboundAPIRoutes
+--- FAIL: TestTheEdgeSetsProxyHeadersAtServerLevelSoAPILocationsInheritThem
+--- FAIL: TestTheEdgeRateLimitsTheAPIWithWaPrefixedZones
+```
+
+`go build ./...`, `go vet ./...` and `go test ./...` all green.
+
+**Not verified.** No real message was sent through the public route — every
+send probe used a deliberately invalid `to` so that nothing left the gateway.
+That the published surface can actually deliver a message is inherited from the
+private-route evidence above, not re-measured here.
+
+**Rollback**, if the public API ever needs to be withdrawn:
+
+```
+sudo cp /etc/nginx/conf.d/wa.conf.bak.20260904140717 /etc/nginx/conf.d/wa.conf
+sudo nginx -t && sudo systemctl reload nginx
+```

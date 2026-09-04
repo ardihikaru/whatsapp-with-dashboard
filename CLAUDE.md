@@ -339,6 +339,38 @@ all. If a media send ever again looks like the app silently ignored it —
 nothing in this app's own logs, nothing in `wa_messages` — check the edge's
 `client_max_body_size` before the app's config.
 
+**The public API is an ALLOWLIST at the edge, and the edge is not in this
+repo.** Since 2026-09-04 `https://wa.mfardiansyah.id` proxies a fixed set of
+`/api/v1` routes — auth login/logout, `/messages{,/group,/media}`, `/inbound`,
+`/contacts/check`, and the `/sessions/{id}/` equivalents of the last three —
+and answers 404 for everything else, `/api/v1/health` included. Adding a route
+to `routes_api.go` therefore does **nothing** publicly: the live file is
+`/etc/nginx/conf.d/wa.conf` on `ssh clino` (103.127.134.25, NOT `rnd-v2-vpn`,
+which has no nginx at all), mirrored in `docs/deploy-nginx-wa.conf.example` and
+asserted by `nginx_edge_test.go`. Three ways this bites:
+
+  - **`^~` outranks regex, so a `^~ /api/v1/` deny silently kills every regex
+    allow rule below it** — nginx resolves exact `=`, then the longest `^~`
+    prefix (which STOPS the search), then regexes in file order. The deny is
+    written `~ ^/api/v1/` and must stay LAST; an allow rule appended after it
+    is dead code. Both failures reload cleanly and pass `nginx -t`.
+  - **`proxy_set_header` in a location discards the whole inherited set.** The
+    headers are at server level for exactly this reason. Put them back inside
+    `location /` and every API location loses `X-Forwarded-For`, so
+    `auth.ClientIP` falls back to the WireGuard peer `10.10.0.1` for all
+    callers alike — and since the failed-Basic throttle keys on that value, one
+    attacker throttles every API client at once.
+  - **The edge is SHARED with nine other products.** `map` and `limit_req_zone`
+    names are global across `conf.d`; a collision fails the reload for the
+    whole box. Everything in `wa.conf` is `wa_`-prefixed. Always
+    `sudo nginx -t` before `systemctl reload nginx`, and back the file up first
+    — the rollback is a `cp` of the `.bak.<stamp>` and a reload.
+
+Note the app has **no rate limit on the bearer path at all** (only failed HTTP
+Basic attempts are throttled, `internal/auth/middleware.go`), and the edge box
+runs neither fail2ban nor ufw — so `limit_req` in `wa.conf` is the only brake
+that exists on an authenticated public caller.
+
 ---
 
 ## Layout

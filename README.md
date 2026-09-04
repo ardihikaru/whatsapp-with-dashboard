@@ -265,10 +265,24 @@ location / {
 }
 ```
 
-with `WSM_TRUSTED_PROXIES` naming the address nginx connects from. The JSON API
-has no public route in that deployment: a `location ^~ /api/v1/ { return 404; }`
-ahead of `location /` keeps it to callers on the private network, which is where
-its consumers already live.
+with `WSM_TRUSTED_PROXIES` naming the address nginx connects from.
+
+**The JSON API is published as an allowlist, not wholesale.** The production edge
+proxies exactly the send-and-read surface — `/api/v1/auth/login` and `logout`,
+`/api/v1/messages{,/group,/media}`, `/api/v1/inbound`, `/api/v1/contacts/check`,
+and the `/api/v1/sessions/{id}/` equivalents of the last three — and answers 404
+for everything else under `/api/v1`, including the unauthenticated
+`/api/v1/health`, session create/delete, `/calls/*` and webhook administration.
+Adding a route to `internal/handler/routes_api.go` does **not** make it public;
+the edge has to be edited too. The full config, with the reasoning for each
+exclusion and for the location ordering, is `docs/deploy-nginx-wa.conf.example`,
+and `nginx_edge_test.go` asserts the shape of it.
+
+Note that the proxy headers above belong at **server** level, not inside
+`location /`. A location inherits them from the server but never from a sibling
+location, and one that sets any header of its own discards the whole inherited
+set — so headers kept in `location /` leave the API locations with no
+`X-Forwarded-For`, and every public caller collapses onto one throttle key.
 
 ## Authentication
 

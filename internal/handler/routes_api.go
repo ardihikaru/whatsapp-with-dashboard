@@ -23,13 +23,36 @@ import "net/http"
 // confused with core-api's /api on the same origin — they are different
 // services behind different routers, and this one has no public route at all.
 //
-// ⚠ THAT MEANS THE API IS NOT PUBLICLY REACHABLE, AND THAT IS THE POINT.
+// ⚠ REGISTERING A ROUTE HERE DOES NOT PUBLISH IT. Nothing in this file is
+// reachable from the internet by default. The production edge
+// (docs/deploy-nginx-wa.conf.example, live as /etc/nginx/conf.d/wa.conf on the
+// public box) answers 404 for every /api/v1 path except an explicit allowlist,
+// and a route added below stays private until that file is edited and nginx
+// reloaded. Published as of 2026-09-04:
+//
+//	POST /api/v1/auth/login, POST /api/v1/auth/logout
+//	POST /api/v1/messages, /messages/group, /messages/media
+//	GET  /api/v1/inbound
+//	POST /api/v1/contacts/check
+//	     /api/v1/sessions/{id}/messages, /messages/media, /contacts/check
+//
+// Everything else is deliberately unpublished, and three of them are worth
+// naming because the reason is not obvious from the handler:
+//
+//	GET /api/v1/health        the ONLY route below with no RequireAPI wrapper.
+//	                          It answers unauthenticated and reports session
+//	                          counts, so it must not be public.
+//	DELETE /sessions/{id}     cannot unlink the device on the waxum backend and
+//	                          burns a linked-device slot per call (CLAUDE.md).
+//	/sessions/{id}/calls/*    places real outbound calls; WSM_CALLS_ENABLED is
+//	                          true in production and a ban lands on a device
+//	                          identity with no second copy anywhere.
+//
 // Before Agustus 2026 a bare Host(`wsm.$DOMAIN`) router exposed the whole
 // service, JSON API included, to the internet — arguably a bug rather than a
-// feature. Anything that needs to call it must be on the private network or
-// come through an SSH forward. Publishing it is a security decision, not a
-// routing tweak: give it its own router, its own authentication, and say so
-// here.
+// feature. That is what the allowlist replaces. Widening it is a security
+// decision, not a routing tweak: say why here, add the location there, and
+// update nginx_edge_test.go, which asserts the published set exactly.
 //
 // /openapi.yaml stays at the root with the API it describes. The Swagger UI at
 // BasePath+"/docs" is a browser page and moves with the UI; the spec is a

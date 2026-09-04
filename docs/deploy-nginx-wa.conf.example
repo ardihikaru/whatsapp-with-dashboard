@@ -4,8 +4,8 @@
 # THIS EDGE IS SHARED with several other products. Two consequences that are easy to get
 # wrong and expensive to debug:
 #
-#   * `map` lives in nginx's http context and its variable names are GLOBAL across
-#     everything in conf.d. Every variable here is prefixed `$wa_`. Renaming
+#   * `map` and `limit_req_zone` live in nginx's http context and their names are GLOBAL
+#     across everything in conf.d. Every name here is prefixed `wa_`. Renaming
 #     them to something generic can collide with a neighbour and fail the reload for the
 #     whole host, taking every other product down with it.
 #   * No `default_server` anywhere in this file. Claiming it would silently steal every
@@ -26,6 +26,23 @@ map $host $wa_backend {
     wa.mfardiansyah.id  10.10.0.4:18801;
     default             "";
 }
+
+# ── RATE LIMITING THE PUBLIC API ────────────────────────────────────────────────
+#
+# limit_req_zone is an http-context directive: it belongs at file top level, beside
+# the maps. Inside a server{} block `nginx -t` fails outright.
+#
+# The edge is the only brake there is on an AUTHENTICATED caller. The app throttles
+# failed HTTP Basic attempts per client IP (internal/auth/middleware.go, 20 burst then
+# one per 3s) but does not throttle the bearer path at all — verifying a token is one
+# SHA-256 and an indexed lookup — so a leaked token is rate-limited here or nowhere.
+# This box runs neither fail2ban nor ufw, so there is no backstop underneath either.
+#
+# wa_api_auth is deliberately tighter and covers POST /api/v1/auth/login only: that
+# endpoint is a bcrypt comparison against api_clients.secret_hash and is the obvious
+# brute-force target. 12r/m matches the opengym_auth precedent on this box.
+limit_req_zone $binary_remote_addr zone=wa_api_auth:1m rate=12r/m;
+limit_req_zone $binary_remote_addr zone=wa_api:1m      rate=1r/s;
 
 server {
     listen 80;
@@ -69,44 +86,120 @@ server {
     # 444 closes without a response rather than proxying to a blank upstream.
     if ($wa_backend = "") { return 444; }
 
-    # THE JSON API HAS NO PUBLIC ROUTE. Its consumers dial the service directly
-    # over WireGuard at 10.10.0.4:18801, so publishing /api/v1 here would widen
-    # the attack surface of a WhatsApp identity to the whole internet and buy
-    # nothing. `^~` beats the prefix match on `/` without needing a regex.
+    # A throttled API client should be told it is throttled. nginx's default is 503,
+    # which reads as "the gateway is down" and invites exactly the retry storm the
+    # limit exists to prevent.
+    limit_req_status 429;
+
+    # ── PROXY HEADERS LIVE AT SERVER LEVEL, DELIBERATELY ────────────────────────
     #
-    # /openapi.yaml is deliberately NOT blocked: the /docs page is behind the
-    # admin login, but the browser fetches the spec from the ROOT (the API lives
-    # there, unprefixed), so blocking it would render /docs empty. A description
-    # of the API is not access to it.
-    location ^~ /api/v1/ { return 404; }
+    # nginx locations inherit proxy_set_header from server/http but NEVER from a
+    # sibling location, and a location that sets even ONE header discards the whole
+    # inherited set. These used to sit inside `location / {}`; with the API locations
+    # below that would have left every /api/v1 request with no X-Forwarded-For.
+    #
+    # That failure is invisible in nginx and expensive in the app. auth.ClientIP
+    # falls back to RemoteAddr, which is this tunnel (10.10.0.1) for every public
+    # caller alike, and the failed-Basic throttle is keyed on that value — so one
+    # attacker guessing secrets would throttle every API client on the internet at
+    # once. Guarded by nginx_edge_test.go.
+    #
+    # $proxy_add_x_forwarded_for APPENDS to whatever the client sent rather than
+    # trusting it. That only works because the app trusts this hop specifically:
+    # WSM_TRUSTED_PROXIES=10.10.0.0/24 on the VM, and it takes the RIGHTMOST
+    # untrusted entry.
+    proxy_http_version 1.1;
+    proxy_set_header Host               $host;
+    proxy_set_header X-Real-IP          $remote_addr;
+    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Host   $host;
+    proxy_set_header X-Forwarded-Port   $server_port;
+    proxy_set_header X-Forwarded-Proto  https;
+    proxy_set_header X-Forwarded-Server $host;
+    proxy_set_header Upgrade            $http_upgrade;
+    proxy_set_header Connection         $wa_connection_upgrade;
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_buffering off;
+    proxy_request_buffering off;
+
+    # ── THE PUBLIC API IS AN ALLOWLIST ──────────────────────────────────────────
+    #
+    # The JSON API used to have no public route at all. It now publishes exactly the
+    # send-and-read surface an external integration needs — authenticate, send, read
+    # replies, check a number — and NOTHING else. Everything not named below falls to
+    # the catch-all 404 at the end of this block and is never proxied.
+    #
+    # WHAT IS EXCLUDED, AND WHY IT STAYS EXCLUDED:
+    #
+    #   /api/v1/health            takes no authentication at all (routes_api.go
+    #                             registers it without the RequireAPI wrapper) and
+    #                             reports session counts. Monitoring reaches it over
+    #                             WireGuard instead.
+    #   DELETE /sessions/{id}     cannot unlink the device on the waxum backend and
+    #                             burns one of the handset's few linked-device slots
+    #                             per call. See CLAUDE.md.
+    #   /sessions/{id}/calls/*    places real outbound WhatsApp calls.
+    #                             WSM_CALLS_ENABLED=true in production, and a ban
+    #                             lands on a device identity with no second copy
+    #                             anywhere.
+    #   POST /sessions, /webhooks/*, /pause, /resume, /appstate/resync,
+    #   /trust-tokens/*, /stats, /pairing, /gateway/health
+    #                             administration of the gateway, not use of it.
+    #
+    # ORDER IS BEHAVIOUR HERE, NOT FORMATTING. nginx resolves a location as:
+    # exact `=` first, then the longest `^~` prefix (which STOPS the search and skips
+    # regexes entirely), then regexes IN FILE ORDER, then plain prefixes. Two
+    # consequences:
+    #
+    #   * The deny must be `~ ^/api/v1/`, not `^~ /api/v1/` as it once was. A `^~`
+    #     deny outranks every regex below it, so the session-scoped rule could never
+    #     be reached and that route would stay 404 while the config reloaded cleanly.
+    #   * The deny must be LAST. An allow rule written after it is dead code, for the
+    #     same first-match-wins reason.
+    #
+    # nginx_edge_test.go asserts both, plus the published set itself. A route added to
+    # internal/handler/routes_api.go is NOT public until it is added here too.
+    #
+    # None of these blocks may set proxy_set_header — see the server-level note above.
+
+    location = /api/v1/auth/login  { limit_req zone=wa_api_auth burst=5  nodelay; proxy_pass http://$wa_backend; }
+    location = /api/v1/auth/logout { limit_req zone=wa_api      burst=20 nodelay; proxy_pass http://$wa_backend; }
+
+    location = /api/v1/messages       { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
+    location = /api/v1/messages/group { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
+    location = /api/v1/messages/media { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
+    location = /api/v1/inbound        { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
+    location = /api/v1/contacts/check { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
+
+    # The session-scoped equivalents of the three above. A regex because the session
+    # id sits mid-path, and anchored at both ends so it cannot be widened by a suffix
+    # — `/sessions/{id}/calls/tts` must not match this.
+    #
+    # THE QUOTES ARE REQUIRED. nginx's parser sees `{` and `}` as block delimiters
+    # before the regex is ever compiled, so an unquoted repetition quantifier ends
+    # the location early and `nginx -t` fails with a bewildering
+    #   unknown directive "1,64}/(messages|messages/media|contacts/check)$"
+    # that points at the quantifier's own tail. Quoting the whole regex is the fix.
+    location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|messages/media|contacts/check)$" {
+        limit_req zone=wa_api burst=20 nodelay;
+        proxy_pass http://$wa_backend;
+    }
+
+    # Everything else under /api/v1 is not published. MUST stay last.
+    location ~ ^/api/v1/ { return 404; }
+
+    # /openapi.yaml is deliberately NOT blocked and is not covered by the rules above:
+    # the /docs page is behind the admin login, but the browser fetches the spec from
+    # the ROOT (the API lives there, unprefixed), so blocking it would render /docs
+    # empty. A description of the API is not access to it.
 
     location / {
-        proxy_pass http://$wa_backend;
-        proxy_http_version 1.1;
-        # X-Forwarded-For is what the app reads back to recover the real client
-        # address, and $proxy_add_x_forwarded_for APPENDS to whatever the client
-        # sent rather than trusting it. That only works because the app trusts
-        # this hop specifically: WSM_TRUSTED_PROXIES=10.10.0.0/24 on the VM, and
-        # it takes the RIGHTMOST untrusted entry. Without it every login attempt
-        # on the box keys on this proxy's address and one attacker throttles
-        # every user at once.
-        proxy_set_header Host               $host;
-        proxy_set_header X-Real-IP          $remote_addr;
-        proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Host   $host;
-        proxy_set_header X-Forwarded-Port   $server_port;
-        proxy_set_header X-Forwarded-Proto  https;
-        proxy_set_header X-Forwarded-Server $host;
-        proxy_set_header Upgrade            $http_upgrade;
-        proxy_set_header Connection         $wa_connection_upgrade;
         # NOTHING IS STRIPPED. WA_BASE_URL has no path, so the service owns this
         # host's root end to end. A stripping proxy would pass every curl check
         # against the API and STILL break the login POST, because the login page
         # renders its form action from BasePath.
-        proxy_connect_timeout 10s;
-        proxy_read_timeout 300s;
-        proxy_send_timeout 300s;
-        proxy_buffering off;
-        proxy_request_buffering off;
+        proxy_pass http://$wa_backend;
     }
 }
