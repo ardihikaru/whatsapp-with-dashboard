@@ -1383,3 +1383,92 @@ message on the wire. Per the hazard note above, `s.state`, `Live()` and
 `s.sendQ != nil` are independent, nothing but `enqueue` reads `sendQ`, and a
 wedged socket and a nil queue present identically — so "connected" here is
 evidence about the first two only.
+
+## 2026-09-09 — the `connecting`/`socket_alive:false` wedge, root-caused and fixed
+
+Host `rnd-v2-vpn` (10.10.0.4). The wedge the 2026-08-27 and 2026-09-04 entries
+above describe is a race INSIDE waxum, and this run identified it, fixed it,
+and reproduced the trigger against the fixed build.
+
+**The report.** Session `59c9…` (`6285132148259`, push_name `Ardi`) would not
+come back after a Deactivate. Its `/status`, sampled repeatedly over 78
+minutes and never once different:
+
+```
+{"status":"connecting","is_logged_in":true,"socket_alive":false,
+ "paused":false,"phone_number":"6285132148259","push_name":"Ardi",
+ "reachability":null}
+```
+
+`reachability:null` is the field that names it — waxum documents it as null
+"when there is no live client in this process at all". Meanwhile waxum logged
+`Session 59c9…: Connected` on every one of WSM's reconnect attempts, always
+DOUBLED (two lines ~0.3s apart), while WSM logged `auto-reconnect attempt …
+(attempt 1/5)` in a loop. The operator's actions, from WSM's own log:
+
+```
+23:07:24 POST /sessions/59c9…/deactivate -> 200
+23:07:25 POST /sessions/59c9…/activate   -> 200      <- one second later
+23:07:29 POST /sessions/59c9…/activate   -> 200
+23:07:48 POST /sessions/59c9…/activate   -> 200
+```
+
+**Root cause**, read off the fork's source at `7013726`: `disconnect_session`
+returns as soon as it has asked the client to stop, but the bot task is still
+parked in `bot.run().await`. The tail of `connect_client`
+(`src/handlers/sessions.rs`) then ran `runtime.set_client(None)` with no
+ownership check, so the OLD bot's teardown evicted the NEW bot that the
+Activate one second later had just installed. Slot empty, permanently; every
+further `connect` built another bot that connected (the doubled `Connected`
+lines are orphan + newcomer) and was evicted by its predecessor in turn.
+waxum's own reconnect watchdog cannot rescue this: it bails at
+`let Some(client) = runtime.get_client() else { continue }`.
+
+**Recovery**, the documented one, at 00:44 UTC:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.remote-db.yml restart waxum
+→ /status {"status":"logged_in","is_logged_in":true,"socket_alive":true,…}
+```
+
+Stable across 7 polls at 25s intervals; WSM logged `state transition
+session=59c9… from=disconnected to=connected` at 00:45:00. No re-pairing.
+
+**The fix**, built on the host as `ardihikaru/waxum:0.12.2-client-slot-ownership`
+from `7013726` plus a patch: `SessionState::clear_client_if` (`Arc::ptr_eq`)
+so a run-loop teardown only clears the slot it still owns, and a same-owner
+guard at the top of `handle_event` so a superseded bot cannot write another
+bot's session state. `WAXUM_TAG` bumped in the host's `.env` (previous value
+backed up to `.env.bak.20260909012414`).
+
+**Reproduction against the fixed build** — the exact trigger, one cycle then
+three back-to-back:
+
+```
+01:27:43 logged_in/socket_alive:true
+01:27:44 POST /disconnect -> 200 ; +1s POST /connect -> 200
+01:27:56 logged_in socket_alive:true      (stable across 4 polls / 48s)
+
+3x [ POST /disconnect -> 200 ; +1s POST /connect -> 200 ; +4s ]
+01:29:23 logged_in socket_alive:true      (stable across 5 polls / 75s)
+```
+
+waxum now logs exactly ONE `Connected` per connect (01:27:45, 01:28:54,
+01:29:00, 01:29:05) where the old build logged two — the orphan signature is
+gone. Under the old build this same sequence produced the permanent wedge.
+
+**WSM-side change in this repo**, so a future occurrence is not silent:
+`internal/waxum.Status.Reachability` is now a `*string` (a plain `string`
+cannot tell a JSON `null` from a real value — `encoding/json` leaves the field
+untouched on null), and `internal/wa/backend_waxum.go`'s
+`isOrphanedClientWedge` escalates a sustained `is_logged_in && !socket_alive
+&& reachability == null` to `markStalled` with a reason naming the restart.
+`mapWaxumStatus` is unchanged — its `disconnected` verdict was always correct.
+
+**Not verified: that this session can SEND.** As with the 2026-09-04 entry,
+nothing here put a message on the wire; `sendQ` was not exercised.
+
+**Not verified: that the patch survives a `docker compose pull`.** The fixed
+image exists only on this host, built from `~/waxum-slotfix`; the patch has
+NOT been pushed to the `ardihikaru/waxum` fork or to Docker Hub. A rebuild or
+a pull of `0.12.2-uploaded-media` reintroduces the bug.

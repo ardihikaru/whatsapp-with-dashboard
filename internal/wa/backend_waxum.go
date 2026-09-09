@@ -92,6 +92,22 @@ type waxumSessionState struct {
 	// (no lost updates, no torn reads) regardless.
 	loggedOutStreak atomic.Int32
 
+	// wedgeStreak counts CONSECUTIVE applyStatus calls in a row whose poll
+	// matched isOrphanedClientWedge — waxum's session runtime holding no
+	// live client for this session AT ALL (is_logged_in && !socket_alive
+	// && Reachability nil), not merely a socket mid-redial. Mirrors
+	// loggedOutStreak exactly, same reasoning: a single poll is not enough
+	// evidence — the production incident this detects
+	// (isOrphanedClientWedge's doc comment, which is this repo's write-up
+	// of it) is a state waxum's own /status is observed twitchy around,
+	// same as loggedOutHysteresisPolls's doc comment documents for the
+	// logged-out edge — so applyStatus requires
+	// loggedOutHysteresisPolls (reused, not re-derived — see
+	// isOrphanedClientWedge's doc comment) CONSECUTIVE qualifying polls
+	// before escalating to ManagedSession.markStalled. Reset to 0 by any
+	// non-qualifying poll, exactly like loggedOutStreak.
+	wedgeStreak atomic.Int32
+
 	// poke lets the fleet-wide SSE event pump (backend_waxum_events.go)
 	// wake THIS session's statusPump early, without ever writing session
 	// state itself — see backend_waxum_events.go's package doc comment for
@@ -484,6 +500,54 @@ func mapWaxumStatus(st *waxum.Status, paired bool) State {
 	}
 }
 
+// isOrphanedClientWedge reports whether st matches the fingerprint of a
+// production incident root-caused 2026-09-09, INSIDE waxum itself, not in
+// this repo (CLAUDE.md carries the operator-facing version; the mechanism
+// is waxum's `connect_client` tail clearing the session's client slot with
+// no ownership check after its `bot.run()` unwinds, so a superseded bot
+// evicts the live one — fixed by `clear_client_if` in that fork): an
+// operator
+// Deactivate-then-Activate within about a second of each other can leave
+// waxum's OWN session runtime holding no client object at all for this
+// session, permanently — every subsequent /connect builds a new bot that
+// the old bot's still-unwinding run loop then evicts, forever, until the
+// waxum PROCESS (not this session) is restarted.
+//
+// waxum's /status renders that exact condition as:
+//
+//	is_logged_in: true   (credentials cached — mapWaxumStatus's point 2 already
+//	                       reports StateDisconnected for this, correctly, since
+//	                       the credential really is still good)
+//	socket_alive: false  (no working socket — same as point 2 alone)
+//	reachability: null   (waxum's own documented meaning: no live client
+//	                       object exists for this session in this process AT
+//	                       ALL — the decisive addition over point 2's plain
+//	                       is_logged_in && !socket_alive, which is also true
+//	                       of an ordinary, recoverable reconnect where a live
+//	                       client object exists and reports SOME concrete
+//	                       value here instead, e.g. "reconnecting")
+//
+// This must NOT change mapWaxumStatus's own verdict (StateDisconnected stays
+// correct — the session really is disconnected) — it is a SEPARATE signal
+// applyStatus escalates, after sustained evidence (see wedgeStreak's doc
+// comment), into ManagedSession.markStalled, so the operator is told the
+// true remedy (restart the waxum process) instead of being left to believe
+// another Activate might help.
+func isOrphanedClientWedge(st *waxum.Status) bool {
+	return st.IsLoggedIn && !st.SocketAlive && st.Reachability == nil
+}
+
+// wedgeStalledReason is the operator-facing text ManagedSession.markStalled
+// records once isOrphanedClientWedge has been sustained for
+// loggedOutHysteresisPolls consecutive polls (applyStatus). Worded, like
+// every other markStalled reason (see that method's doc comment), for an
+// operator to act on directly: it names the actual remedy (restart the
+// waxum PROCESS) and says plainly that Activate — the one button the
+// dashboard offers — cannot fix this specific condition, unlike the generic
+// reconnect.go stall reason, where retrying repeatedly is at least a
+// plausible (if exhausted) strategy.
+const wedgeStalledReason = "waxum reports this session logged in with a dead socket and no live client for it anywhere in its process (reachability: null) — its session runtime is orphaned, and no amount of Activate/reconnect can revive it; only restarting the waxum PROCESS (not this session) clears it. Activate still resumes automatic retrying if you want to confirm, but it will re-stall if the wedge is still there."
+
 // ensureStatusPump starts statusPump for s exactly once per process — a
 // second Connect (reconnect after a manual disconnect, a duplicate boot
 // reconcile) must not spawn a second poller for the same id.
@@ -670,8 +734,10 @@ func (b *waxumBackend) applyStatus(s *ManagedSession, st *waxum.Status) {
 	paired := !s.jid.IsEmpty()
 	s.mu.Unlock()
 
+	sst := b.sessionState(s.ID)
+
 	mapped := mapWaxumStatus(st, paired)
-	streak := &b.sessionState(s.ID).loggedOutStreak
+	streak := &sst.loggedOutStreak
 	if mapped != StateLoggedOut {
 		streak.Store(0) // any non-qualifying poll resets the evidence — loggedOutHysteresisPolls's doc comment
 	} else if streak.Add(1) < loggedOutHysteresisPolls {
@@ -682,6 +748,45 @@ func (b *waxumBackend) applyStatus(s *ManagedSession, st *waxum.Status) {
 		mapped = StateDisconnected
 	}
 	s.setState(mapped)
+
+	b.applyWedgeDetection(s, st, sst)
+}
+
+// applyWedgeDetection is applyStatus's other hysteresis-gated escalation —
+// see isOrphanedClientWedge and waxumSessionState.wedgeStreak's doc
+// comments for what it detects and why sustained evidence, not one poll, is
+// required. Unlike the StateLoggedOut hysteresis above, this never changes
+// `mapped`/State — the session really is StateDisconnected either way
+// (mapWaxumStatus's point 2 already reports that correctly); it only
+// escalates ManagedSession's SEPARATE stalled flag (session.go), the same
+// flag reconnect.go's own attempt-count stall already uses, just reached
+// via a faster, more specific signal than counting failed reconnect
+// attempts one at a time.
+//
+// Guarded by `!s.isStalled()` rather than calling markStalled on every
+// sustained qualifying poll: markStalled is idempotent (it only re-sets the
+// same two fields and re-logs/re-rings), but re-ringing a warning every
+// poll interval for as long as the wedge persists would spam the session's
+// event ring for no operator benefit. The one case that DOES need
+// markStalled called again — a manual Activate (session.go) clearing
+// stalled while the underlying wedge has NOT actually cleared on waxum's
+// side — is exactly what this guard still allows: Activate flips
+// s.stalled back to false, so the very next qualifying poll (wedgeStreak
+// is already >= loggedOutHysteresisPolls and does not need to
+// re-accumulate — the evidence that mattered was the sustained observation
+// BEFORE Activate, not the button press) sees !s.isStalled() true again
+// and re-stalls with the same reason.
+func (b *waxumBackend) applyWedgeDetection(s *ManagedSession, st *waxum.Status, sst *waxumSessionState) {
+	if !isOrphanedClientWedge(st) {
+		sst.wedgeStreak.Store(0)
+		return
+	}
+	if sst.wedgeStreak.Add(1) < loggedOutHysteresisPolls {
+		return
+	}
+	if !s.isStalled() {
+		s.markStalled(wedgeStalledReason)
+	}
 }
 
 // StartPairing provisions the waxum-side session and starts the pairing

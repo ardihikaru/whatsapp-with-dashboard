@@ -83,6 +83,41 @@ Two things make this expensive to debug:
     (`docker compose … restart waxum` — never `down -v`, the volume is the
     paired device's identity). Recovery needed no re-pairing.
 
+**Root-caused 2026-09-09, and the trigger is Deactivate-then-Activate.** The
+wedge above is a race INSIDE waxum, not a WSM bug and not a WhatsApp one.
+`disconnect_session` asks the client to stop and returns immediately, but the
+bot task is still parked in `bot.run().await`; the tail of `connect_client`
+then ran `runtime.set_client(None)` with NO ownership check. So an Activate
+issued before the old bot finished unwinding installed a NEW bot that the OLD
+bot's teardown promptly evicted — the session was left with no client object
+at all, permanently. Every further `connect` built another bot that connected
+(hence the cheerful `Session …: Connected` logs, often DOUBLED — orphan plus
+newcomer) and was evicted in turn by its predecessor. Fixed in the fork by
+`SessionState::clear_client_if` (`Arc::ptr_eq`) plus a same-owner guard on
+`handle_event`, so a superseded bot can no longer write another bot's session
+state. Two operational consequences worth keeping:
+
+  - **`reachability: null` is the field that names it.** waxum documents it
+    as null "when there is no live client in this process at all", which is
+    what separates this from an ordinary redial (a live client reports
+    `"reconnecting"` there). `is_logged_in && !socket_alive` ALONE is true of
+    both, which is why the 2026-08-27 note above could not tell them apart.
+    WSM now stalls the session on this fingerprint after
+    `loggedOutHysteresisPolls` consecutive polls, with a reason naming the
+    restart — see `isOrphanedClientWedge` in `internal/wa/backend_waxum.go`.
+  - **waxum's own reconnect watchdog cannot rescue it either**, and for a
+    reason that reads as a no-op: its loop bails at
+    `let Some(client) = runtime.get_client() else { continue }`, and the whole
+    defect is that there IS no client. A wedge that empties the slot disarms
+    the very thing built to fix it.
+
+  Observed live 2026-09-08 on session `59c9…` (`6285132148259`): Deactivate
+  23:07:24 UTC, Activate 23:07:25, then 78 minutes of `status:"connecting",
+  is_logged_in:true, socket_alive:false, reachability:null` across every
+  sample while WSM logged `auto-reconnect attempt … (1/5)` over and over.
+  `docker compose -f docker-compose.yml -f docker-compose.remote-db.yml
+  restart waxum` recovered it in under a minute, no re-pairing.
+
 **"Connected" means three different things here, and they can disagree.**
 `s.state` (statusPump's verdict), `Live()` (an atomic fed by the same poll),
 and `s.sendQ != nil` (whether a sender loop exists) are independent. Two of

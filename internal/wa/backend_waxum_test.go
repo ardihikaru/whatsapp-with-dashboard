@@ -1415,6 +1415,184 @@ func TestANonQualifyingPollResetsTheLoggedOutEvidence(t *testing.T) {
 	}
 }
 
+// strp returns a pointer to v — waxum.Status.Reachability is a *string
+// (models.go) specifically so applyStatus/isOrphanedClientWedge can tell
+// "the field was JSON null" (nil) apart from "the field was a real, if
+// unhealthy, value" (a non-nil pointer) — see isOrphanedClientWedge's doc
+// comment. Tests below construct both shapes explicitly.
+func strp(v string) *string { return &v }
+
+// TestSustainedOrphanedClientWedgeMarksTheSessionStalledWithTheWaxumRestartReason
+// is the core regression test for the 2026-09-09 production incident
+// (isOrphanedClientWedge's doc
+// comment): waxum's own session runtime can be left holding NO client
+// object at all for a session, permanently, after a
+// Deactivate-then-Activate landed within about a second of each other —
+// every further /connect just gets evicted by the old bot's still-
+// unwinding run loop. waxum's /status renders that exactly as
+// is_logged_in:true, socket_alive:false, reachability:null. Once that
+// fingerprint has been observed on loggedOutHysteresisPolls CONSECUTIVE
+// polls, the session must be marked Stalled with a reason that names the
+// real remedy (restart the waxum PROCESS), not the generic
+// reconnect.go attempt-count reason — reverting isOrphanedClientWedge (or
+// applyWedgeDetection's call from applyStatus) makes this session sit at
+// Stalled=false forever, since reconnect.go's OWN attempt-count stall never
+// even runs here (nothing in this test calls Backend.Connect through the
+// supervisor).
+func TestSustainedOrphanedClientWedgeMarksTheSessionStalledWithTheWaxumRestartReason(t *testing.T) {
+	b := &waxumBackend{}
+	mgr := newWaxumTestManager(t, b)
+
+	s := testSession(mgr, StateConnected)
+	s.jid = pairedTestJID()
+
+	wedged := &waxum.Status{Status: "connecting", IsLoggedIn: true, SocketAlive: false} // Reachability left nil: the wedge fingerprint
+	for i := 0; i < loggedOutHysteresisPolls; i++ {
+		b.applyStatus(s, wedged)
+	}
+
+	snap := s.Snapshot()
+	if !snap.Stalled {
+		t.Fatalf("Stalled = false after %d consecutive orphaned-client-wedge polls, want true", loggedOutHysteresisPolls)
+	}
+	if snap.StalledReason != wedgeStalledReason {
+		t.Fatalf("StalledReason = %q, want the waxum-restart wedge reason %q", snap.StalledReason, wedgeStalledReason)
+	}
+	// mapWaxumStatus's own verdict must stay untouched: the session really
+	// is disconnected, not logged out — this feature must never repaint
+	// that.
+	if snap.State != StateDisconnected {
+		t.Fatalf("State = %v, want %v (the wedge escalates Stalled, it must never change State)", snap.State, StateDisconnected)
+	}
+}
+
+// TestATransientDisconnectWithAReachabilityValueDoesNotTriggerTheWedgeStall
+// is the negative case isOrphanedClientWedge exists to exclude: an
+// ORDINARY, recoverable disconnect also has is_logged_in && !socket_alive
+// (mapWaxumStatus's point 2), but a live client object still exists and
+// reports a concrete Reachability value (e.g. "reconnecting") — only a nil
+// Reachability means no client object exists at all. Sending this same,
+// non-nil-Reachability status on loggedOutHysteresisPolls consecutive polls
+// (i.e. clearing every doubt that this is just a slow first poll) must
+// never stall the session.
+func TestATransientDisconnectWithAReachabilityValueDoesNotTriggerTheWedgeStall(t *testing.T) {
+	b := &waxumBackend{}
+	mgr := newWaxumTestManager(t, b)
+
+	s := testSession(mgr, StateConnected)
+	s.jid = pairedTestJID()
+
+	reconnecting := &waxum.Status{Status: "connecting", IsLoggedIn: true, SocketAlive: false, Reachability: strp("reconnecting")}
+	for i := 0; i < loggedOutHysteresisPolls+2; i++ {
+		b.applyStatus(s, reconnecting)
+	}
+
+	if snap := s.Snapshot(); snap.Stalled {
+		t.Fatalf("Stalled = true after an ordinary disconnect with a non-nil Reachability, want false — StalledReason = %q", snap.StalledReason)
+	}
+}
+
+// TestAHealthySessionNeverTriggersTheWedgeStall guards the third
+// isOrphanedClientWedge conjunct in isolation: is_logged_in && socket_alive
+// (a fully healthy poll) must never stall the session, regardless of how
+// many consecutive polls report it — socket_alive alone already rules the
+// wedge out.
+func TestAHealthySessionNeverTriggersTheWedgeStall(t *testing.T) {
+	b := &waxumBackend{}
+	mgr := newWaxumTestManager(t, b)
+
+	s := testSession(mgr, StateConnected)
+	s.jid = pairedTestJID()
+
+	healthy := &waxum.Status{Status: "connected", IsLoggedIn: true, SocketAlive: true}
+	for i := 0; i < loggedOutHysteresisPolls+2; i++ {
+		b.applyStatus(s, healthy)
+	}
+
+	if snap := s.Snapshot(); snap.Stalled {
+		t.Fatalf("Stalled = true for a fully healthy session, want false — StalledReason = %q", snap.StalledReason)
+	}
+}
+
+// TestOneOrTwoWedgeQualifyingPollsAloneDoNotStallTheSession proves the
+// hysteresis window is real for the wedge signal too, not just for
+// StateLoggedOut: fewer than loggedOutHysteresisPolls consecutive
+// qualifying polls must never stall the session, even though every one of
+// them individually matches isOrphanedClientWedge.
+func TestOneOrTwoWedgeQualifyingPollsAloneDoNotStallTheSession(t *testing.T) {
+	if loggedOutHysteresisPolls < 2 {
+		t.Fatalf("this test requires loggedOutHysteresisPolls >= 2 to exercise a near-miss streak, got %d", loggedOutHysteresisPolls)
+	}
+	b := &waxumBackend{}
+	mgr := newWaxumTestManager(t, b)
+
+	s := testSession(mgr, StateConnected)
+	s.jid = pairedTestJID()
+
+	wedged := &waxum.Status{Status: "connecting", IsLoggedIn: true, SocketAlive: false}
+	for i := 1; i < loggedOutHysteresisPolls; i++ {
+		b.applyStatus(s, wedged)
+		if snap := s.Snapshot(); snap.Stalled {
+			t.Fatalf("Stalled = true after only %d/%d consecutive qualifying polls, want false (the hysteresis window is not yet full)",
+				i, loggedOutHysteresisPolls)
+		}
+	}
+}
+
+// TestActivateClearsTheWedgeStallButItReturnsOnTheNextPollIfTheWedgePersists
+// is applyWedgeDetection's other documented contract (its own doc comment,
+// and reconnect.go's markStalled/Activate doc comments this mirrors): a
+// manual Activate always clears Stalled — the operator must always be able
+// to retry — but for THIS specific condition retrying genuinely cannot
+// help (isOrphanedClientWedge's doc comment), so if the wedge is still
+// there on the very next poll the session must re-stall with the SAME
+// reason instead of silently resuming an unbounded retry loop. Mirrors
+// TestTheReconnectAttemptCounterSurvivesATransientLoggedOutFlap's shape: a
+// fakeBackend drives the supervisor/Activate (no real network), and a
+// standalone waxumBackend drives applyStatus directly against the same
+// session — applyStatus never touches mgr.backend, only its own
+// sessionState(s.ID) bookkeeping and s itself.
+func TestActivateClearsTheWedgeStallButItReturnsOnTheNextPollIfTheWedgePersists(t *testing.T) {
+	fake := &fakeBackend{name: "fake", connectFn: func(context.Context, *ManagedSession) error { return nil }}
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	mgr := NewManager(ctx, fake, newStubSessions(), newStubMsgs(), nil, fastReconnectConfig())
+
+	s := testSession(mgr, StateDisconnected)
+	s.jid = pairedTestJID()
+	s.active = true
+	registerSession(mgr, s)
+
+	b := &waxumBackend{}
+	wedged := &waxum.Status{Status: "connecting", IsLoggedIn: true, SocketAlive: false}
+	for i := 0; i < loggedOutHysteresisPolls; i++ {
+		b.applyStatus(s, wedged)
+	}
+	if snap := s.Snapshot(); !snap.Stalled || snap.StalledReason != wedgeStalledReason {
+		t.Fatalf("setup: Stalled = %v, StalledReason = %q, want true / the wedge reason before exercising Activate",
+			snap.Stalled, snap.StalledReason)
+	}
+
+	if err := s.Activate(ctx); err != nil {
+		t.Fatalf("Activate on a wedge-stalled session: err = %v, want nil (fakeBackend.connectFn always succeeds)", err)
+	}
+	if snap := s.Snapshot(); snap.Stalled {
+		t.Fatalf("Stalled = true right after Activate, want false — Activate must always let the operator retry")
+	}
+
+	// The wedge itself has NOT actually cleared — no waxum process was
+	// restarted in this test — so the very next poll must re-stall the
+	// session with the same reason, not resume looping silently.
+	b.applyStatus(s, wedged)
+	snap := s.Snapshot()
+	if !snap.Stalled {
+		t.Fatal("session did not re-stall on the next poll after Activate even though the wedge condition still persists")
+	}
+	if snap.StalledReason != wedgeStalledReason {
+		t.Fatalf("StalledReason after re-stall = %q, want the same waxum-restart wedge reason", snap.StalledReason)
+	}
+}
+
 // TestTheReconnectAttemptCounterSurvivesATransientLoggedOutFlap ties the
 // applyStatus hysteresis fix back to reconnect.go's supervisor — the actual
 // harm the production incident caused, not just the state-machine mapping

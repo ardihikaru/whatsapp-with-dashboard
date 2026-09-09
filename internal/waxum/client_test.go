@@ -326,6 +326,50 @@ func TestNotFoundAndConflictAndRateLimitedBecomeTypedErrors(t *testing.T) {
 	})
 }
 
+// TestStatusDecodesANullReachabilityAsNilNotAnEmptyString pins the reason
+// Status.Reachability (models.go) is a *string rather than a plain string:
+// waxum sends a JSON `null` for this field precisely when there is no live
+// client for the session in its process at all (the orphaned-runtime wedge
+// internal/wa/reconnect.go's package doc comment describes) — the one
+// condition internal/wa/backend_waxum.go's isOrphanedClientWedge must be
+// able to tell apart from a live client reporting a real, if unhealthy,
+// value like "reconnecting". encoding/json leaves a plain `string` field
+// completely untouched (not reset to "") when unmarshaling a JSON null, so
+// a bare `string` here could never distinguish "absent" from a waxum build
+// that legitimately sends "" for some unrelated reason — this test would
+// not fail against the old `string` field (both cases decode to ""); it
+// exists to prove the *string field actually round-trips null as nil, not
+// as "".
+func TestStatusDecodesANullReachabilityAsNilNotAnEmptyString(t *testing.T) {
+	client, srv := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"connecting","is_logged_in":true,"socket_alive":false,"paused":false,"phone_number":"6281200000001","push_name":"","reachability":null}`))
+	})
+	defer srv.Close()
+
+	got, err := client.Status(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("Status: err = %v, want nil", err)
+	}
+	if got.Reachability != nil {
+		t.Fatalf("Reachability = %q, want nil (a null reachability must decode to a nil pointer, not an empty string)", *got.Reachability)
+	}
+
+	client2, srv2 := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"status":"connecting","is_logged_in":true,"socket_alive":false,"reachability":"reconnecting"}`))
+	})
+	defer srv2.Close()
+
+	got2, err := client2.Status(context.Background(), "sess-1")
+	if err != nil {
+		t.Fatalf("Status: err = %v, want nil", err)
+	}
+	if got2.Reachability == nil || *got2.Reachability != "reconnecting" {
+		t.Fatalf("Reachability = %v, want a non-nil pointer to %q", got2.Reachability, "reconnecting")
+	}
+}
+
 func TestCallTTSDefaultsTheIndonesianVoiceWhenEmpty(t *testing.T) {
 	var gotBody map[string]any
 	client, _ := newFakeServer(t, func(w http.ResponseWriter, r *http.Request) {

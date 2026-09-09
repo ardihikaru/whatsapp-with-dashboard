@@ -19,14 +19,28 @@ const DefaultTTSVoice = "id-ID-ArdiNeural"
 // Status is GET /sessions/{id}/status, decoded verbatim. Status.Status is
 // one of: disconnected|connecting|waiting_for_qr|waiting_for_pair_code|
 // connected|logged_in (waxum's own enum spelling, snake_case).
+//
+// Reachability is a *string, not a plain string, deliberately: waxum
+// documents this field as null "when there is no live client in this
+// process at all" for the session, which is the decisive signal
+// distinguishing an ordinary, recoverable disconnect (a live client object
+// exists and reports SOME reachability value, e.g. "reconnecting") from the
+// orphaned-runtime wedge internal/wa/backend_waxum.go's
+// isOrphanedClientWedge doc comment describes (no client object exists for this session, in this waxum
+// process, at all). encoding/json leaves a plain string field untouched —
+// not reset to "" — when it decodes a JSON null, so a bare `string` could
+// never tell "absent" apart from a waxum build that happens to send "" for
+// some other reason; a live-response fixture round-tripped in
+// client_test.go pins this. See internal/wa/backend_waxum.go's
+// isOrphanedClientWedge, the one reader of this field.
 type Status struct {
-	Status       string `json:"status"`
-	IsLoggedIn   bool   `json:"is_logged_in"`
-	SocketAlive  bool   `json:"socket_alive"`
-	Paused       bool   `json:"paused"`
-	PhoneNumber  string `json:"phone_number"`
-	PushName     string `json:"push_name"`
-	Reachability string `json:"reachability"`
+	Status       string  `json:"status"`
+	IsLoggedIn   bool    `json:"is_logged_in"`
+	SocketAlive  bool    `json:"socket_alive"`
+	Paused       bool    `json:"paused"`
+	PhoneNumber  string  `json:"phone_number"`
+	PushName     string  `json:"push_name"`
+	Reachability *string `json:"reachability"`
 }
 
 // QRResult is GET /sessions/{id}/qr. QRCodes holds RAW payload strings
