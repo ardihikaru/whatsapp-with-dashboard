@@ -378,11 +378,27 @@ nothing in this app's own logs, nothing in `wa_messages` — check the edge's
 repo.** Since 2026-09-04 `https://wa.mfardiansyah.id` proxies a fixed set of
 `/api/v1` routes — auth login/logout, `/messages{,/group,/media}`, `/inbound`,
 `/contacts/check`, and the `/sessions/{id}/` equivalents of the last three —
-and answers 404 for everything else, `/api/v1/health` included. Adding a route
-to `routes_api.go` therefore does **nothing** publicly: the live file is
-`/etc/nginx/conf.d/wa.conf` on `ssh clino` (103.127.134.25, NOT `rnd-v2-vpn`,
-which has no nginx at all), mirrored in `docs/deploy-nginx-wa.conf.example` and
-asserted by `nginx_edge_test.go`. Three ways this bites:
+and answers 404 for everything else. Since 2026-09-10 that set also includes
+`GET /api/v1/sessions` and `GET /api/v1/sessions/{id}` (read-only session
+views) and `GET /api/v1/health`, which — unlike everything else on this list —
+takes **no credential at all**: `routes_api.go` registers it without
+`RequireAPI`, so it is now readable by the entire internet, reporting session
+counts and the backend's identity. Adding a route to `routes_api.go` therefore
+does **nothing** publicly: the live file is `/etc/nginx/conf.d/wa.conf` on
+`ssh clino` (103.127.134.25, NOT `rnd-v2-vpn`, which has no nginx at all),
+mirrored in `docs/deploy-nginx-wa.conf.example` and asserted by
+`nginx_edge_test.go`. Four ways this bites:
+
+  - **nginx matches a location by PATH, not method, so a published path is not
+    a published method.** `/api/v1/sessions` and `/api/v1/sessions/{id}` are
+    published GET/HEAD only — `POST /sessions` (create) and
+    `DELETE /sessions/{id}` (cannot unlink the device on waxum, burns a
+    linked-device slot per call) share those paths and are denied at the edge
+    by a `$request_method` guard on the same location block, not by being on a
+    different path. Widening a read route without checking for a write sibling
+    on the same path is exactly the mistake this guard exists to catch —
+    `TestTheEdgeGatesThePublishedSessionReadRoutesToSafeMethodsOnly` fails if
+    the guard is ever dropped.
 
   - **`^~` outranks regex, so a `^~ /api/v1/` deny silently kills every regex
     allow rule below it** — nginx resolves exact `=`, then the longest `^~`

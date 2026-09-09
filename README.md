@@ -270,13 +270,22 @@ with `WSM_TRUSTED_PROXIES` naming the address nginx connects from.
 **The JSON API is published as an allowlist, not wholesale.** The production edge
 proxies exactly the send-and-read surface — `/api/v1/auth/login` and `logout`,
 `/api/v1/messages{,/group,/media}`, `/api/v1/inbound`, `/api/v1/contacts/check`,
-and the `/api/v1/sessions/{id}/` equivalents of the last three — and answers 404
-for everything else under `/api/v1`, including the unauthenticated
-`/api/v1/health`, session create/delete, `/calls/*` and webhook administration.
-Adding a route to `internal/handler/routes_api.go` does **not** make it public;
-the edge has to be edited too. The full config, with the reasoning for each
-exclusion and for the location ordering, is `docs/deploy-nginx-wa.conf.example`,
-and `nginx_edge_test.go` asserts the shape of it.
+the `/api/v1/sessions/{id}/` equivalents of the last three, the read-only
+`/api/v1/sessions` and `/api/v1/sessions/{id}`, and the unauthenticated
+`/api/v1/health` — and answers 404 for everything else under `/api/v1`,
+including session create/delete, `/calls/*` and webhook administration. nginx
+matches a location by **path**, not method, so publishing the two session
+paths above does not also publish `POST /sessions` or `DELETE /sessions/{id}`
+(which cannot unlink the device on waxum and burns a linked-device slot per
+call): each of those write methods is denied at the edge by its own
+`$request_method` guard on the same location, not by the path being absent.
+`/api/v1/health` has no credential at all — `routes_api.go` registers it
+without `RequireAPI` — so publishing it makes session counts and the backend's
+identity readable by anyone. Adding a route to `internal/handler/routes_api.go`
+does **not** make it public; the edge has to be edited too. The full config,
+with the reasoning for each exclusion and for the location ordering, is
+`docs/deploy-nginx-wa.conf.example`, and `nginx_edge_test.go` asserts the shape
+of it.
 
 Note that the proxy headers above belong at **server** level, not inside
 `location /`. A location inherits them from the server but never from a sibling

@@ -157,10 +157,17 @@ func TestTheEdgeDeniesEveryAPIRouteItDoesNotExplicitlyPublish(t *testing.T) {
 //
 // What is deliberately absent matters as much as what is present:
 //
-//   - /api/v1/health takes no authentication at all (routes_api.go registers it
-//     without the RequireAPI wrapper) and reports session counts.
-//   - DELETE /api/v1/sessions/{id} cannot unlink the device on the waxum
-//     backend and burns one of the handset's few linked-device slots per call.
+//   - GET /api/v1/sessions and GET /api/v1/sessions/{id} ARE published (below);
+//     GET /api/v1/health is too, and unauthenticated by design (routes_api.go
+//     registers it without the RequireAPI wrapper) — it reports session counts to
+//     anyone who asks. See TestTheEdgeGatesThePublishedSessionReadRoutesToSafeMethodsOnly
+//     for why the two session paths do not also publish every other method.
+//   - DELETE /api/v1/sessions/{id} shares ITS PATH with the now-published detail
+//     view above, so it reads as published in a bare path scan. It is not: the
+//     path is published GET/HEAD only, and DELETE is denied at the edge by the
+//     $request_method gate on that location — it cannot unlink the device on the
+//     waxum backend and burns one of the handset's few linked-device slots per
+//     call.
 //   - /calls/* places real outbound WhatsApp calls; WSM_CALLS_ENABLED is true in
 //     production, and a ban lands on an identity that has no second copy.
 func TestTheEdgePublishesOnlyTheSendAndInboundAPIRoutes(t *testing.T) {
@@ -176,6 +183,13 @@ func TestTheEdgePublishesOnlyTheSendAndInboundAPIRoutes(t *testing.T) {
 		// of a block, so the repetition quantifier would end the location early
 		// and `nginx -t` fails. Verified against nginx 1.18 on the live edge.
 		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|messages/media|contacts/check)$"`: true,
+		// Read-only session views, published 2026-09-10. Both are method-gated to
+		// GET/HEAD only (TestTheEdgeGatesThePublishedSessionReadRoutesToSafeMethodsOnly);
+		// the bare presence of the path here does not mean POST/DELETE are public too.
+		"= /api/v1/sessions":                         true,
+		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}$"`: true,
+		// Unauthenticated by design — see the doc comment above.
+		"= /api/v1/health": true,
 	}
 
 	got := map[string]bool{}
@@ -201,8 +215,11 @@ func TestTheEdgePublishesOnlyTheSendAndInboundAPIRoutes(t *testing.T) {
 	}
 
 	// Belt and braces: these must never appear in ANY published matcher, whatever
-	// shape a future edit gives it.
-	for _, forbidden := range []string{"/api/v1/health", "/api/v1/stats", "calls", "webhooks", "pairing"} {
+	// shape a future edit gives it. "/api/v1/health" is deliberately NOT in this
+	// list any more: it was published 2026-09-10 for uptime probing from outside
+	// the WireGuard tunnel (see the doc comment above), so its presence here would
+	// make this test fail against the config it is meant to be checking.
+	for _, forbidden := range []string{"/api/v1/stats", "calls", "webhooks", "pairing"} {
 		for match := range got {
 			if strings.Contains(match, forbidden) {
 				t.Errorf("`location %s` in %s publishes %q, which must stay private",
@@ -301,8 +318,94 @@ func TestTheEdgeRateLimitsTheAPIWithWaPrefixedZones(t *testing.T) {
 			"the login endpoint is a bcrypt comparison exposed to the internet", edgeConf)
 	}
 
+	// /api/v1/health is unauthenticated, so it must NOT share wa_api's budget with
+	// authenticated message sends — an anonymous scraper could otherwise spend the
+	// same allowance. Mirrors how = /api/v1/auth/login above is pinned to
+	// wa_api_auth rather than the general zone.
+	var health *edgeLocation
+	for _, loc := range apiLocations(t, src) {
+		if loc.match == "= /api/v1/health" {
+			l := loc
+			health = &l
+		}
+	}
+	if health == nil {
+		t.Fatalf("%s no longer publishes = /api/v1/health", edgeConf)
+	}
+	if !strings.Contains(health.body, "limit_req zone=wa_health") {
+		t.Errorf("the published `= /api/v1/health` in %s is not behind its own wa_health "+
+			"zone; an anonymous caller could then spend the same budget authenticated "+
+			"message sends draw on", edgeConf)
+	}
+	if strings.Contains(health.body, "limit_req zone=wa_api ") {
+		t.Errorf("the published `= /api/v1/health` in %s is rate-limited by wa_api, not "+
+			"its own wa_health zone; an anonymous caller could spend the same budget "+
+			"authenticated message sends draw on", edgeConf)
+	}
+
 	if !strings.Contains(src, "limit_req_status 429") {
 		t.Errorf("%s does not set limit_req_status 429; nginx's default is 503, which "+
 			"tells a throttled API client to retry as though the service were down", edgeConf)
+	}
+}
+
+// GET /api/v1/sessions, GET /api/v1/sessions/{id} and GET /api/v1/health are
+// published as of 2026-09-10 — but nginx matches a location by PATH, not
+// method, so publishing those paths bare would ALSO publish POST
+// /api/v1/sessions (creates a session) and DELETE /api/v1/sessions/{id}
+// (cannot unlink the device on the waxum backend and burns one of the
+// handset's few linked-device slots per call — see CLAUDE.md). Each of the
+// three locations must therefore answer everything except GET/HEAD with a
+// bare 404 before it ever reaches proxy_pass, or a future edit that drops the
+// gate republishes session creation and deletion to the whole internet with no
+// signal beyond a clean `nginx -t`.
+//
+// The condition regex asserted here must never contain a brace: edgeLocations
+// (see its doc comment) finds a location body's end by counting `{`/`}` per
+// line, so a guard written with a quantifier (e.g. `{1,2}`) would silently
+// break that scan. `^(GET|HEAD)$` has none.
+//
+// The matcher below scans up to the FIRST `{` rather than the first `)`: the
+// guarded condition is `$request_method !~ ^(GET|HEAD)$`, which itself
+// contains a `)` (closing the `(GET|HEAD)` group) before the `)` that closes
+// the `if`. A naive `[^)]*` stops at that inner paren and never matches at
+// all — caught by running this test against the real generated block before
+// trusting it.
+func TestTheEdgeGatesThePublishedSessionReadRoutesToSafeMethodsOnly(t *testing.T) {
+	src := edgeSource(t)
+
+	gate := regexp.MustCompile(`if\s*\(\s*\$request_method\s*!~[^{]*\)\s*\{\s*return\s+404`)
+
+	wantGated := map[string]string{
+		"= /api/v1/sessions":                         "wa_api ",
+		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}$"`: "wa_api ",
+		"= /api/v1/health":                           "wa_health",
+	}
+
+	found := map[string]bool{}
+	for _, loc := range apiLocations(t, src) {
+		zone, ok := wantGated[loc.match]
+		if !ok {
+			continue
+		}
+		found[loc.match] = true
+		if !gate.MatchString(loc.body) {
+			t.Errorf("`location %s` in %s has no $request_method guard returning 404; "+
+				"without it, publishing this READ path also publishes DELETE "+
+				"/api/v1/sessions/{id} (cannot unlink the device on the waxum backend, "+
+				"burns one of the handset's few linked-device slots per call) or POST "+
+				"/api/v1/sessions (creates a session) to every caller on the internet",
+				loc.match, edgeConf)
+		}
+		if !strings.Contains(loc.body, "limit_req zone="+zone) {
+			t.Errorf("`location %s` in %s is not rate-limited by zone=%s as expected",
+				loc.match, edgeConf, zone)
+		}
+	}
+	for match := range wantGated {
+		if !found[match] {
+			t.Errorf("%s no longer publishes `location %s` — expected it gated to "+
+				"GET/HEAD, not absent", edgeConf, match)
+		}
 	}
 }

@@ -28,25 +28,43 @@ import "net/http"
 // (docs/deploy-nginx-wa.conf.example, live as /etc/nginx/conf.d/wa.conf on the
 // public box) answers 404 for every /api/v1 path except an explicit allowlist,
 // and a route added below stays private until that file is edited and nginx
-// reloaded. Published as of 2026-09-04:
+// reloaded. Published as of 2026-09-10:
 //
 //	POST /api/v1/auth/login, POST /api/v1/auth/logout
 //	POST /api/v1/messages, /messages/group, /messages/media
 //	GET  /api/v1/inbound
 //	POST /api/v1/contacts/check
 //	     /api/v1/sessions/{id}/messages, /messages/media, /contacts/check
+//	GET  /api/v1/sessions, /api/v1/sessions/{id}   read-only session views.
+//	GET  /api/v1/health                            no credential at all — see below.
 //
-// Everything else is deliberately unpublished, and three of them are worth
-// naming because the reason is not obvious from the handler:
+// nginx matches a location by PATH, not method, so a published PATH is not the
+// same thing as a published METHOD. Two routes below share a path with one of
+// the reads just published, and stay unreachable at the edge only because their
+// location carries its own $request_method gate, not because the path is
+// absent:
 //
-//	GET /api/v1/health        the ONLY route below with no RequireAPI wrapper.
-//	                          It answers unauthenticated and reports session
-//	                          counts, so it must not be public.
-//	DELETE /sessions/{id}     cannot unlink the device on the waxum backend and
-//	                          burns a linked-device slot per call (CLAUDE.md).
+//	POST /sessions           path published (GET/HEAD only, the list above);
+//	                          this method 404s at the edge. Creating a session
+//	                          is gateway administration, not use of it.
+//	DELETE /sessions/{id}    path published (GET/HEAD only, the detail view
+//	                          above); this method 404s at the edge. It cannot
+//	                          unlink the device on the waxum backend and burns
+//	                          a linked-device slot per call (CLAUDE.md).
+//
+// Everything else is deliberately unpublished, and one is worth naming because
+// the reason is not obvious from the handler:
+//
 //	/sessions/{id}/calls/*    places real outbound calls; WSM_CALLS_ENABLED is
 //	                          true in production and a ban lands on a device
 //	                          identity with no second copy anywhere.
+//
+// GET /api/v1/health is the ONLY route below with no RequireAPI wrapper — it
+// answers unauthenticated and reports session counts, backend identity and
+// reachability. It is published anyway (deliberate choice, for uptime probing
+// from outside the WireGuard tunnel), gated to GET/HEAD, and rate-limited by
+// its own tighter zone precisely because there is no credential to protect it
+// with — see docs/deploy-nginx-wa.conf.example's wa_health zone.
 //
 // Before Agustus 2026 a bare Host(`wsm.$DOMAIN`) router exposed the whole
 // service, JSON API included, to the internet — arguably a bug rather than a

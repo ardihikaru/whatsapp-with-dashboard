@@ -44,6 +44,11 @@ map $host $wa_backend {
 limit_req_zone $binary_remote_addr zone=wa_api_auth:1m rate=12r/m;
 limit_req_zone $binary_remote_addr zone=wa_api:1m      rate=1r/s;
 
+# /api/v1/health is the only route the app serves with no authentication at all,
+# so it gets its own budget: an anonymous scraper must not be able to spend the
+# allowance that authenticated message sends draw on.
+limit_req_zone $binary_remote_addr zone=wa_health:1m rate=1r/s;
+
 server {
     listen 80;
     listen [::]:80;
@@ -131,22 +136,32 @@ server {
     # replies, check a number — and NOTHING else. Everything not named below falls to
     # the catch-all 404 at the end of this block and is never proxied.
     #
-    # WHAT IS EXCLUDED, AND WHY IT STAYS EXCLUDED:
+    # WHAT IS EXCLUDED, AND WHY IT STAYS EXCLUDED. Since 2026-09-10 the session
+    # list, the session detail view and /api/v1/health are all published (see the
+    # three blocks below, after the session-scoped messages regex) — but nginx
+    # matches a location by PATH, not method, so publishing those paths bare would
+    # also publish every OTHER method served on them. That is why each of those
+    # three carries its own $request_method gate rather than appearing in this
+    # list at all:
     #
-    #   /api/v1/health            takes no authentication at all (routes_api.go
-    #                             registers it without the RequireAPI wrapper) and
-    #                             reports session counts. Monitoring reaches it over
-    #                             WireGuard instead.
-    #   DELETE /sessions/{id}     cannot unlink the device on the waxum backend and
+    #   POST /sessions           creates a session — gateway administration, not
+    #                             use of it. The PATH is published (GET/HEAD only);
+    #                             this METHOD is denied at the edge, not the path.
+    #   DELETE /sessions/{id}    cannot unlink the device on the waxum backend and
     #                             burns one of the handset's few linked-device slots
-    #                             per call. See CLAUDE.md.
+    #                             per call (CLAUDE.md). The PATH is published
+    #                             (GET/HEAD only); this METHOD is denied at the
+    #                             edge, not the path.
     #   /sessions/{id}/calls/*    places real outbound WhatsApp calls.
     #                             WSM_CALLS_ENABLED=true in production, and a ban
     #                             lands on a device identity with no second copy
-    #                             anywhere.
-    #   POST /sessions, /webhooks/*, /pause, /resume, /appstate/resync,
-    #   /trust-tokens/*, /stats, /pairing, /gateway/health
+    #                             anywhere. Fully unpublished — a different path
+    #                             from the detail view above it, unaffected by the
+    #                             method gate.
+    #   /webhooks/*, /pause, /resume, /appstate/resync, /trust-tokens/*, /stats,
+    #   /pairing, /gateway/health
     #                             administration of the gateway, not use of it.
+    #                             Fully unpublished.
     #
     # ORDER IS BEHAVIOUR HERE, NOT FORMATTING. nginx resolves a location as:
     # exact `=` first, then the longest `^~` prefix (which STOPS the search and skips
@@ -184,6 +199,75 @@ server {
     # that points at the quantifier's own tail. Quoting the whole regex is the fix.
     location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|messages/media|contacts/check)$" {
         limit_req zone=wa_api burst=20 nodelay;
+        proxy_pass http://$wa_backend;
+    }
+
+    # Read-only session views: the list and the detail view, and nothing else on
+    # those two paths. nginx matches a location by PATH, not method, so publishing
+    # them bare would also publish POST /api/v1/sessions (creates a session — that
+    # is gateway administration, not use of it) and DELETE /api/v1/sessions/{id},
+    # which cannot unlink the device on the waxum backend and burns one of the
+    # handset's few linked-device slots per call. Hence the $request_method gate on
+    # both blocks below (and on /api/v1/health further down); `if` with a bare
+    # `return` is one of the two uses nginx documents as safe, and this file
+    # already relies on it at the $wa_backend guard above.
+    #
+    # Not `limit_except GET HEAD { deny all; }`: that answers 403, not 404, and
+    # `return` is not permitted inside limit_except at all — nginx -t rejects it.
+    # Getting to 404 from there would need a server-level
+    # `error_page 403 =404 @named`, recolouring every nginx-generated 403 on this
+    # vhost, not just these three blocks. The one-line `if` stays local to each
+    # block and fails closed.
+    #
+    # The gate runs in nginx's rewrite phase, BEFORE preaccess (where limit_req
+    # runs) and BEFORE content (where proxy_pass runs) — a gated POST/DELETE is
+    # answered right here and never reaches the upstream, so it draws NO
+    # wa_api/wa_health budget at all. That is fine: the response is a static 404
+    # with no I/O behind it, nothing worth throttling.
+    #
+    # HEAD is allowed on purpose, not just tolerated: Go 1.22's ServeMux matches
+    # HEAD against a GET pattern, so `HEAD /api/v1/sessions` works end to end and
+    # gives a zero-body liveness probe. `!~` is case-sensitive, so lowercase `get`
+    # and `OPTIONS` both 404 — fails closed, and this API has no CORS story to
+    # preserve anyway.
+    #
+    # The condition regex must never contain a brace: nginx_edge_test.go's scanner
+    # counts `{`/`}` per line to find a location body's end, and `^(GET|HEAD)$` has
+    # none, so it is safe. A future gate written with a quantifier (e.g. `{1,2}`)
+    # would silently break that parser. Also note nginx's own lexer strips a
+    # leading `(` off the if's first argument and a trailing `)` off its last, so
+    # the `)` must stay glued to the `$` in `^(GET|HEAD)$)`.
+    location = /api/v1/sessions {
+        if ($request_method !~ ^(GET|HEAD)$) { return 404; }
+        limit_req zone=wa_api burst=20 nodelay;
+        proxy_pass http://$wa_backend;
+    }
+
+    # The detail view. Anchored at both ends so it cannot be widened by a suffix —
+    # `/sessions/{id}/calls/tts` and `/sessions/{id}/pairing` must not match this.
+    # Quoted for the same parser reason as the messages regex above.
+    #
+    # nginx matches the NORMALIZED URI (percent-decoded, `..` resolved, duplicate
+    # slashes collapsed, query string excluded), so `/sessions/abc%2Fcalls%2Ftts`
+    # decodes before matching and falls through to the deny below — an encoded
+    # slash cannot smuggle a suffix past the `$` anchor. A bare trailing slash
+    # (`/sessions/`) also 404s here; that is not a regression, the app's own
+    # `{id}` wildcard requires a non-empty segment too.
+    location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}$" {
+        if ($request_method !~ ^(GET|HEAD)$) { return 404; }
+        limit_req zone=wa_api burst=20 nodelay;
+        proxy_pass http://$wa_backend;
+    }
+
+    # Unauthenticated by design (routes_api.go registers it without RequireAPI).
+    # Published for uptime probing from outside the WireGuard tunnel; it reports
+    # session counts and the backend's identity to anyone who asks, which is the
+    # accepted cost. Its own zone, not wa_api — see the note beside the zones.
+    # Method-gated like the two blocks above, for uniformity: nothing else is
+    # served on this path today, but the pattern should stay consistent.
+    location = /api/v1/health {
+        if ($request_method !~ ^(GET|HEAD)$) { return 404; }
+        limit_req zone=wa_health burst=5 nodelay;
         proxy_pass http://$wa_backend;
     }
 

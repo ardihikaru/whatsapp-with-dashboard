@@ -260,6 +260,11 @@ Notes:
 - **The public readiness probe cannot be `/api/v1/health`**: the edge returns
   404 for `/api/v1/*` by design. `WSM_E2E_NO_SERVER=1` skips Playwright's
   `webServer` block so an already-deployed target can be tested directly.
+  (Amended 2026-09-10: `/api/v1/health` is now deliberately published,
+  unauthenticated, for exactly this purpose — see
+  `docs/deploy-nginx-wa.conf.example`'s `wa_health` zone. This note described
+  the config as it stood on 2026-08-22 and no longer describes the live edge;
+  left in place as the record of what was true then.)
 
 ## 2026-08-23 host migration 10.10.0.2 → 10.10.0.4
 
@@ -1631,3 +1636,110 @@ Notes:
 **Not verified:** an actual Self Convo run in production — no trigger was
 pressed. The runner is started and idle; `/self-convo` now renders without
 the disabled notice for a logged-in operator (not screenshotted here).
+
+## 2026-09-10 — session reads and the health probe published at the edge
+
+`GET /api/v1/sessions` answered `404` from the public edge, so listing sessions
+meant dialling `10.10.0.4:18801` over WireGuard. Published today, together with
+`GET /api/v1/sessions/{id}` and `GET /api/v1/health`, so an external integration
+can discover a session id and then send with it over the public name alone.
+
+**The send half was already public and needed no change.** Probed before
+touching anything, unauthenticated:
+
+```
+GET /api/v1/sessions/000…000/messages   -> 401 application/json {"error":"unauthorized"}
+GET /api/v1/messages                    -> 405 Method Not Allowed
+GET /api/v1/sessions                    -> 404 text/html  (nginx)
+GET /api/v1/health                      -> 404 text/html  (nginx)
+```
+
+The session-scoped regex is method-agnostic, so `POST /sessions/{id}/messages`
+had been reachable since 2026-09-04; only the listing was missing.
+
+**Writes share the published paths and are held back by method, not by path.**
+nginx resolves a location by path alone, so `location = /api/v1/sessions` would
+have published `POST` (create) and the detail regex would have published
+`DELETE` — which burns a linked-device slot and cannot unlink on waxum. Each new
+block therefore opens with
+`if ($request_method !~ ^(GET|HEAD)$) { return 404; }`. That runs in nginx's
+rewrite phase, before `limit_req` and before `proxy_pass`, so a gated write is
+answered by nginx, never proxied, and draws no rate-limit budget.
+`limit_except` was rejected: it yields 403, not 404, and `return` is not
+permitted inside it.
+
+`/api/v1/health` is the one route registered without `RequireAPI`, so it now
+answers the entire internet with session counts and the backend's identity. It
+was published deliberately, for uptime probing from outside the tunnel, and put
+behind its own `wa_health` zone so an anonymous scraper cannot spend the budget
+authenticated sends draw on.
+
+### Deploy
+
+Host `clino` (103.127.134.25), nginx 1.18.0. The live file and the repo mirror
+were byte-identical before the change (`358082ac453c73885c5c910b0fbadd9f`, 11160
+bytes), so the mirror was a safe editing base.
+
+```
+sudo cp -a /etc/nginx/conf.d/wa.conf /etc/nginx/conf.d/wa.conf.bak.20260910005405
+   backup md5 358082ac453c73885c5c910b0fbadd9f  (equals the pre-change live file)
+installed     md5 22a7afb4fdee5ac8d8b9fe0423d52898  (equals the repo mirror)
+sudo nginx -t   -> syntax is ok, test is successful
+sudo systemctl reload nginx  -> active, RELOADED
+```
+
+### Published — reached the app (JSON, not nginx HTML)
+
+```
+GET  /api/v1/health                   (no credential)  -> 200 application/json
+       {"backend":{"name":"waxum","reachable":true},"connected":2,"sessions":2,"status":"ok"}
+GET  /api/v1/sessions                 (Basic)          -> 200 application/json  2 sessions, both connected
+GET  /api/v1/sessions/{id}            (Basic)          -> 200 application/json  state=connected
+HEAD /api/v1/sessions                 (Basic)          -> 200
+GET  /api/v1/sessions/000…000         (Basic)          -> 404 application/json {"error":"session not found"}
+GET  /api/v1/sessions                 (no credential)  -> 401 application/json {"error":"unauthorized"}
+```
+
+The `{"error":"session not found"}` line is the strongest single proof the
+detail regex is published: only the app can produce that body.
+
+### Stopped at the edge (nginx HTML — never proxied)
+
+```
+POST   /api/v1/sessions                            -> 404 text/html
+DELETE /api/v1/sessions/000…000                    -> 404 text/html
+PUT    /api/v1/sessions/000…000                    -> 404 text/html
+GET    /api/v1/stats                               -> 404 text/html
+GET    /api/v1/sessions/000…000/pairing            -> 404 text/html
+GET    /api/v1/sessions/000…000/calls/tts          -> 404 text/html
+GET    /api/v1/gateway/health                      -> 404 text/html
+```
+
+Every write probe was sent unauthenticated and against an all-zero session id,
+so no outcome could have reached a real session even had the gate been absent.
+
+Secret handling: the `naufal` credential was read programmatically from
+`~/.config/wsm/naufal.json` into a `curl -K` file in a scratch dir, `chmod 600`,
+deleted after the run, and never echoed.
+
+### Repo side
+
+`TestTheEdgeGatesThePublishedSessionReadRoutesToSafeMethodsOnly` is new.
+Mutation-tested rather than merely observed green — with the gate line deleted
+from the detail block it fails naming DELETE and the linked-device slot, and
+with `/api/v1/health` moved onto `wa_api` the rate-limit test fails naming the
+shared budget. The config was restored byte-identical after each mutation.
+`go vet ./...` and `go test ./...` green, 0 packages failing.
+
+**Not verified.** No message was sent through the public route in this run.
+The `wa_health` vs `wa_api` budget separation was reasoned from nginx's phase
+order and asserted in the test, but not measured live — no 429 was provoked.
+The `1r/s` read throttle was not measured either, and only one source IP was
+used throughout.
+
+**Rollback**, if the reads or the anonymous health probe need to be withdrawn:
+
+```
+sudo cp /etc/nginx/conf.d/wa.conf.bak.20260910005405 /etc/nginx/conf.d/wa.conf
+sudo nginx -t && sudo systemctl reload nginx
+```
