@@ -1598,3 +1598,36 @@ Notes:
 off), and `wa-phkg` — unreachable from the deploying laptop at this time
 (`No route to host`; it needs the PHKG LAN or the FortiClient VPN), and its
 deploy path is an image bundle, not `git pull`.
+
+### Same day — `WSM_SELF_CONVO_ENABLED=true` switched on in production
+
+Operator's decision, same host and stack. `.env` was backed up to
+`.env.bak.20260909-173835` (mode 600) and the flag appended with `printf`;
+no other value was read or printed.
+
+| Step | Result |
+|---|---|
+| `grep -c '^WSM_SELF_CONVO_ENABLED=true$' .env` | `1` |
+| `docker compose … up -d --no-build app` | `app-1 Started` — **and `waxum-1 Started`**, see note |
+| App boot log | `self-convo runner started`, `listening on http://localhost:8800` |
+| Health right after | `200`, `connected:0, sessions:2` (waxum had just restarted) |
+| Health at 17:39:23 (24 s later) | `200`, `connected:1, sessions:2` |
+| App log 17:39:14 | `wa: state transition session=59c9… from=disconnected to=connected` |
+
+Notes:
+- **`up -d app` recreated `waxum` too.** Every service carries
+  `env_file: [.env]`, so an `.env` change makes compose recreate waxum as well
+  as `app` (and `app` depends on it). That is a waxum PROCESS restart — the
+  documented, identity-preserving recovery, never `down -v` — but it does drop
+  every session for the duration of the reconnect. The paired session came
+  back on its own within 25 s; WSM's own `statusPump` verdict (the state
+  transition line above), not waxum's `Connected` log, is the evidence.
+  Next time, prefer `docker compose … up -d --no-deps app` to leave waxum
+  alone when only the app's env changed.
+- The second session (`sessions:2`, `connected:1`) was disconnected before
+  this deploy as well (health showed `connected:1` at 17:20, pre-flag); this
+  change did not alter it.
+
+**Not verified:** an actual Self Convo run in production — no trigger was
+pressed. The runner is started and idle; `/self-convo` now renders without
+the disabled notice for a logged-in operator (not screenshotted here).
