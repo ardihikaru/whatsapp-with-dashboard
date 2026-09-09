@@ -1565,3 +1565,36 @@ session, so the plan's own Verification steps 1-4 (a live trigger, `/logs`
 showing `category=self_convo`, a mid-run cancel, an app restart mid-run) were
 not exercised here and need a dev box with two paired sessions per the plan's
 own instructions, not this e2e box.
+
+## 2026-09-09 — Self Convo shipped to production (`rnd-v2-vpn`)
+
+Host `rnd-v2-vpn` (10.10.0.4), stack `whatsapp-with-dashboard` (base +
+`docker-compose.remote-db.yml`). Commit `88f29e8`. No secret was read, echoed
+or written into this file; `.env` was never opened.
+
+| Step | Result |
+|---|---|
+| `git pull --ff-only` | `d0ab16e` → `88f29e8` |
+| `--profile migrate build migrate` (fresh, per the 2026-08-31 stale-image trap) | `migrate Built` |
+| `migrate status` before | `0001`–`0006` applied, `Pending -- 0007_self_convo.sql` |
+| `migrate up` on the shared production MySQL (`10.10.0.4:5306`) | `OK 0007_self_convo.sql (78.21ms)`, `successfully migrated database to version: 7` |
+| `make up REMOTE_DB=1` | `app Built`; `app-1 Recreated/Started`; `waxum-1 Running` (not restarted) |
+| App boot log | `minio: connected …`, `self-convo: disabled (set WSM_SELF_CONVO_ENABLED=true to enable it)`, `listening on http://localhost:8800` |
+| `GET http://10.10.0.4:18801/api/v1/health` | `200` `{"backend":{"name":"waxum","reachable":true},"connected":1,"sessions":2,"status":"ok"}` |
+| `GET http://10.10.0.4:18801/self-convo` unauthenticated | `303 → /login` (page is behind `RequirePage`) |
+| `GET https://wa.mfardiansyah.id/login` (edge) | `200` |
+
+Notes:
+- The app's published port binds `10.10.0.4:18801`, not loopback — a
+  `curl 127.0.0.1:18801` answers connection refused and proves nothing.
+  `docker port` names the real address.
+- `WSM_SELF_CONVO_ENABLED` is NOT set in production `.env`, so the feature is
+  deployed but off: the pages render with the disabled notice and the runner
+  is never started. Enabling it is a deliberate, separate step.
+- The waxum container was left running (the paired identity lives in its
+  volume; `make up` only recreated `app`).
+
+**Not verified:** a real trigger between two paired sessions (the flag is
+off), and `wa-phkg` — unreachable from the deploying laptop at this time
+(`No route to host`; it needs the PHKG LAN or the FortiClient VPN), and its
+deploy path is an image bundle, not `git pull`.
