@@ -78,9 +78,14 @@ func (h *handlers) GetLogRows(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// logCategories is the closed set offered in the filter dropdown.
+// logCategories is the closed set offered in the filter dropdown. CategorySelfConvo
+// is included here even though NormalizeCategory never accepts it from a caller
+// (see model.go's doc comment) — a self-convo send is stamped with the category
+// directly by internal/selfconvo's gateway adapter, and an operator still needs to
+// be able to filter the log down to it.
 var logCategories = []string{
 	message.CategoryOTP, message.CategoryNotification, message.CategoryAlert, message.CategoryManual,
+	message.CategorySelfConvo,
 }
 
 // parseLogFilter reads the filter from the query string. Unknown values are simply

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "name": "Contoh: rencana akhir pekan",
+  "pacing": { "min_seconds": 20, "max_seconds": 90 },
+  "vars": { "tempat": ["cafe baru deket stasiun", "resto sushi deket kantor"] },
+  "turns": [
+    { "speaker": "a", "text": "Woy, weekend ini lo sibuk gak?" },
+    { "speaker": "b", "text": "Kayaknya enggak sih, kenapa emang?", "delay_seconds": 15, "alternatives": ["Lagi kosong sih, ada apa?"] },
+    { "speaker": "a", "text": "Gue mau ngajak jalan, udah lama gak ketemu" },
+    { "speaker": "b", "text": "Boleh banget, mau kemana?" },
+    { "speaker": "a", "text": "Belum kepikiran, lo ada usul gak?" },
+    { "speaker": "b", "text": "Kita ke {{tempat}} aja, katanya enak" },
+    { "speaker": "a", "text": "Oke sip, jam berapa enaknya?" },
+    { "speaker": "b", "text": "Sore aja ya, sekitar jam 4" },
+    { "speaker": "a", "text": "Mantap, gue jemput lo apa langsung kesana?" },
+    { "speaker": "b", "text": "Langsung kesana aja, biar simpel" }
+  ]
+}

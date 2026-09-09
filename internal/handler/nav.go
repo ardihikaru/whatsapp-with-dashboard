@@ -43,6 +43,10 @@ const (
 	// sending to it", distinct from iconSend's paper-plane and iconCalls'
 	// handset: this dispatches nothing, it only answers a question.
 	iconVerify template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12 2 4 5v6c0 5.1 3.4 9.7 8 11 4.6-1.3 8-5.9 8-11V5l-8-3zm-1.1 14.2-3.6-3.6 1.4-1.4 2.2 2.2 4.9-4.9 1.4 1.4-6.3 6.3z"/></svg>`
+	// two overlapping speech bubbles: "a simulated exchange between two
+	// parties", distinct from iconSend's single paper-plane (one outbound
+	// message) and iconCalls' handset (one voice call).
+	iconSelfConvo template.HTML = `<svg viewBox="0 0 16 16" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M6.5 1a4.5 4.5 0 0 0-3.9 6.7L1.5 10l2.6-.7A4.5 4.5 0 1 0 6.5 1zm4.9 4.6c.06.3.1.6.1.9 0 2.5-2.24 4.5-5 4.5-.24 0-.47-.02-.7-.05A4 4 0 0 0 9.5 15c.5 0 .98-.08 1.43-.22L14 15.5l-.75-1.9A4 4 0 0 0 11.4 5.6z"/></svg>`
 )
 
 // platformLink is the sidebar footer's way back out to the platform backoffice.
@@ -77,6 +81,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 			{Title: "Send Message", Path: "/send", Icon: iconSend},
 			{Title: "Voice Calls", Path: "/calls", Icon: iconCalls},
 			{Title: "Verify Number", Path: "/verify", Icon: iconVerify},
+			{Title: "Self Convo", Path: "/self-convo", Icon: iconSelfConvo},
 			{Title: "Message Log", Path: "/logs", Icon: iconLogs},
 		}},
 		{Subheader: "Admin", Items: []NavItem{

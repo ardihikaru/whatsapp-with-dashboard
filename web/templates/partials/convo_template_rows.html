@@ -1,0 +1,27 @@
+{{define "convo_template_rows"}}
+{{if .Error}}<tr><td colspan="5"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{range .Templates}}
+<tr>
+  <td><a href="{{u "/self-convo/templates"}}/{{.ID}}">{{.Name}}</a></td>
+  <td class="mono">{{.TurnCount}}</td>
+  <td class="mono">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+  <td>
+    <form class="row-actions" hx-post="{{u "/self-convo/templates"}}/{{.ID}}/rename"
+          hx-target="#convo-template-rows" hx-swap="innerHTML"
+          action="{{u "/self-convo/templates"}}/{{.ID}}/rename" method="post">
+      <input type="text" name="name" value="{{.Name}}" maxlength="120" required>
+      <button class="btn btn-outline" type="submit">Rename</button>
+    </form>
+  </td>
+  <td class="row-actions">
+    <a class="btn btn-outline" href="{{u "/self-convo/templates"}}/{{.ID}}/download">Download</a>
+    <button class="btn btn-outline btn-danger"
+            hx-post="{{u "/self-convo/templates"}}/{{.ID}}/delete"
+            hx-target="#convo-template-rows" hx-swap="innerHTML"
+            hx-confirm="Delete this template?">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="5">No templates yet.</td></tr>
+{{end}}
+{{end}}

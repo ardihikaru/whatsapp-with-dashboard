@@ -1,0 +1,82 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Self Convo</h4>
+</div>
+
+{{if not .Enabled}}
+<div class="alert">Self Convo is disabled on this deployment. An operator can turn it on with
+  <span class="mono">WSM_SELF_CONVO_ENABLED=true</span> — see CLAUDE.md's self-convo hazard note before
+  doing so: two of this deployment's own paired sessions messaging each other automatically is exactly the
+  traffic pattern that gets a WhatsApp account flagged, and neither identity has a backup. The form below
+  still renders so you can see how it works; triggering is refused until the flag is on.</div>
+{{end}}
+
+<div class="card form-card">
+  {{if .Connected}}
+  <form hx-post="{{u "/self-convo/runs"}}" hx-encoding="multipart/form-data"
+        hx-target="#convo-run-rows" hx-swap="innerHTML"
+        hx-sync="this:drop" hx-disabled-elt="find button"
+        action="{{u "/self-convo/runs"}}" method="post" enctype="multipart/form-data" novalidate>
+    <span class="textfield-label">Participants (tick at least two)</span>
+    <div class="convo-participants">
+      {{range .Connected}}
+      <label class="convo-participant">
+        <input type="checkbox" name="session_id" value="{{.ID}}">
+        <span>{{.Name}} <span class="convo-participant-phone">(+{{.Phone}})</span></span>
+      </label>
+      {{end}}
+    </div>
+
+    <label class="textfield">
+      <span class="textfield-label">Script</span>
+      <select name="template_id" class="select">
+        <option value="">Choose a saved template…</option>
+        {{range .Templates}}<option value="{{.ID}}">{{.Name}} ({{.TurnCount}} turns)</option>{{end}}
+      </select>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">…or upload a new script</span>
+      <input type="file" name="file" accept="application/json">
+      <small class="muted">
+        <a href="{{u "/self-convo/templates/example"}}">Download example template</a> ·
+        <a href="{{u "/self-convo/templates"}}">Manage templates</a>
+      </small>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Name for the uploaded script (optional)</span>
+      <input type="text" name="name" maxlength="120" placeholder="defaults to the script's own name">
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Start at</span>
+      <input type="datetime-local" name="start_at">
+      <input type="hidden" name="tz_offset" value="0">
+      <small class="muted">Leave empty to start now; interpreted in your browser's timezone.</small>
+    </label>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">
+        <span class="btn-label">Trigger</span>
+        <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+  {{else}}
+  <p>No connected sessions. <a href="{{u "/sessions"}}">Pair or activate a session</a> first — a run needs
+     at least two.</p>
+  {{end}}
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Template</th><th>Pair</th><th>State</th><th>Progress</th><th>Next fire</th><th>Started</th><th>Error</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="convo-run-rows" hx-get="{{u "/self-convo/runs/rows"}}" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <tr><td colspan="8">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

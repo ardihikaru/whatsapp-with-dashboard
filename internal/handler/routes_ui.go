@@ -86,6 +86,25 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("GET "+bp+"/verify", page(http.HandlerFunc(h.GetVerify)))
 	mux.Handle("POST "+bp+"/verify", page(http.HandlerFunc(h.PostVerify)))
 
+	// Self Convo — simulated two-party conversations between two of this
+	// deployment's own paired sessions. GET /self-convo/templates/example
+	// MUST be registered BEFORE GET /self-convo/templates/{id}: Go 1.22's
+	// mux prefers the more specific literal over a wildcard automatically,
+	// but the order still matters to a reader and is what
+	// TestTheExampleRouteIsNotShadowedByTheTemplateIdRoute pins.
+	mux.Handle("GET "+bp+"/self-convo", page(http.HandlerFunc(h.GetSelfConvo)))
+	mux.Handle("GET "+bp+"/self-convo/runs/rows", page(http.HandlerFunc(h.GetSelfConvoRunRows)))
+	mux.Handle("POST "+bp+"/self-convo/runs", page(http.HandlerFunc(h.PostSelfConvoTrigger)))
+	mux.Handle("POST "+bp+"/self-convo/runs/{id}/cancel", page(http.HandlerFunc(h.PostSelfConvoCancel)))
+	mux.Handle("GET "+bp+"/self-convo/templates", page(http.HandlerFunc(h.GetSelfConvoTemplates)))
+	mux.Handle("GET "+bp+"/self-convo/templates/rows", page(http.HandlerFunc(h.GetSelfConvoTemplateRows)))
+	mux.Handle("POST "+bp+"/self-convo/templates", page(http.HandlerFunc(h.PostSelfConvoTemplateUpload)))
+	mux.Handle("GET "+bp+"/self-convo/templates/example", page(http.HandlerFunc(h.GetSelfConvoExample)))
+	mux.Handle("POST "+bp+"/self-convo/templates/{id}/rename", page(http.HandlerFunc(h.PostSelfConvoTemplateRename)))
+	mux.Handle("POST "+bp+"/self-convo/templates/{id}/delete", page(http.HandlerFunc(h.PostSelfConvoTemplateDelete)))
+	mux.Handle("GET "+bp+"/self-convo/templates/{id}", page(http.HandlerFunc(h.GetSelfConvoTemplateView)))
+	mux.Handle("GET "+bp+"/self-convo/templates/{id}/download", page(http.HandlerFunc(h.GetSelfConvoTemplateDownload)))
+
 	// Calls page.
 	mux.Handle("GET "+bp+"/calls", page(http.HandlerFunc(h.GetCalls)))
 	mux.Handle("GET "+bp+"/calls/rows", page(http.HandlerFunc(h.GetCallRows)))

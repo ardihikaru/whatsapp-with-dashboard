@@ -107,6 +107,23 @@ func TestLogsPageRendersRealData(t *testing.T) {
 	}
 }
 
+// TestTheLogsFilterOffersTheSelfConvoCategory pins that the /logs category
+// dropdown lists self_convo alongside the other categories, so an operator
+// can filter the audit log down to a self-convo run. parseLogFilter
+// (logs.go) passes the raw "category" query value straight through to
+// message.Filter with no validation against logCategories — the dropdown is
+// the only place that needs to know about the new category.
+func TestTheLogsFilterOffersTheSelfConvoCategory(t *testing.T) {
+	srv, sessions, _, _ := newLogsTestServer(t)
+	res := authedGet(t, srv, sessions, "/logs")
+	if res.Code != http.StatusOK {
+		t.Fatalf("GET /logs = %d: %s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), `<option value="self_convo"`) {
+		t.Fatalf("/logs body does not offer a self_convo option in the category filter")
+	}
+}
+
 // The log page is platform-only: an unauthenticated browser request must bounce to
 // login, never render the audit log.
 func TestLogsPageRequiresSession(t *testing.T) {

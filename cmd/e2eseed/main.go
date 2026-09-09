@@ -19,17 +19,21 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log"
+	"math/rand/v2"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo"
 )
 
 // ErrNotSQLite is returned for any DSN that is not a local SQLite file.
@@ -106,7 +110,10 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	log.Printf("seeded %d sessions, %d api clients, %d messages",
+	if err := seedSelfConvo(ctx, pool, base); err != nil {
+		return err
+	}
+	log.Printf("seeded %d sessions, %d api clients, %d messages, self-convo template + 3 runs",
 		len(seedSessionDefs), len(clientIDs), n)
 	return nil
 }
@@ -223,4 +230,161 @@ func seedMessages(
 		}
 	}
 	return n, nil
+}
+
+// seedSelfConvo writes one wa_convo_templates row (the embedded example
+// script, revalidated the same way an upload would be) and three
+// wa_convo_runs rows over the two paired sessions
+// (seedSessionDefs[0]/[1] — e2e-sess-0001/0002), one per state the
+// convo_run_rows partial renders a distinct badge for:
+//
+//   - done: every turn sent, finished_at set.
+//   - failed: turns 1-3 sent, turn 4 failed with a reason naming the
+//     session, the rest skipped by FinishRun, error set, next_due_at
+//     cleared.
+//   - scheduled: next_due_at a year past base, so it never becomes due in
+//     an e2e run (the flag is disabled there anyway, see scripts/e2e-env.sh)
+//     and its Cancel button still renders (convo_run_rows.html's CanCancel
+//     is !IsTerminal, true for "scheduled" regardless of next_due_at).
+//
+// Every run's turns come from selfconvo.Expand (over a selfconvo.Pair built
+// from the seeded sessions and a fixed-seed rng, selfconvo.Vary'd first —
+// the same sequence Runner.Trigger itself runs), converted via
+// selfconvo.ToTurns, rather than a hand-rolled speaker→(session, recipient)
+// mapping of this file's own — so these fixtures can never drift from what
+// a real trigger actually persists. See
+// docs/brief-self-convo.md's review follow-ups ("the e2e seeder
+// re-implements Expand") and
+// TestSeedWritesATemplateAndThreeRunsWithTheStatesTheRowsPartialRenders,
+// which recomputes the same pipeline and checks every seeded turn's
+// SessionID/ToPhone against it.
+//
+// Fixed ids, like every other seed* function in this file: safe to run
+// once, which is why the call sits inside run()'s "already seeded" guard
+// rather than re-checking on its own (a second direct call collides on
+// those ids — see TestSeedSelfConvoIsNotIndependentlyIdempotentSoItMustStayInsideTheExistingSessionsGuard).
+func seedSelfConvo(ctx context.Context, pool *sql.DB, base time.Time) error {
+	script, err := selfconvo.Validate(selfconvo.ExampleJSON)
+	if err != nil {
+		return fmt.Errorf("validate embedded example script: %w", err)
+	}
+
+	repo := convo.NewRepository(pool)
+
+	tmplCreated := base.Add(-3 * 24 * time.Hour)
+	tmpl := &convo.Template{
+		ID:        "e2e-convo-tmpl-0001",
+		Name:      script.Name,
+		TurnCount: len(script.Turns),
+		Body:      string(selfconvo.ExampleJSON),
+		CreatedAt: tmplCreated,
+		UpdatedAt: tmplCreated,
+	}
+	if err := repo.InsertTemplate(ctx, tmpl); err != nil {
+		return fmt.Errorf("insert self-convo template: %w", err)
+	}
+
+	// The seeder's two paired sessions (see seedSessionDefs): "a" sends as
+	// sessA to sessB's phone and vice versa — selfconvo.Expand's own
+	// resolution, run for real below rather than reimplemented.
+	sessA, sessB := seedSessionDefs[0], seedSessionDefs[1]
+	pair := selfconvo.Pair{
+		A: selfconvo.Participant{ID: sessA.ID, Name: sessA.Name, Phone: sessA.Phone, Connected: true},
+		B: selfconvo.Participant{ID: sessB.ID, Name: sessB.Name, Phone: sessB.Phone, Connected: true},
+	}
+	// Fixed seed (matching the one
+	// TestSeedWritesATemplateAndThreeRunsWithTheStatesTheRowsPartialRenders
+	// recomputes independently) so a re-run of this file always seeds
+	// byte-identical turns — Vary and Expand share this ONE rng, drawn from
+	// in that order, the same sequence Runner.Trigger itself runs
+	// (runner.go's Trigger).
+	rng := rand.New(rand.NewPCG(7, 7))
+	varied, err := selfconvo.Vary(script, rng)
+	if err != nil {
+		return fmt.Errorf("vary embedded example script: %w", err)
+	}
+	expanded := selfconvo.Expand(varied, pair, rng)
+
+	newRun := func(id, state string, startAt time.Time) *convo.Run {
+		return &convo.Run{
+			ID:           id,
+			TemplateID:   tmpl.ID,
+			TemplateName: tmpl.Name,
+			SessionAID:   sessA.ID,
+			SessionBID:   sessB.ID,
+			SessionAName: sessA.Name,
+			SessionBName: sessB.Name,
+			PhoneA:       sessA.Phone,
+			PhoneB:       sessB.Phone,
+			State:        state,
+			TurnCount:    len(expanded),
+			StartAt:      startAt,
+			CreatedAt:    startAt,
+		}
+	}
+
+	// --- run 1: done, every turn sent ---
+	doneStart := base.Add(-2 * 24 * time.Hour)
+	doneRun := newRun("e2e-convo-run-done", convo.RunDone, doneStart)
+	doneRun.TurnsDone = len(expanded)
+	doneRun.StartedAt = &doneStart
+	doneFinished := doneStart.Add(20 * time.Minute)
+	doneRun.FinishedAt = &doneFinished
+	if err := repo.CreateRun(ctx, doneRun, selfconvo.ToTurns(doneRun.ID, expanded)); err != nil {
+		return fmt.Errorf("create done self-convo run: %w", err)
+	}
+	for i := range expanded {
+		sentAt := doneStart.Add(time.Duration(i+1) * time.Minute)
+		if err := repo.MarkTurnSent(ctx, doneRun.ID, i+1, sentAt); err != nil {
+			return fmt.Errorf("mark done run turn %d sent: %w", i+1, err)
+		}
+	}
+
+	// --- run 2: failed at turn 4, the rest skipped by FinishRun ---
+	failStart := base.Add(-1 * 24 * time.Hour)
+	failedRun := newRun("e2e-convo-run-failed", convo.RunRunning, failStart)
+	failedRun.TurnsDone = 3
+	// CreateRun's initial state is "running" — the send that will fail
+	// hasn't happened yet at insert time; FinishRun below flips it to
+	// "failed" once turn 4 has actually failed, matching how the real
+	// runner reaches this state.
+	failedRun.StartedAt = &failStart
+	// ~120 chars, names the failing session by name and id — the shape a
+	// real ARunFailsWithTheSessionNameWhenAParticipantDisconnectsMidRun
+	// failure carries (see the plan's runner failure policy).
+	failReason := fmt.Sprintf(
+		`send failed for session "%s" (%s): socket disconnected mid-turn after 3 attempts`,
+		sessB.Name, sessB.ID)
+	if err := repo.CreateRun(ctx, failedRun, selfconvo.ToTurns(failedRun.ID, expanded)); err != nil {
+		return fmt.Errorf("create failed self-convo run: %w", err)
+	}
+	for i := 1; i <= 3; i++ {
+		sentAt := failStart.Add(time.Duration(i) * time.Minute)
+		if err := repo.MarkTurnSent(ctx, failedRun.ID, i, sentAt); err != nil {
+			return fmt.Errorf("mark failed run turn %d sent: %w", i, err)
+		}
+	}
+	if err := repo.MarkTurnFailed(ctx, failedRun.ID, 4, failReason); err != nil {
+		return fmt.Errorf("mark failed run turn 4 failed: %w", err)
+	}
+	// FinishRun sets the terminal state, stamps error/finished_at, clears
+	// next_due_at and skips every turn still pending (seq 5..turnCount) —
+	// see internal/domain/convo.Repository.FinishRun.
+	failFinished := failStart.Add(5 * time.Minute)
+	if err := repo.FinishRun(ctx, failedRun.ID, convo.RunFailed, failReason, failFinished); err != nil {
+		return fmt.Errorf("finish failed self-convo run: %w", err)
+	}
+
+	// --- run 3: scheduled a year out, so the Cancel button still renders
+	// (CanCancel is !IsTerminal — true regardless of how far next_due_at is)
+	// and it can never fire during an e2e run, whose WSM_SELF_CONVO_ENABLED
+	// is false anyway (scripts/e2e-env.sh never sets it).
+	scheduledStart := base.Add(365 * 24 * time.Hour)
+	scheduledRun := newRun("e2e-convo-run-scheduled", convo.RunScheduled, scheduledStart)
+	scheduledRun.NextDueAt = &scheduledStart
+	if err := repo.CreateRun(ctx, scheduledRun, selfconvo.ToTurns(scheduledRun.ID, expanded)); err != nil {
+		return fmt.Errorf("create scheduled self-convo run: %w", err)
+	}
+
+	return nil
 }

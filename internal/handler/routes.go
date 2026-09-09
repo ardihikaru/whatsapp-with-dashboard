@@ -9,9 +9,11 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/storage"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
@@ -63,6 +65,21 @@ type Deps struct {
 	// CallsEnabled gates every /calls/* endpoint — see api_calls.go's
 	// callsDisabledMessage.
 	CallsEnabled bool
+
+	// Convo is the Self Convo persistence seam (internal/domain/convo) —
+	// template CRUD and run listing/cancel go through it directly from the
+	// handlers, same as Calls above. nil is legal (older test servers);
+	// guarded the same way h.Calls is (recentCalls, calls_ui.go).
+	Convo *convo.Repository
+	// SelfConvo is the running scheduler (internal/selfconvo), wired by
+	// cmd/app/main.go via startSelfConvo only when SelfConvoEnabled is true;
+	// nil otherwise. Trigger/Cancel go through it; template management does
+	// not need it at all (see self_convo_ui.go's doc comment on why
+	// template CRUD is not gated by SelfConvoEnabled).
+	SelfConvo *selfconvo.Runner
+	// SelfConvoEnabled gates every /self-convo/runs/* endpoint — see
+	// self_convo_ui.go's selfConvoDisabledMessage.
+	SelfConvoEnabled bool
 
 	SessionTTL time.Duration
 	DarkMode   bool

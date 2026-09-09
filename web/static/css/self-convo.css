@@ -1,0 +1,82 @@
+/* /self-convo and /self-convo/templates — simulated two-party
+   conversations between two of this deployment's own paired sessions.
+   TWELFTH stylesheet, loaded LAST, after verify.css, in both base.html and
+   login.html (see base.html's load-order comment: verify.css is the
+   eleventh, this is the twelfth, and login.html duplicates base.html's
+   whole <head> — CLAUDE.md's hazard note on that). Tokens only — every
+   colour below is a :root variable from base.css, with a
+   [data-theme="dark"] counterpart wherever the light value is not already
+   theme-neutral. verify.css is the model copied here (its own header says
+   the same about media.css). */
+
+/* ---------- run state badges (convo_run_rows.html) -------------------------
+   scheduled = waiting to start (info, same "no answer yet" reading as
+   verify.css's badge-unknown); running = in progress (warning, same as
+   media.css's badge-placing / forms.css's badge-pairing); done = success;
+   cancelled = neutral grey, same as badge-terminated (media.css) /
+   badge-inactive (datatable.css). failed reuses datatable.css's own
+   .badge-failed (light AND dark, datatable.css:75/90) rather than
+   redefining it here — a run failure is exactly the same "error" reading a
+   message/session failure already gets, and a duplicate definition here
+   would silently stop tracking a future contrast fix to that shared rule
+   (the twelfth stylesheet wins by cascade, so a change to datatable.css's
+   badge-failed would leave this one on the old value). Pinned by
+   TestSelfConvoStylesheetDoesNotRedefineBadgesDatatableAlreadyOwns
+   (internal/renderer/self_convo_stylesheet_test.go). convo_run_rows.html
+   still emits class="badge badge-failed" for a failed run — no template
+   change needed. */
+.badge-scheduled { color: var(--info-dark);    background: rgba(0, 184, 217, 0.16); }
+.badge-running   { color: var(--warning-dark); background: rgba(255, 171, 0, 0.16); }
+.badge-done      { color: var(--success-dark); background: rgba(34, 197, 94, 0.16); }
+.badge-cancelled { color: var(--grey-600);     background: rgba(145, 158, 171, 0.16); }
+
+[data-theme="dark"] .badge-scheduled { color: var(--info-light); }
+[data-theme="dark"] .badge-running   { color: var(--warning-light); }
+[data-theme="dark"] .badge-done      { color: var(--success-light); }
+[data-theme="dark"] .badge-cancelled { color: var(--grey-400); }
+
+/* ---------- participant picker (trigger.html's "who takes part") ----------
+   A responsive grid of .checkfield-shaped labels (media.css's .checkfield
+   is the model: a checkbox plus its own label text, not .textfield's
+   text-input shape) — one per connected session, so an operator ticking
+   two sessions sees them as equal-weight cards rather than a cramped
+   single-column list once there are more than a handful. */
+.convo-participants {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.convo-participant {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(145, 158, 171, 0.32);
+  border-radius: var(--radius-btn);
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.convo-participant input[type="checkbox"] { width: 18px; height: 18px; accent-color: var(--primary); flex: none; }
+
+.convo-participant-phone { color: var(--text-secondary); font-size: 12px; }
+
+/* ---------- template JSON preview (template_view.html) --------------------
+   A <pre> long enough to hold a real script must wrap AND scroll inside its
+   own box rather than blow out the page width — the same overflow-x hazard
+   CLAUDE.md's html/body entry warns about, scoped here to one element
+   instead of the document root. */
+.convo-json {
+  max-height: 480px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  padding: 16px;
+  border-radius: var(--radius-btn);
+  background: rgba(145, 158, 171, 0.08);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--text-primary);
+}

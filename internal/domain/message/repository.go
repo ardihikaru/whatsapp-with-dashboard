@@ -3,8 +3,14 @@ package message
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 )
+
+// ErrNotFound is returned by GetByID when id names no row — the "genuinely
+// unknown" signal internal/selfconvo's Recover reconciliation relies on to
+// fall back to "interrupted" rather than guessing (see runner.go's Recover).
+var ErrNotFound = errors.New("message: not found")
 
 // Repository is the audit-log seam used by HTTP handlers (Insert, Recent) and
 // the send worker (MarkSent, MarkFailed).
@@ -77,6 +83,48 @@ func (r *SQLRepository) MarkFailed(ctx context.Context, id, errMsg string, attem
 		`UPDATE wa_messages SET status = ?, error = ?, attempts = ? WHERE id = ?`,
 		StatusFailed, errMsg, attempts, id)
 	return err
+}
+
+// GetByID reads back one row by its primary key — internal/selfconvo's
+// Recover reconciliation (runner.go) is the only production caller: it
+// looks up the wa_messages row a cut-off turn's ClaimTurn already minted an
+// id for, to learn whether the send actually landed before this app's own
+// process died. Returns ErrNotFound rather than sql.ErrNoRows, matching
+// every other domain repository's by-id lookup (e.g.
+// internal/domain/convo.Repository.GetRun).
+func (r *SQLRepository) GetByID(ctx context.Context, id string) (Message, error) {
+	row := r.pool.QueryRowContext(ctx,
+		`SELECT id, session_id, to_phone, body, status, wa_message_id, error, attempts,
+		        created_at, sent_at,
+		        media_kind, media_filename, media_mime, media_size, media_object_key
+		 FROM wa_messages WHERE id = ?`, id)
+
+	var m Message
+	var created string
+	var sent sql.NullString
+	var mediaKind, mediaFilename, mediaMime, mediaObjectKey sql.NullString
+	var mediaSize sql.NullInt64
+	err := row.Scan(&m.ID, &m.SessionID, &m.ToPhone, &m.Body, &m.Status,
+		&m.WAMessageID, &m.Error, &m.Attempts, &created, &sent,
+		&mediaKind, &mediaFilename, &mediaMime, &mediaSize, &mediaObjectKey)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Message{}, ErrNotFound
+	}
+	if err != nil {
+		return Message{}, err
+	}
+	m.CreatedAt, _ = time.Parse(timeLayout, created)
+	if sent.Valid {
+		if t, err := time.Parse(timeLayout, sent.String); err == nil {
+			m.SentAt = &t
+		}
+	}
+	m.MediaKind = mediaKind.String
+	m.MediaFilename = mediaFilename.String
+	m.MediaMime = mediaMime.String
+	m.MediaSize = mediaSize.Int64
+	m.MediaObjectKey = mediaObjectKey.String
+	return m, nil
 }
 
 func (r *SQLRepository) Recent(ctx context.Context, sessionID string, limit int) ([]Message, error) {

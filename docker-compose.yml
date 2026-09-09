@@ -81,6 +81,12 @@ services:
       WSM_MEDIA_ARCHIVE: ${WSM_MEDIA_ARCHIVE:-true}
       # false by default — see CLAUDE.md's calls hazard note.
       WSM_CALLS_ENABLED: ${WSM_CALLS_ENABLED:-false}
+      # false by default — same hazard shape as WSM_CALLS_ENABLED, different
+      # traffic: two of this deployment's own paired sessions messaging each
+      # other automatically is exactly the pattern that gets a WhatsApp
+      # account flagged, and neither identity has a second copy anywhere to
+      # fall back on. See CLAUDE.md's whatsmeow/waxum singleton-volume entries.
+      WSM_SELF_CONVO_ENABLED: ${WSM_SELF_CONVO_ENABLED:-false}
       WSM_WAXUM_EVENTS: ${WSM_WAXUM_EVENTS:-true}
 
     volumes:

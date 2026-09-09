@@ -81,6 +81,14 @@ type fakeBackend struct {
 	// that need a Backend.SendText call to actually succeed.
 	sendTextID string
 
+	// sendTextFn, when set, is called instead of applying sendTextID/
+	// ErrUnsupported — the SendText analogue of sendMediaFn below, added
+	// for dispatch_test.go's timing tests, which need a SendText call that
+	// blocks until the test releases it (proving Dispatch's wait==0/
+	// wait-elapsed/ctx-done branches without a real sender_media_test.go
+	// style retry-count fake).
+	sendTextFn func(ctx context.Context, to JID, text string) (string, error)
+
 	// connectFn, when set, overrides Connect's default ErrUnsupported —
 	// used by the reconnect supervisor tests (reconnect_test.go), which
 	// need Connect to either succeed (proving a reconnect attempt actually
@@ -132,7 +140,10 @@ func (f *fakeBackend) Logout(_ context.Context, _ *ManagedSession) error {
 	f.logoutCalled = true
 	return nil
 }
-func (f *fakeBackend) SendText(context.Context, *ManagedSession, JID, string) (string, error) {
+func (f *fakeBackend) SendText(ctx context.Context, _ *ManagedSession, to JID, text string) (string, error) {
+	if f.sendTextFn != nil {
+		return f.sendTextFn(ctx, to, text)
+	}
 	if f.sendTextID != "" {
 		return f.sendTextID, nil
 	}

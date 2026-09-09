@@ -3,11 +3,20 @@ import { test, expect, Page } from "@playwright/test";
 // The six destinations internal/handler/nav.go builds, and the four section
 // subheaders it groups them under. The point of the drawer is that a phone user
 // loses NONE of them.
+// NOTE: this list is asserted by CONTAINMENT (each name must be visible
+// somewhere in the drawer), not by exact equality against the drawer's full
+// contents — see the per-test loops below, which never compare set size or
+// compare against the full rendered set. It was already missing
+// "Voice Calls" and "System Log", which
+// internal/handler/nav_mobile_test.go's own destination list does carry;
+// left out here too rather than added opportunistically, since this file's
+// containment-only assertion shape does not require completeness.
 const DESTINATIONS = [
   "Dashboard",
   "Sessions",
   "Send Message",
   "Verify Number",
+  "Self Convo",
   "Message Log",
   "API Clients",
   "API Docs",

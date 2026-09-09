@@ -38,7 +38,9 @@ func newTestRepo(t *testing.T) (*SQLRepository, context.Context) {
 
 var idSeq int
 
-func (r *SQLRepository) seed(t *testing.T, ctx context.Context, m Message) {
+// seed returns the id it minted for m, so a test that needs to read the row
+// back by id (GetByID) doesn't have to guess the msg-NNNN sequence itself.
+func (r *SQLRepository) seed(t *testing.T, ctx context.Context, m Message) string {
 	t.Helper()
 	idSeq++
 	m.ID = fmt.Sprintf("msg-%04d", idSeq)
@@ -48,6 +50,7 @@ func (r *SQLRepository) seed(t *testing.T, ctx context.Context, m Message) {
 	if err := r.Insert(ctx, &m); err != nil {
 		t.Fatal(err)
 	}
+	return m.ID
 }
 
 func day(offset int) time.Time { return time.Now().UTC().AddDate(0, 0, offset) }

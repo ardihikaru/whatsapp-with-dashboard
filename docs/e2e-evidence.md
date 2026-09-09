@@ -1472,3 +1472,96 @@ nothing here put a message on the wire; `sendQ` was not exercised.
 image exists only on this host, built from `~/waxum-slotfix`; the patch has
 NOT been pushed to the `ardihikaru/waxum` fork or to Docker Hub. A rebuild or
 a pull of `0.12.2-uploaded-media` reintroduces the bug.
+
+## 2026-09-09 — Self Convo pages, e2e overflow + nav on three viewports
+
+Base URL: `http://127.0.0.1:8801` (throwaway instance booted by
+`scripts/e2e-env.sh`, app tables in a fresh SQLite file, `WSM_WA_BACKEND`
+defaulting to `whatsmeow` there — **no MySQL contacted**).
+`WSM_SELF_CONVO_ENABLED` is unset (false), same as every other feature flag
+this script never sets — this run therefore proves `/self-convo` and
+`/self-convo/templates` render and lay out correctly with the flag OFF, the
+state the e2e box is always in; the trigger/cancel-enabled path (Verification
+steps 1-4 in the plan) still needs a dev box with the flag set and two real
+paired sessions, which this environment has neither of.
+
+Browser: Playwright 1.62.1 (`package.json`), Chromium, launched with no extra
+system packages — `npx playwright install-deps --dry-run
+chromium` reported 11 missing packages (fonts + Xvfb/X server, cosmetic for a
+headless run), and a direct `chromium.launch()` smoke check succeeded without
+them, so no privileged step or private-prefix unpack was needed this time.
+
+Browser user: admin `ardihikaru`, from a throwaway `_data/paswd`-shaped file
+written under this session's scratch directory (never inside the repo, never
+named `_data/paswd`), pointed to via `WSM_E2E_PASSWORD_FILE`.
+
+**This host has no `.env` `WSM_MINIO_*` values at all** (checked by grep,
+value never read), and the only reachable MinIO container is the shared
+production one (`master-compose-ai-minio-master-1`) — not used. Instead: a
+disposable `minio/minio` container, `wsm-e2e-minio`, bound to
+`127.0.0.1:19000` only, throwaway root credentials generated for this run and
+exported straight into the shell running Playwright (never written to a
+file, `.env`, or this document). The app auto-creates its bucket on boot
+(`internal/storage.EnsureBuckets`), so no bucket bootstrap step was needed.
+
+Changed for this task: `cmd/e2eseed/main.go` (`seedSelfConvo`, called inside
+`run()`'s existing "sessions already seeded → skip" guard — it is not
+independently idempotent, pinned by
+`TestSeedSelfConvoIsNotIndependentlyIdempotentSoItMustStayInsideTheExistingSessionsGuard`),
+`e2e/overflow.spec.ts` (`PAGES` += `/self-convo`, `/self-convo/templates`;
+`waitForContent` += `#convo-run-rows`, `#convo-template-rows`), and
+`e2e/nav-mobile.spec.ts` (`DESTINATIONS` += `"Self Convo"`, after
+"Verify Number").
+
+Results:
+
+| Check | Result |
+|---|---|
+| `go test ./cmd/e2eseed/...` (seed test, red-then-green) | RED first: `undefined: seedSelfConvo` (compile failure) with the test present and the function missing; GREEN after — `ok github.com/ardihikaru/whatsapp-with-dashboard/cmd/e2eseed 0.062s` |
+| `go test ./...` | `ok` for every package (18 packages, 2 with no test files) |
+| `go vet ./...` | clean |
+| Playwright `e2e/overflow.spec.ts` + `e2e/nav-mobile.spec.ts`, all projects (`setup`, `mobile-portrait`, `mobile-small`, `desktop`) | **75 passed, 0 failed** (31 skipped — desktop/phone-only drawer guards and the "page fits on one screen, nothing to scroll" skip on short pages) in 1.5m |
+| `/self-convo`, mobile-portrait (390×844) | no element wider than the viewport — pass; scrolled to its bottom — pass |
+| `/self-convo/templates`, mobile-portrait | no element wider than the viewport — pass; scrolled to its bottom — SKIPPED (content fits on one screen at this viewport, not a failure) |
+| `/self-convo`, `/self-convo/templates`, mobile-small (360×740) | both checks pass on both pages |
+| `/self-convo`, `/self-convo/templates`, desktop (1280×800) | both checks pass on both pages |
+| `"Self Convo"` drawer destination, mobile-portrait + mobile-small | visible, ≥36px tall, not covered by another element (`nav-mobile.spec.ts`'s per-destination loop) |
+
+No CSS fix was needed: `web/static/css/self-convo.css` (already landed in an
+earlier step per the plan) did not overflow either viewport with the seeded
+content (one template row, three run rows spanning `scheduled`/`done`/
+`failed` badges, an ~117-character error string, and the full 10-turn example
+script as the template body) — the overflow assertions above are the
+measurement that would have caught it if it had.
+
+**`e2e/screenshots.spec.ts` was not changed.** It iterates no page list — it
+visits only `/dashboard` and `/logs` by name — so there was nothing to add
+per this task's own instruction ("add the two pages if it iterates a page
+list").
+
+**`e2e/nav-mobile.spec.ts`'s `DESTINATIONS` was left short of "Voice Calls"
+and "System Log"**, which `internal/handler/nav_mobile_test.go`'s own list
+does carry. Checked before deciding: every use of `DESTINATIONS` in this file
+loops per-name (`for (const name of DESTINATIONS) { await
+expect(sidebar.getByRole("link", { name, exact: true })).toBeVisible(); }`
+and the tappability loop below it) — containment, never a comparison against
+the drawer's full rendered set — so per this task's instruction the two
+missing names were left out rather than added opportunistically.
+
+Teardown: `docker stop wsm-e2e-minio && docker rm wsm-e2e-minio` (confirmed
+gone from `docker ps -a`; only the pre-existing
+`master-compose-ai-minio-master-1` remains), the throwaway password file
+deleted from the scratch directory, the dev app process on `:8801` killed,
+`make e2e-reset` run (`_data/e2e`, `e2e/.auth` removed).
+
+**No secret was written into this file.** The admin password, the throwaway
+MinIO credentials, and the session cookie value were all read/generated and
+used only inside the process that needed them, and none of the three appears
+above.
+
+**Not verified: the trigger/cancel path with the flag enabled.** This
+environment never sets `WSM_SELF_CONVO_ENABLED` and pairs no real WhatsApp
+session, so the plan's own Verification steps 1-4 (a live trigger, `/logs`
+showing `category=self_convo`, a mid-run cancel, an app restart mid-run) were
+not exercised here and need a dev box with two paired sessions per the plan's
+own instructions, not this e2e box.

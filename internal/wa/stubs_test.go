@@ -88,13 +88,41 @@ type stubMsgs struct {
 	mu     sync.Mutex
 	sent   map[string]string // msgID → waMessageID
 	failed map[string]string // msgID → error text
+
+	// failedAttempts is MarkFailed's attempts argument, keyed the same as
+	// failed above — added for dispatch_test.go, which asserts Dispatch's
+	// enqueue-failure path calls MarkFailed with attempts 0 (it fails before
+	// any send attempt is ever made, unlike senderLoop's own MarkFailed
+	// calls after ≤3 real attempts).
+	failedAttempts map[string]int
+
+	// insertedIDs/insertedCategories record every Insert call in order —
+	// added for dispatch_test.go's
+	// TestDispatchInsertsTheAuditRowBeforeEnqueueingAndReturnsTheTerminalResult,
+	// which asserts the audit row exists (id + category) BEFORE Dispatch
+	// ever reaches Enqueue. insertErr, when set, makes Insert fail instead —
+	// unused today but kept for a future insert-failure test rather than
+	// adding a second stub type.
+	insertedIDs        []string
+	insertedCategories map[string]string // msgID → message.Category
+	insertErr          error
 }
 
 func newStubMsgs() *stubMsgs {
-	return &stubMsgs{sent: map[string]string{}, failed: map[string]string{}}
+	return &stubMsgs{sent: map[string]string{}, failed: map[string]string{},
+		failedAttempts: map[string]int{}, insertedCategories: map[string]string{}}
 }
 
-func (m *stubMsgs) Insert(context.Context, *message.Message) error { return nil }
+func (m *stubMsgs) Insert(_ context.Context, msg *message.Message) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.insertErr != nil {
+		return m.insertErr
+	}
+	m.insertedIDs = append(m.insertedIDs, msg.ID)
+	m.insertedCategories[msg.ID] = msg.Category
+	return nil
+}
 
 func (m *stubMsgs) MarkSent(_ context.Context, id, waID string, _ int) error {
 	m.mu.Lock()
@@ -103,10 +131,11 @@ func (m *stubMsgs) MarkSent(_ context.Context, id, waID string, _ int) error {
 	return nil
 }
 
-func (m *stubMsgs) MarkFailed(_ context.Context, id, errMsg string, _ int) error {
+func (m *stubMsgs) MarkFailed(_ context.Context, id, errMsg string, attempts int) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.failed[id] = errMsg
+	m.failedAttempts[id] = attempts
 	return nil
 }
 

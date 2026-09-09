@@ -7,6 +7,7 @@ API for machine callers.
 - [Load-balanced sends](load-balancing.md)
 - [Curl examples](curl-examples.md)
 - [Reading customer replies (inbound API)](inbound-api.md)
+- [Self Convo — scripted chats between paired sessions](brief-self-convo.md)
 - [E2E evidence](e2e-evidence.md)
 
 Browser admin pages use the local admin login cookie. JSON REST endpoints under

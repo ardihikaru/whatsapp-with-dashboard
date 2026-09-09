@@ -1,8 +1,48 @@
 package message
 
 import (
+	"errors"
 	"testing"
 )
+
+// TestGetByIDReturnsTheStoredRowIncludingItsErrorText pins the by-id read
+// selfconvo's Recover reconciliation needs (internal/selfconvo/runner.go):
+// a failed row's Error text must round-trip so Recover can hand it to
+// convo.Repository.MarkTurnFailed verbatim rather than inventing a reason.
+func TestGetByIDReturnsTheStoredRowIncludingItsErrorText(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	// Error is not an Insert column (only MarkFailed writes it — see
+	// Insert's own column list) — seed a queued row, then fail it the same
+	// way the send worker does.
+	id := r.seed(t, ctx, Message{Status: StatusQueued, Body: "halo"})
+	if err := r.MarkFailed(ctx, id, "waxum: boom", 3); err != nil {
+		t.Fatalf("MarkFailed: %v", err)
+	}
+
+	got, err := r.GetByID(ctx, id)
+	if err != nil {
+		t.Fatalf("GetByID: %v", err)
+	}
+	if got.Status != StatusFailed {
+		t.Errorf("Status = %q, want %q", got.Status, StatusFailed)
+	}
+	if got.Error != "waxum: boom" {
+		t.Errorf("Error = %q, want %q", got.Error, "waxum: boom")
+	}
+	if got.Body != "halo" {
+		t.Errorf("Body = %q, want %q", got.Body, "halo")
+	}
+}
+
+// TestGetByIDReturnsErrNotFoundForAnUnknownID pins the "genuinely unknown"
+// signal Recover relies on to fall back to "interrupted" rather than
+// guessing.
+func TestGetByIDReturnsErrNotFoundForAnUnknownID(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	if _, err := r.GetByID(ctx, "does-not-exist"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("GetByID on an unknown id = %v, want ErrNotFound", err)
+	}
+}
 
 // TestInsertPersistsTheMediaColumns proves the five 0004 columns round-trip
 // through Insert and Recent for a real media send.

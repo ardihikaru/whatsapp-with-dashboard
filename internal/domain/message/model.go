@@ -49,6 +49,15 @@ const (
 	CategoryNotification = "notification"
 	CategoryAlert        = "alert"
 	CategoryManual       = "manual"
+	// CategorySelfConvo marks a send that belongs to a self-convo run (two of
+	// this deployment's own paired sessions exchanging a scripted
+	// conversation; see internal/selfconvo). It is deliberately NOT part of
+	// NormalizeCategory's accepted set below: that value is stamped only by
+	// the self-convo gateway adapter (internal/selfconvo/gateway_wa.go),
+	// never taken from a caller-supplied field, so an ordinary API/UI send
+	// cannot claim this category for itself. NormalizeCategory keeps
+	// clamping "self_convo" from an untrusted caller to the fallback.
+	CategorySelfConvo = "self_convo"
 )
 
 // Attribution is the caller-supplied slice of a send's provenance, threaded from the

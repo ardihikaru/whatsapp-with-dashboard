@@ -233,6 +233,59 @@ var schema = []string{
 	  ON wa_inbound_messages(from_phone, received_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_wa_inbound_client
 	  ON wa_inbound_messages(client_ref, received_at)`,
+	// 0007: Self Convo. Three tables, not columns on wa_messages — a run is
+	// a schedule, not a send; see migrations/0007_self_convo.sql's header.
+	// No FK from wa_convo_runs to wa_sessions (same reasoning as 0006 above
+	// — session names/phones are snapshotted so a deleted session still
+	// renders); wa_convo_turns DOES cascade off its own run.
+	`CREATE TABLE IF NOT EXISTS wa_convo_templates (
+	  id          TEXT PRIMARY KEY,
+	  name        TEXT NOT NULL,
+	  turn_count  INTEGER NOT NULL,
+	  body        TEXT NOT NULL,
+	  created_at  TEXT NOT NULL,
+	  updated_at  TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_convo_templates_created
+	  ON wa_convo_templates(created_at)`,
+	`CREATE TABLE IF NOT EXISTS wa_convo_runs (
+	  id              TEXT PRIMARY KEY,
+	  template_id     TEXT,
+	  template_name   TEXT NOT NULL,
+	  session_a_id    TEXT NOT NULL,
+	  session_b_id    TEXT NOT NULL,
+	  session_a_name  TEXT NOT NULL DEFAULT '',
+	  session_b_name  TEXT NOT NULL DEFAULT '',
+	  phone_a         TEXT NOT NULL,
+	  phone_b         TEXT NOT NULL,
+	  state           TEXT NOT NULL,
+	  turn_count      INTEGER NOT NULL,
+	  turns_done      INTEGER NOT NULL DEFAULT 0,
+	  start_at        TEXT NOT NULL,
+	  next_due_at     TEXT,
+	  started_at      TEXT,
+	  finished_at     TEXT,
+	  error           TEXT NOT NULL DEFAULT '',
+	  created_at      TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_convo_runs_due
+	  ON wa_convo_runs(state, next_due_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_convo_runs_created
+	  ON wa_convo_runs(created_at)`,
+	`CREATE TABLE IF NOT EXISTS wa_convo_turns (
+	  run_id        TEXT NOT NULL REFERENCES wa_convo_runs(id) ON DELETE CASCADE,
+	  seq           INTEGER NOT NULL,
+	  speaker       TEXT NOT NULL,
+	  session_id    TEXT NOT NULL,
+	  to_phone      TEXT NOT NULL,
+	  body          TEXT NOT NULL,
+	  delay_seconds INTEGER NOT NULL,
+	  state         TEXT NOT NULL DEFAULT 'pending',
+	  message_id    TEXT,
+	  error         TEXT NOT NULL DEFAULT '',
+	  sent_at       TEXT,
+	  PRIMARY KEY (run_id, seq)
+	)`,
 }
 
 // EnsureSchema creates the app tables and index if missing, inside one

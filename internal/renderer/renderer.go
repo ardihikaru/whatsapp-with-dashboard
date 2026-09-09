@@ -65,6 +65,22 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/verify.html"),
 		root:  "base",
 	},
+	// self_convo/self_convo_templates: no rows partial in either fileset —
+	// same rule as "calls" above. self_convo_template_view has no rows
+	// partial to worry about at all; it renders one template's JSON, not a
+	// table.
+	"self_convo": {
+		files: append(chrome(), "templates/self_convo/trigger.html"),
+		root:  "base",
+	},
+	"self_convo_templates": {
+		files: append(chrome(), "templates/self_convo/templates.html"),
+		root:  "base",
+	},
+	"self_convo_template_view": {
+		files: append(chrome(), "templates/self_convo/template_view.html"),
+		root:  "base",
+	},
 	"session-ops": {
 		files: append(chrome(), "templates/sessions/ops.html"),
 		root:  "base",
@@ -123,6 +139,8 @@ var partialFiles = []string{
 	"templates/partials/session_ops_panel.html",
 	"templates/partials/webhook_rows.html",
 	"templates/partials/webhook_dlq_rows.html",
+	"templates/partials/convo_run_rows.html",
+	"templates/partials/convo_template_rows.html",
 }
 
 // Renderer holds the parsed template sets.

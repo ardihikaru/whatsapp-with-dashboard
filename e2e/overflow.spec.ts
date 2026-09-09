@@ -19,7 +19,15 @@ const SESSION_ID = "e2e-sess-0001";
 // their own load-triggered hx-get lands.
 async function waitForContent(page: Page) {
   await page.waitForLoadState("networkidle");
-  for (const id of ["#session-rows", "#ops-panel", "#webhook-rows", "#webhook-dlq-rows", "#call-rows"]) {
+  for (const id of [
+    "#session-rows",
+    "#ops-panel",
+    "#webhook-rows",
+    "#webhook-dlq-rows",
+    "#call-rows",
+    "#convo-run-rows",
+    "#convo-template-rows",
+  ]) {
     const el = page.locator(id);
     if (await el.count()) {
       await expect(el).not.toContainText("Loading", { timeout: 10_000 });
@@ -53,6 +61,13 @@ const PAGES = [
   "/verify",
   `/sessions/${SESSION_ID}/ops`,
   `/sessions/${SESSION_ID}/webhooks`,
+  // WSM_SELF_CONVO_ENABLED is false here (scripts/e2e-env.sh never sets
+  // it), so /self-convo also renders an extra disabled-notice alert above
+  // its form — trigger/cancel are refused, but the page, the trigger form
+  // and the seeded #convo-run-rows/#convo-template-rows content (template
+  // management is never gated by the flag) all still render normally.
+  "/self-convo",
+  "/self-convo/templates",
 ];
 
 for (const path of PAGES) {

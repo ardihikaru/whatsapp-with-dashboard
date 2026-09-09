@@ -236,6 +236,11 @@ type Config struct {
 	// DefaultCallsEnabled doc comment.
 	CallsEnabled bool
 
+	// SelfConvoEnabled gates internal/selfconvo's runner — false (the
+	// default) means no self-convo run is ever scheduled or sent. See
+	// selfconvo.go's DefaultSelfConvoEnabled doc comment.
+	SelfConvoEnabled bool
+
 	// Inbound* configure internal/wa's inbound-message pump (see
 	// inbound.go's loadInbound doc comment). InboundEnabled true (the
 	// default) is the ingest-side counterpart of the GET /api/v1/inbound
@@ -334,6 +339,9 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if err := loadInbound(cfg); err != nil {
+		return nil, err
+	}
+	if err := loadSelfConvo(cfg); err != nil {
 		return nil, err
 	}
 	return cfg, nil

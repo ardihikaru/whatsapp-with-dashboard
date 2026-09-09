@@ -6,8 +6,6 @@ package wa
 
 import (
 	"context"
-	"crypto/rand"
-	"encoding/hex"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -16,6 +14,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/id"
 )
 
 // Config is the manager slice of the app configuration.
@@ -204,13 +203,13 @@ func (m *Manager) go1(f func()) {
 	go func() { defer m.wg.Done(); f() }()
 }
 
-// NewID returns a 16-byte crypto/rand hex identifier (sessions and messages).
+// NewID returns a 16-byte crypto/rand hex identifier (sessions and
+// messages) — a thin wrapper over internal/id.New so every existing call
+// site (wa.NewID(), all across this repo) keeps compiling unchanged while
+// internal/selfconvo's own former duplicate (runner.go's old newID) now
+// calls the same underlying implementation instead of copying it.
 func NewID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		panic(err) // crypto/rand never fails on supported platforms
-	}
-	return hex.EncodeToString(b[:])
+	return id.New()
 }
 
 // Get returns the live session for an ID.

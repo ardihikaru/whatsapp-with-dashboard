@@ -17,6 +17,8 @@ var pagesWithChrome = []string{
 	"/send",
 	"/calls",
 	"/verify",
+	"/self-convo",
+	"/self-convo/templates",
 	"/logs",
 	"/admin/api-clients",
 	"/system-log",
@@ -84,7 +86,7 @@ func TestDrawerCarriesEverySidebarDestination(t *testing.T) {
 	sidebar := sidebarHTML(t, body)
 
 	for _, want := range []string{
-		"Dashboard", "Sessions", "Send Message", "Voice Calls", "Verify Number", "Message Log", "API Clients", "System Log", "API Docs",
+		"Dashboard", "Sessions", "Send Message", "Voice Calls", "Verify Number", "Self Convo", "Message Log", "API Clients", "System Log", "API Docs",
 	} {
 		if !strings.Contains(sidebar, want) {
 			t.Errorf("sidebar is missing the %q destination", want)

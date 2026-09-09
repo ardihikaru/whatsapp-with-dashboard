@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -161,12 +162,18 @@ func (h *handlers) sendMediaThroughJID(
 }
 
 // dispatchSend is sendThroughJID/sendMediaThroughJID's shared tail: build
-// the audit row, Insert it, Enqueue (or EnqueueMedia) it, and wait up to
-// sendWaitLimit for a terminal result — the 15s wait, the
-// ErrQueueFull/ErrNotConnected mapping and the MarkFailed-on-enqueue-failure
-// fallback all live here exactly once, per Phase 6a §1b of the plan. media
-// == nil selects the plain-text path (Enqueue); non-nil selects the media
-// path (EnqueueMedia) and also fills the message row's five media columns.
+// the audit row, then hand it to wa.Manager.Dispatch (internal/wa/dispatch.go),
+// which is dispatchSend's OLD inline body (Insert, Enqueue/EnqueueMedia, the
+// 15s wait) moved down a layer so the self-convo runner (internal/selfconvo)
+// can share the exact same audit-row-then-queue-then-wait path without an
+// *http.Request to hang it off of — see Dispatch's doc comment for its full
+// error contract. This function's own job shrank to what only an HTTP
+// caller needs: building msg (media columns, the authenticated principal's
+// APIClientID) and mapping Dispatch's outcome back to sendOutcome/status
+// codes exactly as the old inline switch did — no observable behaviour
+// changed, only where the work happens. media == nil selects the
+// plain-text path; non-nil selects the media path and also fills the
+// message row's five media columns.
 func (h *handlers) dispatchSend(
 	r *http.Request, s *wa.ManagedSession, msgID string, to wa.JID, toDisplay, text string,
 	attr message.Attribution, media *mediaDispatch,
@@ -174,54 +181,75 @@ func (h *handlers) dispatchSend(
 	msg := &message.Message{ID: msgID, SessionID: s.ID, ToPhone: toDisplay,
 		Body: text, Status: message.StatusQueued, CreatedAt: time.Now().UTC(),
 		ClientRef: attr.ClientRef, TenantRef: attr.TenantRef, Category: attr.Category}
+	var outboundMedia *wa.OutboundMedia
 	if media != nil {
 		msg.MediaKind = string(media.Outbound.Kind)
 		msg.MediaFilename = media.Outbound.Filename
 		msg.MediaMime = media.Mime
 		msg.MediaSize = media.Size
 		msg.MediaObjectKey = media.ObjectKey
+		outboundMedia = &media.Outbound
 	}
 	// api_client_id comes from the authenticated principal, never the request body,
 	// so a client cannot attribute its sends to another. Empty for the /send UI.
 	if p, ok := auth.APIPrincipalFrom(r.Context()); ok {
 		msg.APIClientID = p.ClientID
 	}
-	if err := h.Messages.Insert(r.Context(), msg); err != nil {
-		return sendOutcome{Error: "could not store the message"}, http.StatusInternalServerError
-	}
 
-	var done <-chan wa.SendResult
-	var err error
-	if media != nil {
-		done, err = s.EnqueueMedia(msg.ID, to, media.Outbound)
-	} else {
-		done, err = s.Enqueue(msg.ID, to, text)
-	}
+	result, err := h.Manager.Dispatch(r.Context(), s, msg, to, outboundMedia, sendWaitLimit)
 	if err != nil {
-		reason := "could not queue the message"
-		status := http.StatusInternalServerError
-		switch {
-		case errors.Is(err, wa.ErrQueueFull):
-			reason = "send queue full"
-			status = http.StatusTooManyRequests
-		case errors.Is(err, wa.ErrNotConnected):
-			reason = "session not connected"
-			status = http.StatusConflict
+		if result.MsgID == "" {
+			// Insert itself failed — Dispatch never reached Enqueue.
+			return sendOutcome{Error: "could not store the message"}, http.StatusInternalServerError
 		}
-		_ = h.Messages.MarkFailed(r.Context(), msg.ID, reason, 0)
-		return sendOutcome{ID: msg.ID, Status: message.StatusFailed, Error: reason}, status
+		return dispatchEnqueueOutcome(r.Context().Err(), result.MsgID, err)
 	}
+	if result.Result == nil {
+		// The wait elapsed with no terminal result yet.
+		return sendOutcome{ID: result.MsgID, Status: message.StatusQueued, Error: "still queued - it will be sent in order"}, http.StatusAccepted
+	}
+	if result.Result.Err != nil {
+		return sendOutcome{ID: result.MsgID, Status: message.StatusFailed, Error: result.Result.Err.Error()}, http.StatusOK
+	}
+	return sendOutcome{ID: result.MsgID, Status: message.StatusSent, WAMessageID: result.Result.WAMessageID}, http.StatusOK
+}
 
-	select {
-	case res := <-done:
-		if res.Err != nil {
-			return sendOutcome{ID: msg.ID, Status: message.StatusFailed, Error: res.Err.Error()}, http.StatusOK
-		}
-		return sendOutcome{ID: msg.ID, Status: message.StatusSent, WAMessageID: res.WAMessageID}, http.StatusOK
-	case <-time.After(sendWaitLimit):
-		return sendOutcome{ID: msg.ID, Status: message.StatusQueued, Error: "still queued - it will be sent in order"}, http.StatusAccepted
-	case <-r.Context().Done():
-		return sendOutcome{ID: msg.ID, Status: message.StatusQueued}, http.StatusAccepted
+// dispatchEnqueueOutcome maps Manager.Dispatch's error contract (see its
+// doc comment, internal/wa/dispatch.go) onto dispatchSend's HTTP response,
+// for the case Dispatch already reached Enqueue (msgID is set — the row
+// exists). Factored out of dispatchSend as its own pure function so the
+// branch below CANNOT be exercised through a real Manager today (see its
+// comment) is still directly testable — package handler has no way to
+// fabricate a connected, sendable session (the same constraint
+// internal/selfconvo/gateway.go's doc comment names for the runner), so an
+// HTTP round trip can only ever reach the two enqueue sentinels below and
+// the ctx-ended branch, never a hypothetical third enqueue error.
+//
+// reqCtxErr is r.Context().Err() at the point Dispatch returned — nil
+// unless the caller's own request context had already ended.
+func dispatchEnqueueOutcome(reqCtxErr error, msgID string, err error) (sendOutcome, int) {
+	switch {
+	case errors.Is(err, wa.ErrQueueFull):
+		return sendOutcome{ID: msgID, Status: message.StatusFailed, Error: "send queue full"}, http.StatusTooManyRequests
+	case errors.Is(err, wa.ErrNotConnected):
+		return sendOutcome{ID: msgID, Status: message.StatusFailed, Error: "session not connected"}, http.StatusConflict
+	case reqCtxErr != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded):
+		// The row was inserted and enqueued, but the request's own context
+		// ended before a terminal result arrived — Dispatch's doc comment
+		// names this the third branch. Same 202, no error text, as the old
+		// select's <-r.Context().Done() case.
+		return sendOutcome{ID: msgID, Status: message.StatusQueued}, http.StatusAccepted
+	default:
+		// Any OTHER enqueue error: Dispatch already marked the row failed
+		// before returning it (see Dispatch's doc comment) — the response
+		// must agree, not silently report 202 queued while the row is
+		// actually failed. No enqueue error other than the two sentinels
+		// above exists today (internal/wa/sender.go's enqueue, lines
+		// 65-79's admission check has exactly two failure modes), so this
+		// default is unreachable through the real Manager — it exists so a
+		// future third enqueue-error sentinel fails SAFE (500, row and
+		// response agree) instead of silently disagreeing with the DB.
+		return sendOutcome{ID: msgID, Status: message.StatusFailed, Error: "could not queue the message"}, http.StatusInternalServerError
 	}
 }
 

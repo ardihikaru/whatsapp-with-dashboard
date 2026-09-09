@@ -1,0 +1,16 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>{{.Template.Name}}</h4>
+</div>
+
+<div class="card">
+  <p><strong>Turns:</strong> {{.Template.TurnCount}}</p>
+  <p><strong>Created:</strong> <span class="mono">{{.Template.CreatedAt.Format "2006-01-02 15:04:05"}}</span></p>
+  <p><a href="{{u "/self-convo/templates"}}/{{.Template.ID}}/download">Download</a> ·
+     <a href="{{u "/self-convo/templates"}}">Back to templates</a></p>
+</div>
+
+<div class="card">
+  <pre class="convo-json">{{.PrettyJSON}}</pre>
+</div>
+{{end}}

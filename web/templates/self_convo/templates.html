@@ -1,0 +1,47 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Self Convo Templates</h4>
+</div>
+
+{{if not .Enabled}}
+<div class="alert">Self Convo is disabled on this deployment (<span class="mono">WSM_SELF_CONVO_ENABLED=true</span>
+  turns it on). Managing templates still works — nothing here sends a message; only
+  <a href="{{u "/self-convo"}}">triggering a run</a> is gated.</div>
+{{end}}
+
+<div class="card form-card">
+  <form hx-post="{{u "/self-convo/templates"}}" hx-encoding="multipart/form-data"
+        hx-target="#convo-template-rows" hx-swap="innerHTML"
+        hx-sync="this:drop" hx-disabled-elt="find button"
+        action="{{u "/self-convo/templates"}}" method="post" enctype="multipart/form-data" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Script (JSON)</span>
+      <input type="file" name="file" accept="application/json" required>
+      <small class="muted"><a href="{{u "/self-convo/templates/example"}}">Download example template</a></small>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Name (optional)</span>
+      <input type="text" name="name" maxlength="120" placeholder="defaults to the script's own name">
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">
+        <span class="btn-label">Upload</span>
+        <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+      </button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Name</th><th>Turns</th><th>Created</th><th>Rename</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="convo-template-rows" hx-get="{{u "/self-convo/templates/rows"}}" hx-trigger="load" hx-swap="innerHTML">
+        <tr><td colspan="5">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

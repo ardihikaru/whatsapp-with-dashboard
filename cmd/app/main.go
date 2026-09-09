@@ -5,9 +5,11 @@
 // wa.NewWhatsmeowBackend, OR — when WSM_WA_BACKEND=waxum — a waxum HTTP
 // client via wa.NewWaxumBackend with NO SQLite store opened at all; see
 // newBackend's doc comment for why that matters) → app store (MySQL/SQLite)
-// → repos → wa.Manager + boot reconciliation → HTTP. Shutdown order is a
-// hard requirement: server.Shutdown → manager.Close (which now also closes
-// the backend) → the WA backend's own store, if it opened one → pool.Close.
+// → repos → wa.Manager + boot reconciliation → self-convo runner (nil unless
+// WSM_SELF_CONVO_ENABLED=true; startSelfConvo, selfconvo.go) → HTTP. Shutdown
+// order is a hard requirement: server.Shutdown → runner.Stop (if non-nil) →
+// manager.Close (which now also closes the backend) → the WA backend's own
+// store, if it opened one → pool.Close.
 package main
 
 import (
@@ -30,6 +32,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
@@ -165,6 +168,7 @@ func run() error {
 	// dashboard read path (its analytics methods).
 	msgRepo := message.NewRepository(appDB)
 	callRepo := call.NewRepository(appDB)
+	convoRepo := convo.NewRepository(appDB)
 	// inboundRepo is nil-able on Manager (see Manager.inbound's doc
 	// comment) but always real in production — WSM_INBOUND_ENABLED only
 	// gates whether internal/wa's pump actually polls waxum for it, not
@@ -181,6 +185,10 @@ func run() error {
 	if err := manager.StartAll(ctx); err != nil { // boot reconciliation; never blocks
 		return err
 	}
+
+	// Self Convo runner: nil when WSM_SELF_CONVO_ENABLED is off (the
+	// default) — see startSelfConvo's doc comment (cmd/app/selfconvo.go).
+	runner := startSelfConvo(ctx, cfg, convoRepo, manager, msgRepo)
 
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
@@ -219,6 +227,9 @@ func run() error {
 			MessageStats:           msgRepo,
 			APIClients:             apiClients,
 			Calls:                  callRepo,
+			Convo:                  convoRepo,
+			SelfConvo:              runner,
+			SelfConvoEnabled:       cfg.SelfConvoEnabled,
 			Inbound:                inboundRepo,
 			Objects:                objectStore,
 			MediaMaxBytes:          cfg.MediaMaxBytes,
@@ -254,6 +265,9 @@ func run() error {
 
 	select {
 	case err := <-errCh:
+		if runner != nil {
+			runner.Stop()
+		}
 		manager.Close()
 		return err
 	case <-ctx.Done():
@@ -262,9 +276,12 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	err = server.Shutdown(shutdownCtx) // 1) stop accepting / drain HTTP
-	manager.Close()                    // 2) close queues, cancel pumps, Disconnect, wg.Wait()
+	if runner != nil {
+		runner.Stop() // 2) join the self-convo loop, letting any in-flight send finish
+	}
+	manager.Close() // 3) close queues, cancel pumps, Disconnect, wg.Wait()
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return nil // 3) deferred pool.Close() runs last
+	return nil // 4) deferred pool.Close() runs last
 }
