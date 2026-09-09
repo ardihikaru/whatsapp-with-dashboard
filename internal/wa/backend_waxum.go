@@ -832,11 +832,93 @@ func (b *waxumBackend) StartPairing(ctx context.Context, s *ManagedSession, mode
 	return nil
 }
 
+// rollbackPairing undoes StartPairing's local state bump (s.pairing, s.state)
+// when a remote setup call failed outright. It also best-effort tells waxum
+// to stop, because the two remote calls above are not atomic:
+// CreateSession may well have already succeeded on the line before Connect
+// failed, leaving a registry row (and, if Connect itself partially started
+// a client, a live pairing attempt) on waxum's side with nothing in WSM
+// pointing at it any more — the same forgotten-attempt shape
+// finishPairingFailure's doc comment describes, just entered from the other
+// direction. A CreateSession failure leaves nothing on waxum's side to
+// stop, so the Disconnect below is a routine 404/NotConnected there and is
+// swallowed the same way — see disconnectAbandonedPairing.
 func (b *waxumBackend) rollbackPairing(s *ManagedSession) {
 	s.mu.Lock()
 	s.pairing = nil
 	s.state = StateNew
 	s.mu.Unlock()
+	b.disconnectAbandonedPairing(s, "pairing setup failed")
+}
+
+// abandonedPairingDisconnectTimeout bounds the best-effort waxum Disconnect
+// issued by disconnectAbandonedPairing. It must never hold up teardown or a
+// StartPairing caller waiting on rollbackPairing, and s.mgr.persistCtx
+// itself carries no deadline (context.WithoutCancel, manager.go) to bound
+// it for us.
+const abandonedPairingDisconnectTimeout = 5 * time.Second
+
+// disconnectAbandonedPairing best-effort tells waxum to stop an attempt WSM
+// has already given up on — see finishPairingFailure's and rollbackPairing's
+// doc comments for why each calls this.
+//
+// It runs on s.mgr.persistCtx, not the caller's own ctx: by the time either
+// caller runs, pairPump's pctx is already expired/cancelled (that IS why
+// the pump returned), so a call scoped to it would fail instantly and do
+// nothing — persistCtx exists precisely so teardown writes like this one
+// can still land (manager.go's doc comment on the field). It also runs
+// OUTSIDE s.mu: session.go documents s.mu as for short, cheap work only,
+// never held across a remote call like Connect/SendMessage/Logout, and this
+// is the same shape of call.
+//
+// This is deliberately the ONLY remote call made here — never follow it
+// with a Connect. See CLAUDE.md's Deactivate-then-Activate wedge hazard: a
+// Disconnect racing an in-flight Connect on waxum's side can strand the
+// session's runtime with no live client anywhere in waxum's process
+// (reachability: null), recoverable only by restarting the waxum process.
+// Calling Disconnect and then stopping keeps this well clear of that race.
+//
+// A failing or 404 Disconnect does not change control flow — the caller's
+// state transition to StateNew already happened and stays unconditional
+// either way. waxum answers NotConnected/404 for a session with no live
+// client, the ordinary outcome for an attempt that was abandoned or never
+// got off the ground, so that case is swallowed exactly like
+// waxumBackend.Disconnect already swallows waxum.ErrNotFound. Only a
+// genuinely unexpected failure is surfaced, matching the posture
+// Manager.Delete uses for a failed backend Logout (manager_crud.go): a
+// slog.Warn for operational visibility plus s.ring so a test — or an
+// operator reading the session's own event log — can see it without
+// capturing slog output.
+//
+// Skipped entirely once s.mgr.closed is true — i.e. once Manager.Close has
+// started. Close sets closed via CompareAndSwap as its very first action,
+// strictly before it cancels any session's ctx or issues its own
+// m.backend.Disconnect(m.persistCtx, s) for that same session
+// (manager_boot.go), so a pairing pump that wakes from finishPairingFailure
+// BECAUSE of shutdown always observes closed already true, and Close has
+// already covered — or is about to cover, moments later in the very same
+// loop — the disconnect this method exists to make. Without this guard,
+// this call runs on persistCtx (context.WithoutCancel — deliberately
+// immune to the shutdown that triggered it) and can block m.wg.Wait() for
+// the full abandonedPairingDisconnectTimeout: against
+// docker-compose.yml's 15s stop_grace_period that is a third of the
+// teardown budget, spent for nothing, during exactly the window CLAUDE.md's
+// SIGKILL-mid-write-to-`-wal` hazard warns about. A pump that instead
+// expires on its own pairTimeout while the manager is still running must
+// still reach this call normally — only the shutdown path is short-
+// circuited. See
+// TestClosingTheManagerDoesNotMakeAnAbandonedPairingWaitOnADisconnectShutdownAlreadyIssued.
+func (b *waxumBackend) disconnectAbandonedPairing(s *ManagedSession, reason string) {
+	if s.mgr.closed.Load() {
+		return
+	}
+	ctx, cancel := context.WithTimeout(s.mgr.persistCtx, abandonedPairingDisconnectTimeout)
+	defer cancel()
+	if err := b.client.Disconnect(ctx, s.ID); err != nil && !errors.Is(err, waxum.ErrNotFound) {
+		slog.Warn("waxum disconnect failed while abandoning a pairing attempt; the session may still be pairing on waxum's side",
+			"session", s.ID, "reason", reason, "err", err)
+		s.ring("abandon pairing: waxum disconnect failed (possibly still pairing on waxum's side): " + err.Error())
+	}
 }
 
 // pairPump polls waxum for the duration of one pairing attempt. It replaces
@@ -1092,6 +1174,21 @@ func (b *waxumBackend) finishPairingSuccess(s *ManagedSession, ps *PairingState,
 // keep the pairing box (done+err) so the status partial can show why. No
 // device row exists to purge (waxum only persists credentials on its own
 // side, on success) — matches meow's comment for the same reason.
+//
+// It also best-effort tells waxum to stop the attempt
+// (disconnectAbandonedPairing), which used to be the whole missing half of
+// this function: WSM's give-up was purely local, and waxum kept driving
+// whatsapp-rust for the same never-scanned client forever. Every
+// Event::PairingQrCode there sets status WaitingForQr and bumps
+// pair.attempts (waxum fork's src/handlers/sessions.rs:1659), and
+// whatsapp-rust rotates the QR payload roughly every 20s indefinitely for
+// an unpaired client — so attempts climbs without bound. Neither
+// reconnect_all_on_startup nor the reconnect watchdog stops it:
+// WaitingForQr is skipped by the former, and the latter only rebuilds a
+// stuck client, it never gives up on one. Observed live: session
+// 6686fd00… sat at pair.attempts=3744, no phone_number, roughly 20 hours
+// after WSM itself had already rolled the session back to new. Only an
+// explicit Disconnect (or restarting the waxum process) stops the loop.
 func (b *waxumBackend) finishPairingFailure(s *ManagedSession, ps *PairingState, cause error) {
 	if cause == nil {
 		cause = errors.New("pairing aborted")
@@ -1104,4 +1201,5 @@ func (b *waxumBackend) finishPairingFailure(s *ManagedSession, ps *PairingState,
 	s.mu.Unlock()
 	_ = s.mgr.repo.UpdateStatus(s.mgr.persistCtx, s.ID, string(StateNew))
 	s.ringLevel("warn", "pairing failed: "+cause.Error())
+	b.disconnectAbandonedPairing(s, "pairing failed: "+cause.Error())
 }

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -22,12 +23,13 @@ import (
 // for "N polls have happened", or assert a call count stayed exactly N (the
 // connect-nudge idempotency tests), without sleeping a fixed, flaky amount.
 type waxumFakeCalls struct {
-	create  atomic.Int32
-	status  atomic.Int32
-	qr      atomic.Int32
-	pair    atomic.Int32
-	connect atomic.Int32
-	delete_ atomic.Int32
+	create     atomic.Int32
+	status     atomic.Int32
+	qr         atomic.Int32
+	pair       atomic.Int32
+	connect    atomic.Int32
+	disconnect atomic.Int32
+	delete_    atomic.Int32
 	// events counts how many times a client has dialed GET
 	// /api/v1/events/tail — one per connection ATTEMPT, so a test asserting
 	// a redial can watch this climb past 1.
@@ -59,6 +61,20 @@ type waxumFakeOpts struct {
 	// /api/v1/sessions/{id} per call (n is 1-based). Nil means every call
 	// succeeds with 200.
 	deleteFn func(n int) int
+	// disconnectFn, when set, determines the HTTP status for POST
+	// /api/v1/sessions/{id}/disconnect per call (n is 1-based). Nil means
+	// every call succeeds with 200 — used to simulate waxum answering 404
+	// (ErrNotFound, the normal "no live client to stop" outcome — see
+	// waxumBackend.Disconnect's own posture) or a genuinely unexpected
+	// failure.
+	disconnectFn func(n int) int
+	// disconnectHandler, when set, handles POST …/disconnect directly
+	// instead of the calls.disconnect+disconnectFn shape above (calls.disconnect
+	// is still incremented either way). Needed when a test cares about the
+	// RESPONSE TIMING of a disconnect call — e.g. blocking it to prove some
+	// other codepath does not end up waiting on it — not just its status
+	// code, mirroring eventsHandler's "full control" escape hatch below.
+	disconnectHandler http.HandlerFunc
 	// alwaysRateLimited, when true, makes EVERY request under
 	// /api/v1/sessions/ (status, qr, pair, connect, delete — NOT the bare
 	// POST /api/v1/sessions create path) answer 429 forever, regardless of
@@ -180,7 +196,18 @@ func newWaxumFakeServer(t *testing.T, opts waxumFakeOpts) (*waxum.Client, *waxum
 		case strings.HasSuffix(r.URL.Path, "/connect"):
 			calls.connect.Add(1)
 			w.WriteHeader(http.StatusOK)
-		default: // /disconnect etc — not under test here
+		case strings.HasSuffix(r.URL.Path, "/disconnect"):
+			n := int(calls.disconnect.Add(1))
+			if opts.disconnectHandler != nil {
+				opts.disconnectHandler(w, r)
+				return
+			}
+			status := http.StatusOK
+			if opts.disconnectFn != nil {
+				status = opts.disconnectFn(n)
+			}
+			w.WriteHeader(status)
+		default: // not under test here
 			w.WriteHeader(http.StatusOK)
 		}
 	})
@@ -541,6 +568,204 @@ func TestManagerCloseReturnsPromptlyWithAPairingPumpRunning(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Manager.Close did not return promptly with a pairing pump running " +
 			"(SIGKILL-on-teardown hazard — see CLAUDE.md's WhatsApp session identity note)")
+	}
+}
+
+// TestClosingTheManagerDoesNotMakeAnAbandonedPairingWaitOnADisconnectShutdownAlreadyIssued
+// is the regression test for the shutdown-latency regression
+// disconnectAbandonedPairing's guard exists to prevent: Manager.Close
+// (manager_boot.go) cancels this session's ctx AND issues its own
+// m.backend.Disconnect(m.persistCtx, s) for it, in that same loop, before
+// blocking on m.wg.Wait(). Without the s.mgr.closed guard, the pairing pump
+// woken by that ctx cancellation reaches finishPairingFailure and makes a
+// SECOND Disconnect call of its own — on persistCtx, which Close's shutdown
+// cannot interrupt — so Close winds up waiting on two serialized disconnect
+// calls instead of the one it already made itself.
+//
+// disconnectHandler below forces that serialization deterministically (a
+// shared mutex, independent of how many goroutines the test HTTP server
+// itself uses) rather than relying on real concurrency to line the two
+// calls up: every call to POST …/disconnect blocks for disconnectBlock.
+// With the guard, Close makes exactly ONE such call (its own) and returns
+// in roughly disconnectBlock; without it, Close wants both calls to finish
+// (its own AND the pump's) before wg.Wait() unblocks — roughly
+// 2×disconnectBlock. closePromptBound sits strictly between the two, so
+// this fails against the unguarded code and passes with the guard.
+func TestClosingTheManagerDoesNotMakeAnAbandonedPairingWaitOnADisconnectShutdownAlreadyIssued(t *testing.T) {
+	const disconnectBlock = 400 * time.Millisecond
+	const closePromptBound = 700 * time.Millisecond // > 1×disconnectBlock, < 2×disconnectBlock
+
+	var disconnectMu sync.Mutex
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{
+		disconnectHandler: func(w http.ResponseWriter, r *http.Request) {
+			disconnectMu.Lock()
+			defer disconnectMu.Unlock()
+			time.Sleep(disconnectBlock)
+			w.WriteHeader(http.StatusOK)
+		},
+	})
+	b := &waxumBackend{
+		client:         client,
+		qrPollInterval: 2 * time.Millisecond,
+		pollInterval:   time.Hour,
+		pairTimeout:    time.Hour, // never reached — only Close's own ctx cancellation ends this pump
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	mgr := NewManager(ctx, b, newStubSessions(), newStubMsgs(), nil,
+		Config{SendRate: 1, SendBurst: 3, ReconcilePar: 2})
+
+	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.StartPairing(PairModeQR); err != nil {
+		t.Fatalf("StartPairing: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond) // let the pump actually start polling
+
+	start := time.Now()
+	closeDone := make(chan struct{})
+	go func() {
+		mgr.Close()
+		close(closeDone)
+	}()
+	select {
+	case <-closeDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Manager.Close did not return at all within 3s — far worse than the regression under test")
+	}
+	elapsed := time.Since(start)
+
+	if elapsed > closePromptBound {
+		t.Fatalf("Manager.Close took %v (want <= %v): an abandoned pairing's own waxum disconnect "+
+			"is waiting behind the shutdown's disconnect instead of being skipped — "+
+			"see disconnectAbandonedPairing's s.mgr.closed guard", elapsed, closePromptBound)
+	}
+	if got := calls.disconnect.Load(); got != 1 {
+		t.Fatalf("POST …/disconnect calls = %d, want exactly 1 (Close's own) — "+
+			"the pairing pump made an extra one instead of skipping it", got)
+	}
+}
+
+// TestAPairingPumpReachingItsHardDeadlineTellsWaxumToDisconnectSoAnAbandonedQRAttemptDoesNotRotateCodesForever
+// is the direct regression test for the resource leak diagnosed against the
+// live waxum fork: finishPairingFailure used to reset ONLY WSM's own state
+// (StateNew) and never told waxum to stop, so an unscanned QR kept rotating
+// and pair.attempts kept climbing on waxum's side forever (observed live:
+// session 6686fd00…, pair.attempts=3744, ~20h after WSM itself had already
+// given up). This fails against the pre-fix code because nothing ever calls
+// POST …/disconnect when pairPump gives up at its deadline.
+func TestAPairingPumpReachingItsHardDeadlineTellsWaxumToDisconnectSoAnAbandonedQRAttemptDoesNotRotateCodesForever(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{}) // never terminal, never scanned — by default
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StatePairing)
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(context.Background(), s, ps, 2*time.Millisecond, time.Now().Add(20*time.Millisecond))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pairPump did not return at its deadline")
+	}
+
+	waitForCondition(t, "waxum to receive a Disconnect for the abandoned pairing attempt", func() bool {
+		return calls.disconnect.Load() >= 1
+	})
+	if s.state != StateNew {
+		t.Fatalf("s.state = %v, want StateNew after an abandoned pairing attempt", s.state)
+	}
+}
+
+// TestAConnectFailureDuringStartPairingStillDisconnectsTheSessionCreateSessionJustCreated
+// is rollbackPairing's regression test: CreateSession and Connect are two
+// separate remote calls, not one atomic operation, so a Connect failure
+// leaves a registry row on waxum's side (created by the CreateSession call
+// immediately above it) with nothing in WSM pointing at it any more unless
+// rollbackPairing also disconnects it.
+func TestAConnectFailureDuringStartPairingStillDisconnectsTheSessionCreateSessionJustCreated(t *testing.T) {
+	// waxumFakeOpts has no connectFn hook to make POST …/connect fail on
+	// demand, so this test builds a minimal purpose-built server instead of
+	// newWaxumFakeServer — just enough of the same shape for the one call
+	// sequence under test (CreateSession succeeds, Connect fails).
+	var disconnects atomic.Int32
+	var creates atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+		creates.Add(1)
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.HandleFunc("/api/v1/sessions/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/connect"):
+			w.WriteHeader(http.StatusInternalServerError)
+		case strings.HasSuffix(r.URL.Path, "/disconnect"):
+			disconnects.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	wc := waxum.New(srv.URL, "test-token", 5*time.Second,
+		waxum.WithClientRateLimit(1e6, 1e6),
+		waxum.WithRetryPolicy(1, func(int, string) time.Duration { return time.Millisecond }))
+
+	b := &waxumBackend{client: wc}
+	mgr := newWaxumTestManager(t, b)
+	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-1111")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.StartPairing(PairModeQR); err == nil {
+		t.Fatal("StartPairing: err = nil, want a Connect failure to propagate")
+	}
+	if creates.Load() != 1 {
+		t.Fatalf("CreateSession calls = %d, want 1 (StartPairing must still have created the row before Connect failed)", creates.Load())
+	}
+	waitForCondition(t, "waxum to receive a Disconnect for the session CreateSession just created", func() bool {
+		return disconnects.Load() >= 1
+	})
+	if s.state != StateNew {
+		t.Fatalf("s.state = %v, want StateNew after a failed StartPairing", s.state)
+	}
+}
+
+// TestAFailingWaxumDisconnectDuringPairingFailureStillLeavesTheSessionInStateNew
+// proves the disconnect this phase added is genuinely best-effort: even
+// when waxum answers something other than success or 404 for the
+// disconnect, the local state transition to StateNew — the thing an
+// operator actually depends on to retry pairing — must happen regardless.
+func TestAFailingWaxumDisconnectDuringPairingFailureStillLeavesTheSessionInStateNew(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{
+		disconnectFn: func(int) int { return http.StatusInternalServerError },
+	})
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StatePairing)
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	b.finishPairingFailure(s, ps, errors.New("boom"))
+
+	if s.state != StateNew {
+		t.Fatalf("s.state = %v, want StateNew even though waxum's Disconnect call failed — "+
+			"the disconnect must be best-effort and never gate the local state transition", s.state)
+	}
+	waitForCondition(t, "the failing Disconnect to actually have been attempted", func() bool {
+		return calls.disconnect.Load() >= 1
+	})
+	if snap := ps.Snapshot(); !snap.Done || snap.Err == "" {
+		t.Fatalf("PairingState after failure = %+v, want Done with a non-empty Err", snap)
 	}
 }
 
