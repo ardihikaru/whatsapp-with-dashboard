@@ -1743,3 +1743,32 @@ used throughout.
 sudo cp /etc/nginx/conf.d/wa.conf.bak.20260910005405 /etc/nginx/conf.d/wa.conf
 sudo nginx -t && sudo systemctl reload nginx
 ```
+
+### Same day — the app redeployed onto `rnd-v2-vpn`
+
+The commit above changes no app behaviour: `routes_api.go` is comment-only and
+the sole compiled change is `nginx_edge_test.go`, which never ships in the
+binary. The redeploy was requested anyway, so it is recorded for what it cost
+rather than for what it changed.
+
+`git pull --ff-only` to `b63dc18`, then `make up REMOTE_DB=1` on
+`/home/sismedika/devel/projects/whatsapp-with-dashboard`. Only `app` was
+recreated — `waxum` stayed `Up (healthy)` throughout, which is the outcome to
+want: its volume is the paired device's identity.
+
+The restart did drop both sessions, and they came back on their own:
+
+```
+immediately after start   connected=0  sessions=2   both state=disconnected
+t+25s                     connected=1
+t+75s                     connected=2   — same as before the redeploy
+```
+
+No `error`/`panic`/`fatal` lines in `docker compose logs app`, and no waxum
+wedge: this is the ordinary reconnect, not the `is_logged_in && !socket_alive`
+fingerprint. Worth noting the ~75s window is real, though — an app restart on
+this stack costs about a minute of send capacity even when nothing goes wrong.
+
+The public surface was re-probed after the redeploy and is unchanged:
+`GET /api/v1/health` 200 anonymously, `GET /api/v1/sessions` 200 with the
+credential, `DELETE /api/v1/sessions/000…000` still 404 `text/html` from nginx.
