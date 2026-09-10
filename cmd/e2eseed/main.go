@@ -34,6 +34,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo/corpus"
 )
 
 // ErrNotSQLite is returned for any DSN that is not a local SQLite file.
@@ -113,8 +114,13 @@ func run() error {
 	if err := seedSelfConvo(ctx, pool, base); err != nil {
 		return err
 	}
-	log.Printf("seeded %d sessions, %d api clients, %d messages, self-convo template + 3 runs",
-		len(seedSessionDefs), len(clientIDs), n)
+	nTemplates, nSchedules, err := seedConvoScheduling(ctx, pool, base)
+	if err != nil {
+		return err
+	}
+	log.Printf("seeded %d sessions, %d api clients, %d messages, self-convo template + 3 runs, "+
+		"%d corpus templates, %d schedules",
+		len(seedSessionDefs), len(clientIDs), n, nTemplates, nSchedules)
 	return nil
 }
 
@@ -387,4 +393,162 @@ func seedSelfConvo(ctx context.Context, pool *sql.DB, base time.Time) error {
 	}
 
 	return nil
+}
+
+// e2eConvoTopic is the one corpus pack (of the 50 internal/selfconvo/corpus
+// ships) this seeder materialises — see seedConvoScheduling's own doc
+// comment for why one full pack rather than a hand-picked slice of it.
+const e2eConvoTopic = "ngopi"
+
+// e2eConvoSeed is corpus.Generate's own seed for this file — fixed so a
+// re-run (guarded, like every other seed* function, by run()'s
+// "already seeded" check) always produces byte-identical templates and
+// links.
+const e2eConvoSeed uint64 = 20260910
+
+// e2eDateLayout is the <input type="date">/wa_convo_schedules date-column
+// shape (dateInputLayout, internal/handler/self_convo_schedule_ui.go) —
+// kept as a separate literal here for the same reason that file keeps its
+// own copy of planner.go's dateLayout rather than importing either: this
+// package has no reason to depend on internal/handler or internal/selfconvo
+// for one layout string.
+const e2eDateLayout = "2006-01-02"
+
+// seedConvoScheduling materialises the "ngopi" corpus pack (48 templates —
+// 4 setups x 4 endings per opener/middle/closer scene, wired into a
+// weighted, cyclic correlation graph closer->opener included, see
+// corpus/generate.go's and chain.go's own doc comments) as convo.Template
+// rows with Origin=convo.OriginCorpus, plus their outgoing
+// convo.TemplateLink edges — the SAME insertion shape cmd/convoseed uses at
+// production scale (50 topics, ~2400 templates), just one topic. That is
+// "a handful of corpus templates" in the sense the phase brief means: a
+// small SLICE of the corpus, not the full catalogue — every pack's shape
+// (four setups by four endings per stage) fixes it at exactly 48
+// templates, so there is no smaller unit to seed that still exercises the
+// templates page's topic filter and a template's own outgoing-links table
+// meaningfully (a cap that kept, say, only the opener stage would keep
+// zero outgoing links — every opener->middle edge would point at an
+// excluded target).
+//
+// Two convo.Schedule rows follow, covering what
+// e2e/convo-schedules.spec.ts and e2e/overflow.spec.ts need that this
+// file's other seed* functions do not already provide:
+//
+//   - "e2e-convo-sched-active": weekly recurrence, TWO receivers
+//     (seedSessionDefs[1] and [2] — "several receivers") and no end date,
+//     rendering convo_schedule_rows.html's/schedule_view.html's "no end
+//     date" badge.
+//   - "e2e-convo-sched-stalled": daily recurrence, one receiver, moved to
+//     `stalled` via SetScheduleState with a reason in the SAME
+//     "session <id>: <text>" shape Planner.planSchedule's own health-gate
+//     stall writes (planner.go's stallReason) — not a hand-invented
+//     string, so the page under test renders exactly what a real stall
+//     looks like.
+//
+// Both schedules' sender/receivers are seedSessionDefs entries resolved
+// directly: this seeder writes to the DB through convo.Repository, unlike
+// the create-schedule FORM, which only offers h.Manager.Snapshots()'s
+// connected fleet (scheduleSessions, self_convo_schedule_ui.go) — no such
+// constraint applies to a row inserted straight through the repository.
+func seedConvoScheduling(ctx context.Context, pool *sql.DB, base time.Time) (templateCount, scheduleCount int, err error) {
+	packs, err := corpus.Packs()
+	if err != nil {
+		return 0, 0, fmt.Errorf("load corpus packs: %w", err)
+	}
+	var pack *corpus.Pack
+	for i := range packs {
+		if packs[i].Topic == e2eConvoTopic {
+			pack = &packs[i]
+			break
+		}
+	}
+	if pack == nil {
+		return 0, 0, fmt.Errorf("corpus pack %q not found among embedded packs", e2eConvoTopic)
+	}
+	generated, err := corpus.Generate([]corpus.Pack{*pack}, e2eConvoSeed)
+	if err != nil {
+		return 0, 0, fmt.Errorf("generate %q corpus subset: %w", e2eConvoTopic, err)
+	}
+
+	repo := convo.NewRepository(pool)
+	nameToID := make(map[string]string, len(generated))
+	tmplCreated := base.Add(-6 * time.Hour)
+	for i, g := range generated {
+		tid := fmt.Sprintf("e2e-convo-corpus-%04d", i+1)
+		nameToID[g.Name] = tid
+		tmpl := &convo.Template{
+			ID: tid, Name: g.Name, Topic: g.Topic, Stage: g.Stage,
+			Origin: convo.OriginCorpus, TurnCount: len(g.Script.Turns), Body: g.Body,
+			CreatedAt: tmplCreated, UpdatedAt: tmplCreated,
+		}
+		if err := repo.InsertTemplate(ctx, tmpl); err != nil {
+			return 0, 0, fmt.Errorf("insert corpus template %q: %w", g.Name, err)
+		}
+	}
+	for _, g := range generated {
+		links := make([]convo.TemplateLink, 0, len(g.Links))
+		for _, l := range g.Links {
+			links = append(links, convo.TemplateLink{
+				ToTemplateID: nameToID[l.ToName], Weight: l.Weight,
+				MinGapSeconds: l.MinGapSeconds, MaxGapSeconds: l.MaxGapSeconds,
+			})
+		}
+		if err := repo.ReplaceTemplateLinks(ctx, nameToID[g.Name], links); err != nil {
+			return 0, 0, fmt.Errorf("insert links for %q: %w", g.Name, err)
+		}
+	}
+
+	// The seeder's three sessions (seedSessionDefs): the first two are
+	// "connected"/"disconnected" respectively (irrelevant here — see this
+	// function's own doc comment on why that gate does not apply to a
+	// direct repository insert), the third has no JID at all. All three
+	// are usable as a schedule's snapshot sender/receiver rows regardless.
+	sender, recvB, recvC := seedSessionDefs[0], seedSessionDefs[1], seedSessionDefs[2]
+
+	activeCreated := base.Add(-2 * time.Hour)
+	active := &convo.Schedule{
+		ID: "e2e-convo-sched-active", Name: "Ngopi sore — tim outlet",
+		SenderSessionID: sender.ID, SenderName: sender.Name, SenderPhone: sender.Phone,
+		Topic: e2eConvoTopic, ChainEnabled: true,
+		Recurrence: convo.RecurrenceWeekly, Weekdays: "1,3,5",
+		SetsPerDay: 2, WindowStart: "09:00", WindowEnd: "17:00", Timezone: "Asia/Jakarta",
+		StartDate: base.Add(-30 * 24 * time.Hour).Format(e2eDateLayout),
+		// EndDate left blank on purpose: this is the "no end date" fixture
+		// convo_schedule_rows.html's/schedule_view.html's badge_nonstop
+		// badge renders — see this function's own doc comment.
+		State: convo.ScheduleActive, CreatedAt: activeCreated, UpdatedAt: activeCreated,
+	}
+	activeReceivers := []convo.ScheduleReceiver{
+		{SessionID: recvB.ID, SessionName: recvB.Name, Phone: recvB.Phone, Position: 0},
+		{SessionID: recvC.ID, SessionName: recvC.Name, Phone: recvC.Phone, Position: 1},
+	}
+	if err := repo.InsertSchedule(ctx, active, activeReceivers); err != nil {
+		return len(generated), 0, fmt.Errorf("insert active schedule: %w", err)
+	}
+
+	stalledCreated := base.Add(-4 * time.Hour)
+	stalled := &convo.Schedule{
+		ID: "e2e-convo-sched-stalled", Name: "Ngopi pagi — cadangan outlet",
+		SenderSessionID: sender.ID, SenderName: sender.Name, SenderPhone: sender.Phone,
+		Topic: e2eConvoTopic, ChainEnabled: false,
+		Recurrence: convo.RecurrenceDaily,
+		SetsPerDay: 1, WindowStart: "08:00", WindowEnd: "10:00", Timezone: "Asia/Jakarta",
+		StartDate: base.Add(-10 * 24 * time.Hour).Format(e2eDateLayout),
+		State:     convo.ScheduleActive, CreatedAt: stalledCreated, UpdatedAt: stalledCreated,
+	}
+	stalledReceivers := []convo.ScheduleReceiver{
+		{SessionID: recvB.ID, SessionName: recvB.Name, Phone: recvB.Phone, Position: 0},
+	}
+	if err := repo.InsertSchedule(ctx, stalled, stalledReceivers); err != nil {
+		return len(generated), 1, fmt.Errorf("insert stalled schedule: %w", err)
+	}
+	// The same "session <id>: <text>" shape Planner.planSchedule's own
+	// health-gate stall writes (planner.go), not a hand-invented string.
+	stallReason := fmt.Sprintf("session %s: socket disconnected, waiting for reconnect", recvB.ID)
+	stalledAt := base.Add(-3 * time.Hour)
+	if err := repo.SetScheduleState(ctx, stalled.ID, convo.ScheduleStalled, stallReason, stalledAt); err != nil {
+		return len(generated), 1, fmt.Errorf("stall schedule: %w", err)
+	}
+
+	return len(generated), 2, nil
 }

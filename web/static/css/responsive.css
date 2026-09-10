@@ -35,6 +35,25 @@
 
 .nav-backdrop { display: none; }
 
+/* The sidebar is display:flex; flex-direction:column (layout.css), with a
+ * fixed height (100vh desktop, 100dvh in the phone drawer below). .nav-scroll
+ * is the flex child that actually grows/shrinks to fill the space left by
+ * .sidebar-logo above and .nav-user/.nav-footer below, and it is the ONLY
+ * piece that scrolls: min-height: 0 is required for a flex item to be allowed
+ * to shrink below its content size at all, and without it overflow-y here
+ * would never trigger — the box would just grow past the sidebar's own fixed
+ * height instead, exactly the eleven-destination bug this rule fixes (the
+ * eleventh item, "Convo Schedules", pushed "API Docs" past the visible drawer
+ * on a 360x740 phone with no way to reach it). Top-level, not inside the
+ * max-width query below: a sidebar that keeps growing destinations should
+ * scroll on desktop too, not just on phones, once it stops fitting there.
+ */
+.nav-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
 /* Who you are signed in as. Redundant on desktop, where .header-user shows it;
    shown below 900px so hiding .header-user on a narrow phone loses nothing. */
 .nav-user {

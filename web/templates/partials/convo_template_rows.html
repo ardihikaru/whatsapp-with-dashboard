@@ -1,8 +1,9 @@
 {{define "convo_template_rows"}}
-{{if .Error}}<tr><td colspan="5"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{if .Error}}<tr><td colspan="6"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
 {{range .Templates}}
 <tr>
   <td><a href="{{u "/self-convo/templates"}}/{{.ID}}">{{.Name}}</a></td>
+  <td>{{if .Topic}}{{.Topic}}{{else}}—{{end}}</td>
   <td class="mono">{{.TurnCount}}</td>
   <td class="mono">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
   <td>
@@ -22,6 +23,6 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="5">No templates yet.</td></tr>
+<tr><td colspan="6">No templates yet.</td></tr>
 {{end}}
 {{end}}

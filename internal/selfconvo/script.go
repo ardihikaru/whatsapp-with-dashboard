@@ -14,6 +14,8 @@ import (
 	"io"
 	"regexp"
 	"strings"
+
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo/paraphrase"
 )
 
 const (
@@ -31,6 +33,8 @@ const (
 	MaxTextChars = 4096
 	// MaxNameChars caps Script.Name.
 	MaxNameChars = 120
+	// MaxTopicChars caps Script.Topic, in runes.
+	MaxTopicChars = 48
 	// MaxVarValueChars caps each value in Script.Vars, in runes.
 	MaxVarValueChars = 256
 	// MaxDelaySeconds bounds both Pacing.MaxSeconds and any per-turn
@@ -49,11 +53,20 @@ const ExampleFilename = "self-convo-template.json"
 
 // Script is the top-level JSON document describing a simulated conversation.
 type Script struct {
-	Version int                 `json:"version"`
-	Name    string              `json:"name,omitempty"`
-	Pacing  *Pacing             `json:"pacing,omitempty"`
-	Vars    map[string][]string `json:"vars,omitempty"`
-	Turns   []Turn              `json:"turns"`
+	Version int    `json:"version"`
+	Name    string `json:"name,omitempty"`
+	// Topic selects the paraphrase engine's emoji pool (see
+	// internal/selfconvo/paraphrase's emoji.json) for every message Vary
+	// paraphrases from this script; "" (the default — every script authored
+	// before this field existed omits it) selects the neutral pool. Purely
+	// cosmetic: Validate's DisallowUnknownFields means an older validator
+	// would have rejected this field outright, so its addition is
+	// backward-compatible only in the direction of an OLDER script running
+	// against the CURRENT Validate, never the reverse.
+	Topic  string              `json:"topic,omitempty"`
+	Pacing *Pacing             `json:"pacing,omitempty"`
+	Vars   map[string][]string `json:"vars,omitempty"`
+	Turns  []Turn              `json:"turns"`
 }
 
 // Pacing is the default random-delay window a turn draws from when it does
@@ -93,7 +106,17 @@ func validationErrorf(format string, args ...any) *ValidationError {
 // the variable name (group 1) so callers can check it against Script.Vars
 // or substitute it in place (see vary.go). Variable names are lowercase
 // snake_case, matching varKeyRE below.
-var placeholderRE = regexp.MustCompile(`\{\{\s*([a-z_][a-z0-9_]*)\s*\}\}`)
+//
+// Built from paraphrase.PlaceholderPattern rather than its own literal:
+// internal/selfconvo/paraphrase also needs to recognise a placeholder (so
+// its rewrite steps never touch one), and that package must not import
+// this one (paraphrase is selfconvo's dependency, not the reverse) — so it
+// cannot share this *regexp.Regexp value directly. Keeping ONE pattern
+// STRING as the source of truth for both compiled regexps, instead of two
+// hand-maintained literals, is how they're kept from drifting apart
+// silently; TestPlaceholderPatternMatchesParaphrasePlaceholderPattern pins
+// the two literal sources equal.
+var placeholderRE = regexp.MustCompile(paraphrase.PlaceholderPattern)
 
 // varKeyRE is the allowed shape of a Script.Vars key: lowercase snake_case,
 // the same shape placeholderRE requires inside `{{...}}`.
@@ -130,6 +153,16 @@ func Validate(raw []byte) (Script, error) {
 	s.Name = strings.TrimSpace(s.Name)
 	if len([]rune(s.Name)) > MaxNameChars {
 		return Script{}, validationErrorf("name is over %d characters", MaxNameChars)
+	}
+
+	s.Topic = strings.TrimSpace(s.Topic)
+	if s.Topic != "" {
+		if len([]rune(s.Topic)) > MaxTopicChars {
+			return Script{}, validationErrorf("topic is over %d characters", MaxTopicChars)
+		}
+		if !varKeyRE.MatchString(s.Topic) {
+			return Script{}, validationErrorf("topic %q must be lowercase snake_case (match %s)", s.Topic, varKeyRE.String())
+		}
 	}
 
 	if len(s.Turns) < 2 {

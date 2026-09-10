@@ -3,6 +3,7 @@ package selfconvo
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
@@ -102,6 +103,22 @@ func (g *managerGateway) Send(ctx context.Context, req SendRequest) (SendReceipt
 // no id for) is reported not-found without a query: message.SQLRepository's
 // primary key is never empty, so a lookup would only ever waste a round
 // trip to learn what is already known.
+// Healthy reports on ids via the SAME Participant call above — see
+// Gateway.Healthy's doc comment for exactly which signal that is (and is
+// not) reading.
+func (g *managerGateway) Healthy(ids []string) (sessionID, reason string, ok bool) {
+	for _, id := range ids {
+		p, found := g.Participant(id)
+		if !found {
+			return id, fmt.Sprintf("session %s not found", id), false
+		}
+		if !p.Connected {
+			return id, fmt.Sprintf("session %s (%s) is not connected", p.Name, id), false
+		}
+	}
+	return "", "", true
+}
+
 func (g *managerGateway) MessageStatus(ctx context.Context, messageID string) (status, reason string, found bool, err error) {
 	if messageID == "" {
 		return "", "", false, nil

@@ -5,11 +5,15 @@
 // wa.NewWhatsmeowBackend, OR — when WSM_WA_BACKEND=waxum — a waxum HTTP
 // client via wa.NewWaxumBackend with NO SQLite store opened at all; see
 // newBackend's doc comment for why that matters) → app store (MySQL/SQLite)
-// → repos → wa.Manager + boot reconciliation → self-convo runner (nil unless
-// WSM_SELF_CONVO_ENABLED=true; startSelfConvo, selfconvo.go) → HTTP. Shutdown
-// order is a hard requirement: server.Shutdown → runner.Stop (if non-nil) →
-// manager.Close (which now also closes the backend) → the WA backend's own
-// store, if it opened one → pool.Close.
+// → repos → wa.Manager + boot reconciliation → self-convo runner AND planner
+// (both nil unless WSM_SELF_CONVO_ENABLED=true; startSelfConvo, selfconvo.go)
+// → HTTP. Shutdown order is a hard requirement: server.Shutdown →
+// planner.Stop (if non-nil) → runner.Stop (if non-nil) → manager.Close
+// (which now also closes the backend) → the WA backend's own store, if it
+// opened one → pool.Close. The planner stops FIRST, before the runner,
+// because the planner's only effect is calling the runner's own
+// StartOccurrence — stopping it first guarantees no new occurrence can be
+// materialised while the runner is already winding down.
 package main
 
 import (
@@ -186,9 +190,10 @@ func run() error {
 		return err
 	}
 
-	// Self Convo runner: nil when WSM_SELF_CONVO_ENABLED is off (the
-	// default) — see startSelfConvo's doc comment (cmd/app/selfconvo.go).
-	runner := startSelfConvo(ctx, cfg, convoRepo, manager, msgRepo)
+	// Self Convo runner + planner: both nil when WSM_SELF_CONVO_ENABLED is
+	// off (the default) — see startSelfConvo's doc comment
+	// (cmd/app/selfconvo.go).
+	runner, planner := startSelfConvo(ctx, cfg, convoRepo, manager, msgRepo)
 
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
@@ -230,6 +235,7 @@ func run() error {
 			Convo:                  convoRepo,
 			SelfConvo:              runner,
 			SelfConvoEnabled:       cfg.SelfConvoEnabled,
+			Planner:                planner,
 			Inbound:                inboundRepo,
 			Objects:                objectStore,
 			MediaMaxBytes:          cfg.MediaMaxBytes,
@@ -265,6 +271,9 @@ func run() error {
 
 	select {
 	case err := <-errCh:
+		if planner != nil {
+			planner.Stop()
+		}
 		if runner != nil {
 			runner.Stop()
 		}
@@ -276,10 +285,13 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	err = server.Shutdown(shutdownCtx) // 1) stop accepting / drain HTTP
-	if runner != nil {
-		runner.Stop() // 2) join the self-convo loop, letting any in-flight send finish
+	if planner != nil {
+		planner.Stop() // 2) join the planner loop FIRST — see this file's own boot-order comment
 	}
-	manager.Close() // 3) close queues, cancel pumps, Disconnect, wg.Wait()
+	if runner != nil {
+		runner.Stop() // 3) join the self-convo loop, letting any in-flight send finish
+	}
+	manager.Close() // 4) close queues, cancel pumps, Disconnect, wg.Wait()
 	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}

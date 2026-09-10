@@ -62,6 +62,33 @@ type Gateway interface {
 	// row that exists and says "queued" (also folded into that same
 	// fallback — see Recover's doc comment).
 	MessageStatus(ctx context.Context, messageID string) (status, reason string, found bool, err error)
+
+	// Healthy reports whether every named session can send right now, for
+	// the planner's pre-flight gate (PlanDay) and processRun's mid-run gate
+	// for a scheduled run. sessionID/reason name the FIRST unhealthy session
+	// found, so a stall reason can point at it directly; ok is true only
+	// when every id passed.
+	//
+	// Read CLAUDE.md's "'Connected' means three different things here, and
+	// they can disagree" hazard before touching this method. Healthy reads
+	// exactly the same signal Participant does above — ManagedSession.
+	// Snapshot's Connected field (wa/session.go), itself
+	// `state == StateConnected && backend.Live(s)` — and nothing else. It
+	// deliberately does NOT reach past Snapshot to check whether the
+	// session's sender loop exists (Snapshot has no field for that; the
+	// underlying s.sendQ != nil check is Manager-internal and unexported,
+	// and this package's Gateway boundary intentionally never reaches past
+	// Snapshot — see this file's own doc comment on why gateway_wa.go is
+	// the only file that imports internal/wa at all). A "healthy" answer
+	// here therefore does NOT guarantee a subsequent Send succeeds: a nil
+	// send queue on an otherwise Connected session (the exact defect
+	// TestAWaxumSessionCanSendAfterConnectingWithoutPairing, in package wa,
+	// exists to catch) presents identically at this layer, and only Send's
+	// own error return can tell the difference. Healthy exists to catch a
+	// disconnected or wedged session before scheduling work for it, not to
+	// make Send infallible — processRun's own Send error handling remains
+	// the backstop for everything Healthy cannot see.
+	Healthy(ids []string) (sessionID, reason string, ok bool)
 }
 
 // Message status strings MessageStatus returns — the same values

@@ -81,6 +81,23 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/self_convo/template_view.html"),
 		root:  "base",
 	},
+	// self_convo_schedule_form is shared by GET .../schedules/new AND GET
+	// .../schedules/{id}/edit (and both handlers' own validation-failure
+	// re-render) — one template, IsEdit in the page data picks the
+	// heading/submit label/action, api_clients.go's create/edit split
+	// without needing two near-identical files.
+	"self_convo_schedules": {
+		files: append(chrome(), "templates/self_convo/schedules.html"),
+		root:  "base",
+	},
+	"self_convo_schedule_form": {
+		files: append(chrome(), "templates/self_convo/schedule_form.html"),
+		root:  "base",
+	},
+	"self_convo_schedule_view": {
+		files: append(chrome(), "templates/self_convo/schedule_view.html"),
+		root:  "base",
+	},
 	"session-ops": {
 		files: append(chrome(), "templates/sessions/ops.html"),
 		root:  "base",
@@ -141,6 +158,7 @@ var partialFiles = []string{
 	"templates/partials/webhook_dlq_rows.html",
 	"templates/partials/convo_run_rows.html",
 	"templates/partials/convo_template_rows.html",
+	"templates/partials/convo_schedule_rows.html",
 }
 
 // Renderer holds the parsed template sets.

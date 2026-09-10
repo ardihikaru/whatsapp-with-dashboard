@@ -1,0 +1,28 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Convo Schedules</h4>
+  <a class="btn btn-primary" href="{{u "/self-convo/schedules/new"}}">New schedule</a>
+</div>
+
+{{if not .Enabled}}
+<div class="alert">Convo scheduling is disabled on this deployment (<span class="mono">WSM_SELF_CONVO_ENABLED=true</span>
+  turns it on). Existing schedules are still listed below and can be paused, resumed, stopped or deleted —
+  they simply never materialise a new run while the flag is off.</div>
+{{end}}
+
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr>
+          <th>Name</th><th>Topic</th><th>Sender</th><th>Receivers</th><th>Recurrence</th>
+          <th>Window</th><th>Sets/day</th><th>Start–End</th><th>State</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="convo-schedule-rows" hx-get="{{u "/self-convo/schedules/rows"}}" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <tr><td colspan="10">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

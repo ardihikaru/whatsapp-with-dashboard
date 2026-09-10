@@ -80,6 +80,13 @@ type Deps struct {
 	// SelfConvoEnabled gates every /self-convo/runs/* endpoint — see
 	// self_convo_ui.go's selfConvoDisabledMessage.
 	SelfConvoEnabled bool
+	// Planner is the Convo scheduling background loop (internal/selfconvo),
+	// wired by cmd/app/main.go's startSelfConvo alongside SelfConvo — nil
+	// under the exact same condition (SelfConvoEnabled off). Every schedule
+	// pause/resume/stop action goes through it (self_convo_schedule_ui.go)
+	// so those refusals live in one place; plain schedule CRUD and listing
+	// go through Convo directly and need no Planner at all.
+	Planner *selfconvo.Planner
 
 	SessionTTL time.Duration
 	DarkMode   bool

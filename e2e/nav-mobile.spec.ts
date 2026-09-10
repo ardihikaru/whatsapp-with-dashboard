@@ -84,6 +84,20 @@ test.describe("phone portrait: the sidebar is reachable as a drawer", () => {
 
     for (const name of DESTINATIONS) {
       const link = sidebar.getByRole("link", { name, exact: true });
+      // Eleven destinations, four subheaders and the identity block no longer
+      // fit a 360x740 drawer on one screen — .nav-scroll (responsive.css) is
+      // what keeps every one of them reachable, by making the destination
+      // list itself scroll while the logo and identity/footer stay pinned.
+      // boundingBox() reports an element's CURRENT painted position, which for
+      // an item below the fold is a real position outside the viewport (not a
+      // missing one) — elementFromPoint() then can't find anything there
+      // because that point isn't on screen at all, and the hit-test below
+      // would fail even though the link is perfectly reachable by a real
+      // finger that scrolls first. Scrolling it into view first is what makes
+      // the test match that real interaction; the assertions after it are
+      // unchanged and still require a genuine >=36px touch target with
+      // nothing else on top of it.
+      await link.scrollIntoViewIfNeeded();
       const box = await link.boundingBox();
       expect(box, `"${name}" has no layout box`).not.toBeNull();
       // 44px is the .nav-item height in layout.css and the usual minimum

@@ -1,0 +1,384 @@
+{
+  "topic": "konser",
+  "title": "Nonton konser bareng",
+  "slots": {
+    "detail": [
+      "tiketnya war banget susah dapet",
+      "venue-nya jauh banget",
+      "hujan deres pas hari-h",
+      "capek abis kerja seharian"
+    ],
+    "tempat": [
+      "venue konser langganan",
+      "GBK",
+      "venue di tengah kota"
+    ],
+    "waktu": [
+      "sabtu sore",
+      "minggu pagi",
+      "abis maghrib nanti",
+      "rabu malem"
+    ]
+  },
+  "scenes": [
+    {
+      "stage": "opener",
+      "name": "opener",
+      "setups": [
+        {
+          "name": "out_of_blue",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "eh, nonton konser yuk"
+            },
+            {
+              "speaker": "b",
+              "text": "kapan?"
+            }
+          ]
+        },
+        {
+          "name": "callback_kebiasaan",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "udah lama ya kita ga nonton konser"
+            },
+            {
+              "speaker": "b",
+              "text": "iya bener, kangen juga"
+            }
+          ]
+        },
+        {
+          "name": "react_prompt",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "td liat orang cerita soal nonton konser, jadi pengen"
+            },
+            {
+              "speaker": "b",
+              "text": "wkwk sama, ayo kapan-kapan"
+            }
+          ]
+        },
+        {
+          "name": "check_in_simple",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "btw availability lo gimana minggu ini, ada rencana nonton konser gak"
+            },
+            {
+              "speaker": "b",
+              "text": "lumayan luang sih, emang kenapa"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "langsung_oke",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "{{waktu}} di {{tempat}} buat nonton konser gimana"
+            },
+            {
+              "speaker": "b",
+              "text": "oke gas, jam berapa"
+            }
+          ]
+        },
+        {
+          "name": "tentatif",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "boleh, tapi gue cek jadwal nonton konser dulu ya"
+            },
+            {
+              "speaker": "a",
+              "text": "oke, kabarin aja kalo udah fix"
+            }
+          ]
+        },
+        {
+          "name": "usul_spesifik",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "{{waktu}} di {{tempat}} aja deh buat nonton konser, biar gampang"
+            },
+            {
+              "speaker": "b",
+              "text": "sip, gue catet"
+            }
+          ]
+        },
+        {
+          "name": "alihkan",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "gue kayaknya gabisa nonton konser, coba ajak yang lain aja dulu"
+            },
+            {
+              "speaker": "a",
+              "text": "hmm oke deh, gapapa"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "middle",
+      "name": "middle",
+      "setups": [
+        {
+          "name": "cek_hari_h",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "jadi kan nonton konser {{waktu}}?"
+            },
+            {
+              "speaker": "b",
+              "text": "jadi kok, td udah siap-siap"
+            }
+          ]
+        },
+        {
+          "name": "nanya_sebelum",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "eh nonton konser kita jadi kan"
+            },
+            {
+              "speaker": "a",
+              "text": "jadi dong, udah gue tungguin dari td"
+            }
+          ]
+        },
+        {
+          "name": "muncul_kendala",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "eh gawat, {{detail}}, jadi nonton konser kayaknya kacau nih"
+            },
+            {
+              "speaker": "a",
+              "text": "lah kenapa emang"
+            }
+          ]
+        },
+        {
+          "name": "lanjut_santai",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "gimana rencana nonton konser kita"
+            },
+            {
+              "speaker": "b",
+              "text": "masih on track kok tenang aja"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "on_track",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "oke berarti fix ya {{waktu}} buat nonton konser"
+            },
+            {
+              "speaker": "b",
+              "text": "fix, sampe ketemu di {{tempat}}"
+            }
+          ]
+        },
+        {
+          "name": "telat",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "gue kayaknya telat dikit ke nonton konser, {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "yaudah santai, gue tungguin"
+            }
+          ]
+        },
+        {
+          "name": "reschedule",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "kayaknya nonton konser {{waktu}} gabisa deh, {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "yaudah kita geser aja kapan-kapan"
+            }
+          ]
+        },
+        {
+          "name": "batal",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "duh maaf banget, nonton konser kita batal dulu ya, {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "yah gapapa, next time aja"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "closer",
+      "name": "closer",
+      "setups": [
+        {
+          "name": "reaksi_langsung",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "tadi seru banget ya nonton konser-nya"
+            },
+            {
+              "speaker": "b",
+              "text": "iya gila, capek tapi puas"
+            }
+          ]
+        },
+        {
+          "name": "refleksi_nanti",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "td kepikiran, nonton konser tadi worth it banget"
+            },
+            {
+              "speaker": "b",
+              "text": "setuju, harus sering-sering nih"
+            }
+          ]
+        },
+        {
+          "name": "share_momen",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "eh gue kirim foto nonton konser td ya"
+            },
+            {
+              "speaker": "b",
+              "text": "wih mantap, kirim dong"
+            }
+          ]
+        },
+        {
+          "name": "nanya_hasil",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "gimana td abis nonton konser, lancar?"
+            },
+            {
+              "speaker": "b",
+              "text": "lancar kok alhamdulillah"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "positif_next",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "kapan-kapan nonton konser lagi ya"
+            },
+            {
+              "speaker": "b",
+              "text": "gas, lo yang ajak duluan aja nanti"
+            }
+          ]
+        },
+        {
+          "name": "grateful",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "makasih banget udah nemenin nonton konser"
+            },
+            {
+              "speaker": "a",
+              "text": "santai, sama-sama seneng kok"
+            }
+          ]
+        },
+        {
+          "name": "bercanda",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "td lo lemot banget pas nonton konser"
+            },
+            {
+              "speaker": "b",
+              "text": "diem lu, gantian nanti gue balikin"
+            }
+          ]
+        },
+        {
+          "name": "praktis",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "oh iya soal {{detail}} pas nonton konser kita omongin lagi nanti ya"
+            },
+            {
+              "speaker": "a",
+              "text": "oke noted"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "from_scene": "opener",
+      "to_scene": "middle",
+      "weight": 3,
+      "min_gap_seconds": 3600,
+      "max_gap_seconds": 86400
+    },
+    {
+      "from_scene": "middle",
+      "to_scene": "closer",
+      "weight": 3,
+      "min_gap_seconds": 1800,
+      "max_gap_seconds": 14400
+    },
+    {
+      "from_scene": "closer",
+      "to_scene": "opener",
+      "weight": 2,
+      "min_gap_seconds": 259200,
+      "max_gap_seconds": 1209600
+    }
+  ]
+}

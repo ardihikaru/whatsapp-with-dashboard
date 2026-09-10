@@ -1,0 +1,131 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>{{if .IsEdit}}Edit Schedule{{else}}New Schedule{{end}}</h4>
+  <a class="btn btn-outline" href="{{u "/self-convo/schedules"}}">Back to schedules</a>
+</div>
+
+{{if not .Enabled}}
+<div class="alert">Convo scheduling is disabled on this deployment (<span class="mono">WSM_SELF_CONVO_ENABLED=true</span>
+  turns it on). The form below still renders so you can see how it works; saving is refused until the flag is on.</div>
+{{end}}
+
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+
+<div class="card form-card">
+  <form action="{{if .IsEdit}}{{u "/self-convo/schedules"}}/{{.ScheduleID}}{{else}}{{u "/self-convo/schedules"}}{{end}}"
+        method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Name</span>
+      <input type="text" name="name" value="{{.Form.Name}}" maxlength="120" required>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Sender</span>
+      <select name="sender_id" class="select" required>
+        <option value="">Choose a session…</option>
+        {{range .Sessions}}
+        <option value="{{.ID}}" {{if eq $.Form.SenderID .ID}}selected{{end}}>{{.Name}} (+{{.Phone}})</option>
+        {{end}}
+      </select>
+      <small class="muted">The sessions offered here are the same connected fleet the Self Convo trigger page
+        lists — a session must be connected at least once to be selectable.</small>
+    </label>
+
+    <span class="textfield-label">Receivers (tick at least one — cannot include the sender)</span>
+    <div class="convo-participants">
+      {{range .Sessions}}
+      <label class="convo-participant">
+        <input type="checkbox" name="receiver_id" value="{{.ID}}" {{if index $.ReceiverSet .ID}}checked{{end}}>
+        <span>{{.Name}} <span class="convo-participant-phone">(+{{.Phone}})</span></span>
+      </label>
+      {{end}}
+    </div>
+
+    <label class="textfield">
+      <span class="textfield-label">Topic</span>
+      <select name="topic" class="select" required>
+        <option value="">Choose a topic…</option>
+        {{range .Topics}}
+        <option value="{{.Topic}}" {{if eq $.Form.Topic .Topic}}selected{{end}}>{{.Topic}} ({{.Count}} templates)</option>
+        {{end}}
+      </select>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Root template (optional)</span>
+      <input type="text" name="root_template_id" value="{{.Form.RootTemplateID}}" placeholder="template id">
+      <small class="muted">Leave blank to let the planner draw an opener from the topic automatically every time.
+        To pin a specific starting script instead, paste its template id — find it on the
+        <a href="{{u "/self-convo/templates"}}">Templates</a> page.</small>
+    </label>
+
+    <label class="checkfield">
+      <input type="checkbox" name="chain_enabled" {{if .Form.ChainEnabled}}checked{{end}}>
+      <span>Chain follow-ups</span>
+    </label>
+    <small class="muted">When on, a finished conversation automatically schedules its own follow-up from the
+      template correlation graph (see a template's own page for its outgoing links) instead of simply stopping.</small>
+
+    <span class="textfield-label">Recurrence</span>
+    <div class="row-actions">
+      <label><input type="radio" name="recurrence" value="daily" {{if eq .Form.Recurrence "daily"}}checked{{end}}> Daily</label>
+      <label><input type="radio" name="recurrence" value="weekly" {{if eq .Form.Recurrence "weekly"}}checked{{end}}> Weekly</label>
+      <label><input type="radio" name="recurrence" value="interval" {{if eq .Form.Recurrence "interval"}}checked{{end}}> Every N days</label>
+    </div>
+
+    <div data-recurrence-section="weekly" class="convo-participants">
+      {{range .Weekdays}}
+      <label class="convo-participant">
+        <input type="checkbox" name="weekday" value="{{.Value}}" {{if .Checked}}checked{{end}}>
+        <span>{{.Label}}</span>
+      </label>
+      {{end}}
+    </div>
+
+    <div data-recurrence-section="interval">
+      <label class="textfield">
+        <span class="textfield-label">Every N days</span>
+        <input type="number" name="interval_days" min="1" value="{{.Form.IntervalDays}}">
+      </label>
+    </div>
+
+    <label class="textfield">
+      <span class="textfield-label">Sets per day</span>
+      <input type="number" name="sets_per_day" min="1" max="10" value="{{.Form.SetsPerDay}}" required>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Window start</span>
+      <input type="time" name="window_start" value="{{.Form.WindowStart}}" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Window end</span>
+      <input type="time" name="window_end" value="{{.Form.WindowEnd}}" required>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Timezone</span>
+      <select name="timezone" class="select" required>
+        {{range .Timezones}}
+        <option value="{{.}}" {{if eq $.Form.Timezone .}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Start date</span>
+      <input type="date" name="start_date" value="{{.Form.StartDate}}" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">End date</span>
+      <input type="date" name="end_date" value="{{.Form.EndDate}}">
+      <small class="muted">Leave blank for no end date — the schedule then runs indefinitely (unlimited,
+        non-stop) until an operator pauses or stops it.</small>
+    </label>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">{{if .IsEdit}}Save{{else}}Create{{end}}</button>
+    </div>
+  </form>
+</div>
+{{end}}

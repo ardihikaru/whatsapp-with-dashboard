@@ -75,6 +75,13 @@ type fakeGateway struct {
 	// actually inserted, which is exactly the fake's default state (no
 	// production Send path runs in these tests unless a test wires one).
 	messageStatuses map[string]fakeMessageStatus
+
+	// unhealthy backs Healthy — a session id present here (any string value,
+	// even "") is reported unhealthy with that value as the reason; an id
+	// absent from the map is healthy, matching a real deployment where every
+	// seeded/connected participant can send. nil (the default) means every
+	// participant is healthy.
+	unhealthy map[string]string
 }
 
 // fakeMessageStatus is one configured MessageStatus answer.
@@ -157,6 +164,30 @@ func (g *fakeGateway) MessageStatus(ctx context.Context, messageID string) (stat
 		return "", "", false, nil
 	}
 	return s.status, s.reason, true, nil
+}
+
+// setUnhealthy configures Healthy to report id as unhealthy with reason —
+// see the unhealthy field's own doc comment. setUnhealthy(id, "") followed
+// by never calling it again for a different id leaves every OTHER
+// participant healthy.
+func (g *fakeGateway) setUnhealthy(id, reason string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.unhealthy == nil {
+		g.unhealthy = map[string]string{}
+	}
+	g.unhealthy[id] = reason
+}
+
+func (g *fakeGateway) Healthy(ids []string) (sessionID, reason string, ok bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, id := range ids {
+		if r, bad := g.unhealthy[id]; bad {
+			return id, r, false
+		}
+	}
+	return "", "", true
 }
 
 func (g *fakeGateway) sendCount() int {
@@ -396,6 +427,62 @@ func TestTriggerAppliesVariationSoTwoRunsFromOneTemplateCanDiffer(t *testing.T) 
 	}
 	if len(seen) < 2 {
 		t.Fatalf("expected at least two distinct variations across 20 seeds triggering the same template, got %d distinct: %v", len(seen), seen)
+	}
+}
+
+// TestTriggerWithParaphraseDisabledStoresThePlainlySubstitutedBodyExactly
+// pins Runner.Options.Paraphrase's disabled path all the way through
+// Trigger: a Runner built with Paraphrase pointing at false must persist
+// turn bodies that are exactly Text/Alternatives with {{place}}
+// substituted, never surface-rewritten — this is what
+// WSM_SELF_CONVO_PARAPHRASE=false has to actually deliver in production.
+func TestTriggerWithParaphraseDisabledStoresThePlainlySubstitutedBodyExactly(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"turns": [
+			{ "speaker": "a", "text": "Halo" },
+			{ "speaker": "b", "text": "Hai" }
+		]
+	}`
+	script, err := Validate([]byte(raw))
+	if err != nil {
+		t.Fatalf("test setup: Validate returned error: %v", err)
+	}
+
+	pool := newTestPool(t)
+	clock := newFakeClock(time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC))
+	setupRepo := convo.NewRepository(pool)
+	tmpl := convo.Template{ID: "tmpl-noparaphrase", Name: script.Name, TurnCount: len(script.Turns), Body: raw}
+	if err := setupRepo.InsertTemplate(context.Background(), &tmpl); err != nil {
+		t.Fatalf("InsertTemplate: %v", err)
+	}
+
+	disabled := false
+	for seed := uint64(0); seed < 30; seed++ {
+		repo := convo.NewRepository(pool)
+		gw := newFakeGateway()
+		gw.seed(Participant{ID: "sess-a", Name: "Session A", Phone: "628110000001", Connected: true})
+		gw.seed(Participant{ID: "sess-b", Name: "Session B", Phone: "628110000002", Connected: true})
+		r := New(repo, gw, Options{
+			Now: clock.Now, Rand: rand.New(rand.NewPCG(seed, seed+1)), PollInterval: 5 * time.Second,
+			Paraphrase: &disabled,
+		})
+
+		run, err := r.Trigger(context.Background(), TriggerRequest{
+			TemplateID: tmpl.ID, TickedSessionIDs: []string{"sess-a", "sess-b"},
+		})
+		if err != nil {
+			t.Fatalf("seed %d: Trigger: %v", seed, err)
+		}
+		turns, err := repo.Turns(context.Background(), run.ID)
+		if err != nil {
+			t.Fatalf("seed %d: Turns: %v", seed, err)
+		}
+		for _, tu := range turns {
+			if tu.Body != "Halo" && tu.Body != "Hai" {
+				t.Fatalf("seed %d: stored turn body = %q, want exactly \"Halo\" or \"Hai\" with Options.Paraphrase disabled", seed, tu.Body)
+			}
+		}
 	}
 }
 

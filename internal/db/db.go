@@ -241,6 +241,9 @@ var schema = []string{
 	`CREATE TABLE IF NOT EXISTS wa_convo_templates (
 	  id          TEXT PRIMARY KEY,
 	  name        TEXT NOT NULL,
+	  topic       TEXT NOT NULL DEFAULT '',
+	  stage       TEXT NOT NULL DEFAULT '',
+	  origin      TEXT NOT NULL DEFAULT 'upload',
 	  turn_count  INTEGER NOT NULL,
 	  body        TEXT NOT NULL,
 	  created_at  TEXT NOT NULL,
@@ -248,10 +251,18 @@ var schema = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_wa_convo_templates_created
 	  ON wa_convo_templates(created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_convo_templates_topic_stage
+	  ON wa_convo_templates(topic, stage)`,
 	`CREATE TABLE IF NOT EXISTS wa_convo_runs (
-	  id              TEXT PRIMARY KEY,
-	  template_id     TEXT,
-	  template_name   TEXT NOT NULL,
+	  id                TEXT PRIMARY KEY,
+	  template_id       TEXT,
+	  template_name     TEXT NOT NULL,
+	  schedule_id       TEXT,
+	  occurrence_date   TEXT NOT NULL DEFAULT '',
+	  chain_prev_run_id TEXT,
+	  chain_depth       INTEGER NOT NULL DEFAULT 0,
+	  topic             TEXT NOT NULL DEFAULT '',
+	  paraphrase_seed   INTEGER NOT NULL DEFAULT 0,
 	  session_a_id    TEXT NOT NULL,
 	  session_b_id    TEXT NOT NULL,
 	  session_a_name  TEXT NOT NULL DEFAULT '',
@@ -272,6 +283,8 @@ var schema = []string{
 	  ON wa_convo_runs(state, next_due_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_wa_convo_runs_created
 	  ON wa_convo_runs(created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_convo_runs_schedule_date
+	  ON wa_convo_runs(schedule_id, occurrence_date)`,
 	`CREATE TABLE IF NOT EXISTS wa_convo_turns (
 	  run_id        TEXT NOT NULL REFERENCES wa_convo_runs(id) ON DELETE CASCADE,
 	  seq           INTEGER NOT NULL,
@@ -285,6 +298,58 @@ var schema = []string{
 	  error         TEXT NOT NULL DEFAULT '',
 	  sent_at       TEXT,
 	  PRIMARY KEY (run_id, seq)
+	)`,
+	// 0008: Convo scheduling. wa_convo_template_links cascades off BOTH its
+	// endpoints (unlike wa_convo_runs' snapshot columns above) — a link has
+	// no audit value once either template it connects is gone; see
+	// migrations/0008_convo_scheduling.sql's header. wa_convo_schedules'
+	// receivers cascade off their schedule the same way wa_convo_turns
+	// cascades off its run.
+	`CREATE TABLE IF NOT EXISTS wa_convo_template_links (
+	  from_template_id TEXT NOT NULL REFERENCES wa_convo_templates(id) ON DELETE CASCADE,
+	  to_template_id   TEXT NOT NULL REFERENCES wa_convo_templates(id) ON DELETE CASCADE,
+	  weight           INTEGER NOT NULL DEFAULT 1,
+	  min_gap_seconds  INTEGER NOT NULL DEFAULT 0,
+	  max_gap_seconds  INTEGER NOT NULL DEFAULT 0,
+	  created_at       TEXT NOT NULL,
+	  PRIMARY KEY (from_template_id, to_template_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_convo_template_links_to
+	  ON wa_convo_template_links(to_template_id)`,
+	`CREATE TABLE IF NOT EXISTS wa_convo_schedules (
+	  id                TEXT PRIMARY KEY,
+	  name              TEXT NOT NULL,
+	  sender_session_id TEXT NOT NULL,
+	  sender_name       TEXT NOT NULL DEFAULT '',
+	  sender_phone      TEXT NOT NULL DEFAULT '',
+	  topic             TEXT NOT NULL DEFAULT '',
+	  root_template_id  TEXT,
+	  chain_enabled     INTEGER NOT NULL DEFAULT 1,
+	  recurrence        TEXT NOT NULL,
+	  weekdays          TEXT NOT NULL DEFAULT '',
+	  interval_days     INTEGER NOT NULL DEFAULT 0,
+	  sets_per_day      INTEGER NOT NULL DEFAULT 1,
+	  window_start      TEXT NOT NULL,
+	  window_end        TEXT NOT NULL,
+	  timezone          TEXT NOT NULL DEFAULT 'UTC',
+	  start_date        TEXT NOT NULL,
+	  end_date          TEXT,
+	  state             TEXT NOT NULL,
+	  paused_reason     TEXT NOT NULL DEFAULT '',
+	  paused_at         TEXT,
+	  last_planned_date TEXT,
+	  created_at        TEXT NOT NULL,
+	  updated_at        TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_convo_schedules_state_planned
+	  ON wa_convo_schedules(state, last_planned_date)`,
+	`CREATE TABLE IF NOT EXISTS wa_convo_schedule_receivers (
+	  schedule_id  TEXT NOT NULL REFERENCES wa_convo_schedules(id) ON DELETE CASCADE,
+	  session_id   TEXT NOT NULL,
+	  session_name TEXT NOT NULL DEFAULT '',
+	  phone        TEXT NOT NULL DEFAULT '',
+	  position     INTEGER NOT NULL DEFAULT 0,
+	  PRIMARY KEY (schedule_id, session_id)
 	)`,
 }
 
@@ -328,7 +393,34 @@ func EnsureSchema(ctx context.Context, pool *sql.DB) error {
 			return err
 		}
 	}
-	return ensureColumn(ctx, pool, "wa_messages", "media_size", "INTEGER")
+	if err := ensureColumn(ctx, pool, "wa_messages", "media_size", "INTEGER"); err != nil {
+		return err
+	}
+	// 0008 Convo scheduling additive columns, same reason as every other
+	// ensureColumn call here: a SQLite dev/e2e database created before this
+	// migration must still gain them.
+	for _, col := range []struct{ name, typ string }{
+		{"topic", "TEXT NOT NULL DEFAULT ''"},
+		{"stage", "TEXT NOT NULL DEFAULT ''"},
+		{"origin", "TEXT NOT NULL DEFAULT 'upload'"},
+	} {
+		if err := ensureColumn(ctx, pool, "wa_convo_templates", col.name, col.typ); err != nil {
+			return err
+		}
+	}
+	for _, col := range []struct{ name, typ string }{
+		{"schedule_id", "TEXT"},
+		{"occurrence_date", "TEXT NOT NULL DEFAULT ''"},
+		{"chain_prev_run_id", "TEXT"},
+		{"chain_depth", "INTEGER NOT NULL DEFAULT 0"},
+		{"topic", "TEXT NOT NULL DEFAULT ''"},
+		{"paraphrase_seed", "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureColumn(ctx, pool, "wa_convo_runs", col.name, col.typ); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureColumn(ctx context.Context, pool *sql.DB, table, column, typ string) error {

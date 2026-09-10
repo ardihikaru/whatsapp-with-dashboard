@@ -27,7 +27,15 @@ func TestVaryPicksAlternativesAndSubstitutesVarsConsistentlyAcrossTheRun(t *test
 	var sawHalo, sawHai bool
 	for seed := uint64(0); seed < 300; seed++ {
 		rng := rand.New(rand.NewPCG(seed, seed+1))
-		out, err := Vary(s, rng)
+		// Paraphrase disabled: this test asserts EXACT substituted text
+		// (turn 0 is either "Halo" or "Hai" verbatim, and {{place}}
+		// resolves to a bare "Bandung"/"Bogor" surrounded by fixed
+		// wording) — paraphrasing is free to reword any of that, so it
+		// would make this test meaningless rather than wrong. Paraphrase's
+		// own placeholder-survival and determinism guarantees are tested
+		// in internal/selfconvo/paraphrase; Vary's own paraphrase wiring is
+		// tested in TestVaryParaphrasesTurnTextWhileStillResolvingPlaceholders.
+		out, err := VaryWithOptions(s, rng, VaryOptions{ParaphraseDisabled: true})
 		if err != nil {
 			t.Fatalf("seed %d: Vary returned error: %v", seed, err)
 		}
@@ -127,12 +135,108 @@ func TestVaryIsTheIdentityForAScriptWithoutVariationFields(t *testing.T) {
 	}
 	rng := rand.New(rand.NewPCG(1, 2))
 
-	out, err := Vary(s, rng)
+	// Paraphrase disabled: enabled, it would rewrite the wording of both
+	// turns' text (that IS a behavioural change, exercised separately by
+	// TestVaryParaphrasesTurnTextWhileStillResolvingPlaceholders and
+	// TestVaryWithParaphraseDisabledReproducesThePreParaphraseBehaviourExactly),
+	// so it must be off here for "the identity for a script without
+	// variation fields" to mean what it says.
+	out, err := VaryWithOptions(s, rng, VaryOptions{ParaphraseDisabled: true})
 	if err != nil {
 		t.Fatalf("Vary returned error: %v", err)
 	}
 	if !reflect.DeepEqual(out.Turns, s.Turns) {
 		t.Fatalf("Vary changed the turns of a script with no variation fields:\ngot  %+v\nwant %+v", out.Turns, s.Turns)
+	}
+}
+
+// TestVaryParaphrasesTurnTextWhileStillResolvingPlaceholders is the
+// required proof that Vary's step 4 (paraphrasing) is actually wired in:
+// across many seeds, at least one run's resolved body must differ from the
+// plainly-substituted text a paraphrase-disabled run would have produced —
+// while the {{place}} placeholder still resolves to a real drawn value
+// either way (paraphrase never leaves a placeholder unresolved, since
+// substitution runs before it).
+func TestVaryParaphrasesTurnTextWhileStillResolvingPlaceholders(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"vars": { "place": ["Bandung", "Bogor"] },
+		"turns": [
+			{ "speaker": "a", "text": "Kamu mau ke {{place}} gak?" },
+			{ "speaker": "b", "text": "Boleh, {{place}} enak tuh" }
+		]
+	}`
+	s, err := Validate([]byte(raw))
+	if err != nil {
+		t.Fatalf("test setup: Validate returned error: %v", err)
+	}
+
+	sawDifference := false
+	for seed := uint64(0); seed < 200; seed++ {
+		plainRng := rand.New(rand.NewPCG(seed, seed+1))
+		plain, err := VaryWithOptions(s, plainRng, VaryOptions{ParaphraseDisabled: true})
+		if err != nil {
+			t.Fatalf("seed %d: VaryWithOptions(disabled) returned error: %v", seed, err)
+		}
+
+		paraRng := rand.New(rand.NewPCG(seed, seed+1))
+		para, err := Vary(s, paraRng)
+		if err != nil {
+			t.Fatalf("seed %d: Vary returned error: %v", seed, err)
+		}
+
+		if len(para.Turns) != len(plain.Turns) {
+			t.Fatalf("seed %d: paraphrased run has %d turns, plain run has %d", seed, len(para.Turns), len(plain.Turns))
+		}
+		for i := range para.Turns {
+			lower := strings.ToLower(para.Turns[i].Text)
+			// Case-insensitive: casing jitter (paraphrase's step 8) may
+			// lower-case the whole message under kasual/slang, so the
+			// drawn place name can legitimately come back as "bandung".
+			if !strings.Contains(lower, "bandung") && !strings.Contains(lower, "bogor") {
+				t.Fatalf("seed %d turn %d: paraphrased text %q resolves neither {{place}} value",
+					seed, i, para.Turns[i].Text)
+			}
+			if para.Turns[i].Text != plain.Turns[i].Text {
+				sawDifference = true
+			}
+		}
+	}
+	if !sawDifference {
+		t.Fatalf("across 200 seeds, no paraphrased turn ever differed from its plainly-substituted counterpart")
+	}
+}
+
+// TestVaryWithParaphraseDisabledReproducesThePreParaphraseBehaviourExactly
+// is the other required half: VaryOptions{ParaphraseDisabled: true} must
+// behave EXACTLY like Vary did before paraphrasing existed — this is what
+// lets WSM_SELF_CONVO_PARAPHRASE=false (see config.loadSelfConvo) actually
+// turn paraphrasing off rather than merely turning it down.
+func TestVaryWithParaphraseDisabledReproducesThePreParaphraseBehaviourExactly(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"vars": { "place": ["Bandung", "Bogor"] },
+		"turns": [
+			{ "speaker": "a", "text": "Halo", "alternatives": ["Hai"] },
+			{ "speaker": "b", "text": "Mau ke {{place}} gak?" }
+		]
+	}`
+	s, err := Validate([]byte(raw))
+	if err != nil {
+		t.Fatalf("test setup: Validate returned error: %v", err)
+	}
+	for seed := uint64(0); seed < 100; seed++ {
+		rng := rand.New(rand.NewPCG(seed, seed+1))
+		out, err := VaryWithOptions(s, rng, VaryOptions{ParaphraseDisabled: true})
+		if err != nil {
+			t.Fatalf("seed %d: VaryWithOptions returned error: %v", seed, err)
+		}
+		if out.Turns[0].Text != "Halo" && out.Turns[0].Text != "Hai" {
+			t.Fatalf("seed %d: turn 0 text = %q, want exactly \"Halo\" or \"Hai\" with paraphrasing disabled", seed, out.Turns[0].Text)
+		}
+		if out.Turns[1].Text != "Mau ke Bandung gak?" && out.Turns[1].Text != "Mau ke Bogor gak?" {
+			t.Fatalf("seed %d: turn 1 text = %q, want an exact, unparaphrased substitution", seed, out.Turns[1].Text)
+		}
 	}
 }
 

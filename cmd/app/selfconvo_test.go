@@ -13,13 +13,14 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
 
-// TestStartSelfConvoReturnsNoRunnerWhenTheFlagIsOff pins startSelfConvo's
-// disabled path: cfg.SelfConvoEnabled false (config.DefaultSelfConvoEnabled)
-// must produce a nil *selfconvo.Runner, so main's shutdown sequence
-// (`if runner != nil { runner.Stop() }`) skips it cleanly rather than
-// nil-pointer-dereferencing on every boot where the operator has not opted
-// in.
-func TestStartSelfConvoReturnsNoRunnerWhenTheFlagIsOff(t *testing.T) {
+// TestStartSelfConvoReturnsNoRunnerOrPlannerWhenTheFlagIsOff pins
+// startSelfConvo's disabled path: cfg.SelfConvoEnabled false
+// (config.DefaultSelfConvoEnabled) must produce a nil *selfconvo.Runner AND
+// a nil *selfconvo.Planner, so main's shutdown sequence
+// (`if planner != nil { ... }` / `if runner != nil { ... }`) skips both
+// cleanly rather than nil-pointer-dereferencing on every boot where the
+// operator has not opted in.
+func TestStartSelfConvoReturnsNoRunnerOrPlannerWhenTheFlagIsOff(t *testing.T) {
 	pool, err := db.Open(filepath.Join(t.TempDir(), "test.db"), db.SQLiteDialect)
 	if err != nil {
 		t.Fatal(err)
@@ -34,17 +35,20 @@ func TestStartSelfConvoReturnsNoRunnerWhenTheFlagIsOff(t *testing.T) {
 		msgs, nil, wa.Config{SendRate: 1, SendBurst: 1, ReconcilePar: 1})
 
 	cfg := &config.Config{SelfConvoEnabled: false}
-	runner := startSelfConvo(context.Background(), cfg, repo, mgr, msgs)
+	runner, planner := startSelfConvo(context.Background(), cfg, repo, mgr, msgs)
 	if runner != nil {
 		t.Fatalf("startSelfConvo with the flag off returned a non-nil runner")
 	}
+	if planner != nil {
+		t.Fatalf("startSelfConvo with the flag off returned a non-nil planner")
+	}
 }
 
-// TestStartSelfConvoReturnsAStartedRunnerWhenTheFlagIsOn is the flag-on
-// mirror: a real *selfconvo.Runner is returned and its background loop is
-// already running (Stop must not hang or panic on a runner that was never
-// Start'd, and must return promptly on one that was).
-func TestStartSelfConvoReturnsAStartedRunnerWhenTheFlagIsOn(t *testing.T) {
+// TestStartSelfConvoReturnsAStartedRunnerAndPlannerWhenTheFlagIsOn is the
+// flag-on mirror: a real *selfconvo.Runner AND a real *selfconvo.Planner are
+// returned, both with their background loop already running (Stop must not
+// hang or panic on either, and must return promptly).
+func TestStartSelfConvoReturnsAStartedRunnerAndPlannerWhenTheFlagIsOn(t *testing.T) {
 	pool, err := db.Open(filepath.Join(t.TempDir(), "test.db"), db.SQLiteDialect)
 	if err != nil {
 		t.Fatal(err)
@@ -58,12 +62,16 @@ func TestStartSelfConvoReturnsAStartedRunnerWhenTheFlagIsOn(t *testing.T) {
 	mgr := wa.NewManager(context.Background(), nil, wasession.NewRepository(pool),
 		msgs, nil, wa.Config{SendRate: 1, SendBurst: 1, ReconcilePar: 1})
 
-	cfg := &config.Config{SelfConvoEnabled: true}
+	cfg := &config.Config{SelfConvoEnabled: true, SelfConvoMaxMsgsPerDay: 200}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	runner := startSelfConvo(ctx, cfg, repo, mgr, msgs)
+	runner, planner := startSelfConvo(ctx, cfg, repo, mgr, msgs)
 	if runner == nil {
 		t.Fatalf("startSelfConvo with the flag on returned a nil runner")
 	}
+	if planner == nil {
+		t.Fatalf("startSelfConvo with the flag on returned a nil planner")
+	}
+	planner.Stop()
 	runner.Stop()
 }

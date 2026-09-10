@@ -422,6 +422,19 @@ Basic attempts are throttled, `internal/auth/middleware.go`), and the edge box
 runs neither fail2ban nor ufw — so `limit_req` in `wa.conf` is the only brake
 that exists on an authenticated public caller.
 
+**A Convo Scheduling schedule with no end date runs, and grows its tables,
+forever.** `EndDate == ""` is the deliberate "unlimited" setting
+(`schedule_form.html`'s own help text: "the schedule then runs indefinitely...
+until an operator pauses or stops it"), and nothing in this codebase prunes
+`wa_convo_runs`/`wa_convo_turns` — a schedule left running for months
+accumulates an unbounded number of rows in both. The `/self-convo` and
+`/self-convo/schedules/{id}` pages' own run tables only cap what is
+DISPLAYED (`ListRuns(ctx, 50)`, `selfConvoScheduleRunsLimit`), not what is
+STORED. This is a known limitation, not something handled elsewhere — see
+`docs/brief-convo-scheduling.md`'s own "Known limitation" section. Any future
+retention/archival work should treat that gap as real, not assume a job
+already exists to clean it up.
+
 ---
 
 ## Layout

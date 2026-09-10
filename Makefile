@@ -41,7 +41,7 @@ COMPOSE := docker compose$(if $(REMOTE_DB), -f docker-compose.yml -f docker-comp
 # and enabling it would widen the blast radius of any injection for free.
 WA_DSN := $(WSM_MYSQL_USER):$(WSM_MYSQL_PASSWORD)@tcp($(WSM_MYSQL_HOST):$(WSM_MYSQL_PORT))/$(WSM_MYSQL_DATABASE)?parseTime=true&charset=utf8mb4&loc=UTC&multiStatements=true
 
-.PHONY: help build test vet hashpw db-bootstrap db-verify db-drop db-bootstrap-waxum db-verify-waxum migrate-up migrate-status \
+.PHONY: help build test vet hashpw convo-seed db-bootstrap db-verify db-drop db-bootstrap-waxum db-verify-waxum migrate-up migrate-status \
         migrate-down-all run docker-build up down logs e2e-install e2e e2e-headed e2e-report e2e-serve e2e-evidence e2e-reset
 
 help: ## Show this help
@@ -61,6 +61,16 @@ hashpw: ## Print a bcrypt hash for WSM_ADMIN_PASSWORD_HASH (password not echoed)
 	@stty -echo 2>/dev/null; printf 'password: ' >&2; \
 	 read -r pw; stty echo 2>/dev/null; printf '\n' >&2; \
 	 printf '%s' "$$pw" | go run ./cmd/hashpw
+
+# `. ./.env` in the recipe's OWN shell, same reasoning as `run` above: a
+# WSM_APP_DSN pointed at MySQL carries a password, and make's `export`
+# mangles a `$`-bearing value on the way out (the bcrypt hazard `run`
+# documents) — sourcing it fresh here passes it through untouched instead.
+# ARGS carries convoseed's own flags through untouched, e.g.:
+#   make convo-seed ARGS="-dry-run"
+#   make convo-seed ARGS="-replace"
+convo-seed: ## Materialise the self-convo corpus into WSM_APP_DSN (ARGS="-dry-run" to preview)
+	@set -a; [ -f .env ] && . ./.env; set +a; go run ./cmd/convoseed $(ARGS)
 
 # All five DB admin recipes below share two habits, for the reasons given
 # above the `run` target:

@@ -628,6 +628,25 @@ func (g *fakeUploadTriggerGateway) MessageStatus(ctx context.Context, messageID 
 	return selfconvo.MessageStatusSent, "", true, nil
 }
 
+// Healthy mirrors Participant's own view: a session is healthy here exactly
+// when this fake knows it and its Participant is Connected. That is the same
+// signal the production gateway reads (see selfconvo.Gateway.Healthy's doc
+// comment), so a test that flips a participant's Connected flag exercises
+// the planner's stall path without this double inventing a second notion of
+// health the real one does not have.
+func (g *fakeUploadTriggerGateway) Healthy(ids []string) (sessionID, reason string, ok bool) {
+	for _, id := range ids {
+		p, found := g.participants[id]
+		switch {
+		case !found:
+			return id, "unknown session", false
+		case !p.Connected:
+			return id, "session is not connected", false
+		}
+	}
+	return "", "", true
+}
+
 // newSelfConvoTestServerWithFakeGateway is newSelfConvoTestServer(t, true),
 // except its Runner is wired over gw rather than a real
 // selfconvo.NewManagerGateway — see fakeUploadTriggerGateway's doc comment
