@@ -92,7 +92,12 @@ type Deps struct {
 	DarkMode   bool
 	// PlatformURL is the absolute backoffice url for the sidebar's back-link.
 	PlatformURL string
-	AssetsFS    fs.FS // embedded FS rooted at the app dir (web/..., openapi.yaml)
+	// HostLabel is operator-supplied text ("MINIPC"/"LAPTOP") rendered as a
+	// header chip so an operator can tell which machine served the page
+	// during a failover — see config.Config.HostLabel's doc comment. ""
+	// hides the chip.
+	HostLabel string
+	AssetsFS  fs.FS // embedded FS rooted at the app dir (web/..., openapi.yaml)
 
 	// BasePath is the mount prefix for the BROWSER surface ("/wsm" when served
 	// under a path, "" at a host root). Derived from WA_BASE_URL by config.Load,

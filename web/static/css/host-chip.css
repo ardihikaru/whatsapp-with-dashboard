@@ -1,0 +1,63 @@
+/* header.html's "which host served this page" chip. THIRTEENTH stylesheet,
+   loaded LAST, after self-convo.css (see base.html's load-order comment:
+   self-convo.css is the twelfth). Tokens only — every colour below is a
+   :root variable from base.css, with a [data-theme="dark"] counterpart,
+   same convention self-convo.css's own header describes.
+
+   Deliberately NOT linked from login.html. Every other post-responsive
+   stylesheet (media.css, verify.css, self-convo.css) duplicates into
+   login.html's <head> because login.html duplicates base.html's whole head
+   (CLAUDE.md's hazard note) — but those style markup that can, in
+   principle, appear anywhere under base.html's body. This chip renders
+   from header.html ("header" template), and header.html is never invoked
+   by login.html: the auth layout (login.html) builds its own
+   .auth-layout/.auth-card markup and never calls {{template "header" .}}.
+   A rule with no matching element on that page is dead weight, not a
+   correctness requirement — hence no entry in
+   TestEveryHeadTemplateLinksTheResponsiveStylesheet's pattern for this
+   file (see host_chip_stylesheet_test.go, which asserts the opposite of
+   that test on purpose: base.html links it, login.html does not need to).
+*/
+
+/* .badge (forms.css, one of the frozen eight) already supplies the shape —
+   inline-block, padding, border-radius, font-size, font-weight, capitalize.
+   This only adds colour and the header-specific sizing/degrade below. */
+.badge-host-label {
+  color: var(--text-secondary);
+  background: var(--grey-200);
+  border: 1px solid var(--grey-300);
+  letter-spacing: 0.02em;
+  /* Bounds WSM_HOST_LABEL's MaxHostLabelLen (config.go) so even the longest
+     accepted value degrades by ellipsis instead of stretching the header
+     and crowding the logout button — see the two tighter caps below for
+     the breakpoints where that room is scarcest. */
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+[data-theme="dark"] .badge-host-label {
+  color: var(--grey-400);
+  background: var(--grey-800);
+  border-color: var(--grey-700);
+}
+
+/* Same 900px breakpoint charts.css/responsive.css already tighten the header
+   at (.header-actions gap drops to 8px there); the chip's own budget has to
+   shrink with it or a long label starts crowding the theme toggle. */
+@media (max-width: 900px) {
+  .badge-host-label { max-width: 96px; }
+}
+
+/* Below 480px responsive.css already drops .header-user and the header's
+   side padding to make room; the chip is the next thing to give ground
+   rather than let the logout button get pushed toward the edge. */
+@media (max-width: 480px) {
+  .badge-host-label {
+    max-width: 64px;
+    padding: 2px 6px;
+    font-size: 11px;
+  }
+}

@@ -1,0 +1,218 @@
+# waxum's own admin console and API, on the SAME public edge box as
+# whatsapp-with-dashboard (`ssh clino`). Install as /etc/nginx/conf.d/waxum.conf.
+#
+# DELIBERATELY A SEPARATE FILE FROM wa.conf, not a second server{} appended to it.
+# waxum's console is a normal web app rooted at `/` with its own `/api/v1` tree and
+# `/swagger-ui`; wa.conf's `/api/v1` allowlist and its trailing
+# `location ~ ^/api/v1/ { return 404; }` deny belong to whatsapp-with-dashboard's API
+# ONLY. Merging the two files would either 404 waxum's own API and swagger UI (if the
+# deny came along) or silently drop wa.conf's allowlist discipline (if it didn't) —
+# neither is acceptable, so they stay two files that happen to share a box, a
+# certificate lineage and the wa_/waxum_ naming convention that keeps their http-context
+# names from colliding. See wa.conf's own top-of-file comment and
+# TestNoMapOrZoneOrUpstreamNameIsDefinedTwiceAcrossTheTwoEdgeFiles.
+#
+# `SUPERADMIN_TOKEN` is root over every session on this waxum instance and waxum's
+# console has no username/password at all — its login *is* that token
+# (src/console/handlers.rs:280-300 in waxum). That is why this vhost exists at all
+# rather than pointing an operator straight at the published port: it puts the WSM
+# admin credential (HTTP Basic, below) and a source-IP allowlist in front of a console
+# whose own login is a bare root secret, and then injects that secret as a cookie so
+# the operator never has to see or paste it. NEVER put the token itself in this file —
+# see the include below.
+#
+# Always `sudo nginx -t` before `systemctl reload nginx`. This box is SHARED with
+# roughly nine other products; every name below is `waxum_`-prefixed for that reason.
+
+# The SUPERADMIN_TOKEN lives here, not in this file. wa_waxum_tokens.conf sits at
+# /etc/nginx/wa_waxum_tokens.conf — OUTSIDE conf.d/ — mode 640 root:www-data, and
+# defines `map $host $wa_waxum_console_cookie { … }`, yielding the literal string
+# `waxum_console=<SUPERADMIN_TOKEN>` for each of the three waxum hostnames below and
+# "" for everything else. It is included, not inlined, for exactly one reason: THIS
+# file is mirrored byte-for-byte into docs/deploy-nginx-waxum.conf.example and
+# committed to git, and wa_waxum_tokens.conf is not. A secret pasted into this file
+# would be committed with it the moment someone ran the mirror diff. Nothing below
+# this line, and nothing in docs/deploy-nginx-waxum.conf.example, may contain the
+# token, the WSM admin password, or its bcrypt hash — asserted by
+# TestNeitherEdgeFileContainsALiteralTokenPasswordOrHash.
+include /etc/nginx/wa_waxum_tokens.conf;
+
+# ── UPSTREAMS: PASSIVE HEALTH CHECKS ONLY, SAME DISCIPLINE AS wa.conf's wa_pool ────
+#
+# waxum_pool is the public host's group: mini-PC primary, laptop as an explicit
+# `backup`. waxum_minipc and waxum_laptop are single-peer groups for the two
+# machine-specific hostnames, for the same "pin a request at one box while
+# diagnosing" reason wa.conf's wa_minipc/wa_laptop exist. max_fails/fail_timeout are
+# stated explicitly on BOTH peers, including the backup, so a future edit to the
+# primary's line cannot leave the backup silently on nginx's own defaults without it
+# being visible in a diff.
+#
+# Unlike wa.conf, this file adds no proxy_next_upstream / proxy_request_buffering
+# overrides: nginx's own defaults (`proxy_next_upstream error timeout`,
+# `proxy_request_buffering on`) already exclude every 4xx from triggering a retry,
+# which is what matters here too — a 401/403 from waxum's own auth is a fact about
+# the request, not evidence the backend is down, and must not be retried against a
+# different waxum instance's session state.
+upstream waxum_pool {
+    server 10.10.0.4:3451 max_fails=2 fail_timeout=10s;
+    server 10.10.0.3:3451 backup max_fails=2 fail_timeout=10s;
+}
+
+upstream waxum_minipc {
+    server 10.10.0.4:3451 max_fails=2 fail_timeout=10s;
+}
+
+upstream waxum_laptop {
+    server 10.10.0.3:3451 max_fails=2 fail_timeout=10s;
+}
+
+map $host $waxum_backend {
+    hostnames;
+    waxum.mfardiansyah.id         waxum_pool;
+    waxum-minipc.mfardiansyah.id  waxum_minipc;
+    waxum-laptop.mfardiansyah.id  waxum_laptop;
+    default                       "";
+}
+
+# waxum has its own websocket routes (the console's live event stream). wa.conf
+# ALREADY defines `map $http_upgrade $wa_connection_upgrade { … }`, and map names
+# live in nginx's http context, GLOBAL across every file conf.d loads — redefining
+# $wa_connection_upgrade here would be a duplicate `map` on the same variable and
+# fails `nginx -t` for the WHOLE box, not just this file (CLAUDE.md's hazard note on
+# this exact file, and nginx_edge_test.go's TestNoMapOrZoneOrUpstreamNameIsDefined
+# TwiceAcrossTheTwoEdgeFiles catches it here).
+#
+# DECISION: define a SEPARATE, waxum_-prefixed map rather than referencing
+# $wa_connection_upgrade from wa.conf. Referencing it would work today — both files
+# load into the same http context on the same box — but it would make this file
+# depend on wa.conf existing at all, which is not true in general (a waxum-only edge
+# with no whatsapp-with-dashboard instance in front of it is a real future
+# possibility, and this file should stand on its own). The two maps compute the
+# identical value from the identical input; the duplication is one line, not a
+# behavioural difference.
+map $http_upgrade $waxum_connection_upgrade { default upgrade; '' close; }
+
+# The console is used interactively by one operator at a time, not scripted like the
+# API in wa.conf, so one generous zone is enough — no separate "auth" zone the way
+# wa.conf splits login from everything else, because HTTP Basic below is verified by
+# nginx itself (not a bcrypt round-trip into the app) and is cheap to check.
+limit_req_zone $binary_remote_addr zone=waxum_console:1m rate=5r/s;
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name waxum.mfardiansyah.id waxum-minipc.mfardiansyah.id waxum-laptop.mfardiansyah.id;
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/acme;
+        default_type "text/plain";
+    }
+
+    location / { return 301 https://$host$request_uri; }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name waxum.mfardiansyah.id waxum-minipc.mfardiansyah.id waxum-laptop.mfardiansyah.id;
+
+    # Same lineage as wa.conf: one certbot cert-name covers all six wa*/waxum* names,
+    # so a neighbour product's broken DNS can never block renewal for either vhost.
+    ssl_certificate     /etc/letsencrypt/live/wa/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/wa/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # waxum's own /media/upload limit is 100 MB (see whatsapp-with-dashboard's
+    # CLAUDE.md); 110m for the same headroom-over-multipart-envelope reason wa.conf
+    # uses for WSM_MEDIA_MAX_BYTES.
+    client_max_body_size 110m;
+
+    if ($waxum_backend = "") { return 444; }
+
+    limit_req_status 429;
+
+    # ── SOURCE ALLOWLIST ─────────────────────────────────────────────────────────
+    #
+    # waxum's console has no username/password of its own — see the top-of-file
+    # comment — so this vhost is gated twice: by source IP here, and by HTTP Basic
+    # below. `satisfy all` is nginx's implicit default when both an access module
+    # (allow/deny) and an auth module (auth_basic) apply to the same scope, so a
+    # request must pass BOTH, not either.
+    #
+    #   10.10.0.0/24      WireGuard peers — every real backend and every legitimate
+    #                     operator machine reaches clino through this tunnel.
+    #   103.161.62.0/24   The operator laptop's ISP egress range, not a /32. clino
+    #                     sees the laptop's WireGuard endpoint as 103.161.62.131, but
+    #                     the wider internet (and this console, reached directly
+    #                     rather than over the tunnel) sees 103.161.62.135 — a
+    #                     rotating address within this /24. A /32 here would break
+    #                     silently at the ISP's next rotation. THIS IS THE WEAKEST
+    #                     LINE IN THE FILE: a /24 admits every other customer of that
+    #                     ISP, not just the operator's laptop. HTTP Basic below is
+    #                     what actually stands behind this range — the allowlist
+    #                     narrows the population that gets to TRY the password, it is
+    #                     not the control keeping the console safe.
+    #   157.85.213.59/32  The mini-PC's own internet egress (its direct address, not
+    #                     the WireGuard tunnel — relevant when reaching the console
+    #                     from a path that does not traverse WireGuard at all).
+    #   202.152.143.147/32 The third WireGuard peer's egress.
+    allow 10.10.0.0/24;
+    allow 103.161.62.0/24;
+    allow 157.85.213.59/32;
+    allow 202.152.143.147/32;
+    deny all;
+
+    auth_basic           "waxum console";
+    auth_basic_user_file /etc/nginx/wa_waxum.htpasswd;
+
+    # ── PROXY HEADERS AND THE AUTO-LOGIN COOKIE, ALL AT SERVER LEVEL ────────────
+    #
+    # Same rule as wa.conf: a location that sets even ONE proxy_set_header discards
+    # the WHOLE inherited set, X-Forwarded-For included. This file has only one
+    # proxied location (`location /`, below the ACME one on :80), but the rule is
+    # kept anyway — asserted by TestNoLocationInEitherEdgeFileSetsAProxyHeader — so a
+    # location added later (e.g. to special-case /swagger-ui) cannot silently lose
+    # the Cookie injection this vhost exists for.
+    #
+    # proxy_set_header Cookie $wa_waxum_console_cookie REPLACES the client's entire
+    # Cookie header with the value wa_waxum_tokens.conf's map produces for $host —
+    # literally `waxum_console=<SUPERADMIN_TOKEN>` for these three hostnames. That is
+    # the whole point: the operator authenticates once, with HTTP Basic against the
+    # WSM admin credential above, and never sees waxum's own token-paste login page.
+    # Two consequences worth keeping in mind:
+    #
+    #   1. This is a REPLACEMENT, not a merge. Any cookie the browser itself set
+    #      (waxum's console reads only `waxum_console`, so today that's moot, but a
+    #      future waxum release that sets a SECOND cookie would have it silently
+    #      stripped on every request here) is discarded.
+    #   2. The console's own Logout button cannot work through this proxy: it clears
+    #      the browser's cookie, but the very next request has nginx re-inject the
+    #      same token again. There is no way to "log out" of this vhost short of
+    #      revoking or rotating SUPERADMIN_TOKEN itself.
+    #
+    # X-Forwarded-For uses $proxy_add_x_forwarded_for, matching wa.conf, so a
+    # client-supplied value is appended to rather than trusted outright.
+    proxy_http_version 1.1;
+    proxy_set_header Host               $host;
+    proxy_set_header X-Real-IP          $remote_addr;
+    proxy_set_header X-Forwarded-For    $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Host   $host;
+    proxy_set_header X-Forwarded-Port   $server_port;
+    proxy_set_header X-Forwarded-Proto  https;
+    proxy_set_header X-Forwarded-Server $host;
+    proxy_set_header Upgrade            $http_upgrade;
+    proxy_set_header Connection         $waxum_connection_upgrade;
+    proxy_set_header Cookie             $wa_waxum_console_cookie;
+    proxy_connect_timeout 10s;
+    proxy_read_timeout 300s;
+    proxy_send_timeout 300s;
+    proxy_buffering off;
+
+    location / {
+        limit_req zone=waxum_console burst=20 nodelay;
+        proxy_pass http://$waxum_backend;
+    }
+}

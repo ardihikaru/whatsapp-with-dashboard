@@ -435,6 +435,97 @@ STORED. This is a known limitation, not something handled elsewhere — see
 retention/archival work should treat that gap as real, not assume a job
 already exists to clean it up.
 
+**NATS is a SECOND front door into sending, and it bypasses every gate this
+app owns.** waxum does not merely publish events to NATS — it *consumes* a
+durable pull consumer named `wa-send-worker` on `wa.send.>`
+(`src/nats/consumer.rs:20-31`), parses the session id straight out of the
+subject (`consumer.rs:87-93`), and executes any of sixteen `OutboundCommand`
+variants (`src/nats/models.rs:13-131`). WSM's bearer tokens, the nginx edge
+allowlist, `internal/auth`'s throttles and `internal/wa`'s send rate limiter
+are **none of them** in that path. `NATS_TOKEN` is therefore a send credential
+of exactly the same class as `WAXUM_TOKEN`, not a bus password — treat it the
+same way, and never publish the NATS port wider than the one interface that
+needs it. Both servers bind accordingly (the laptop to loopback, the mini-PC
+to its WireGuard address).
+
+**Do not put credentials in `NATS_URL` — async-nats parses them and then
+ignores them.** waxum's client is async-nats 0.38, whose `ServerAddr` exposes
+`username()`, `password()` and `has_user_pass()` — and whose connector calls
+none of them: `connect_info.user`/`.pass` come only from `options.auth`, which
+just `user_and_password()`, `token()` and an auth callback ever populate.
+`nats://user:pass@host:4222` therefore connects **UNAUTHENTICATED**, with no
+error, no log line and nothing on either side to say so. That is why both NATS
+servers were switched from `--user`/`--pass` to `--auth <token>` (mutually
+exclusive flags — it is a swap, not an addition) and why waxum is given
+`NATS_TOKEN` as its own variable. The trap is that `DATABASE_URL` three lines
+above it in the same compose file *does* carry its credentials inline, so the
+wrong pattern is right there to copy. `TestTheNatsURLNeverCarriesEmbeddedCredentials`
+is what keeps it out.
+
+**The two NATS servers are standalone, and linking them would silently split
+the send queue.** Neither runs a cluster, gateway or leafnode (`/varz` reports
+0 of each on both). Both waxum instances create the *same* streams
+(`WA_EVENTS`, `WA_SEND`) with the *same* subjects and register a durable
+consumer with the *same* hardcoded name, `wa-send-worker`. That collision is
+harmless only because the servers never see each other's messages. Federate
+them for any reason — a gateway, a leafnode, a supercluster set up for some
+other product — and the two consumers begin competing over one merged
+`wa.send.>`, so a send meant for one handset goes out from the other's number,
+with nothing in either log saying so. If they are ever linked, the stream and
+consumer names must become deployment-specific first.
+
+**waxum now publishes a host port, and the shape of that port is the whole
+safety story.** This file used to say "NO ports: block, deliberately", and the
+reason it gave has not expired: `SUPERADMIN_TOKEN` is root over every session
+on the instance, and waxum's console has no username/password at all — its
+login *is* that token, pasted into a form and then kept in a `waxum_console`
+cookie for 30 days (`src/console/handlers.rs:280-300`). What changed is that
+clino's nginx serves that console, and a compose network does not span
+machines. So the port exists, pinned by `WAXUM_BIND_ADDR` to the host's
+WireGuard address and nothing wider, with `:?` so an unset value aborts the
+container rather than defaulting to every interface.
+`TestWaxumPublishesItsHostPortOnlyOnAnExplicitBindAddress` fails on a bare
+`3451:3451`, on a literal `0.0.0.0`, on a hardcoded address, and on the port
+going missing. Note this means `curl 127.0.0.1:3451` does **not** work on
+either host — loopback is deliberately not published, and a failed local curl
+is the binding working, not a broken waxum.
+
+**One certificate, six names, two edge files, and the secret is in neither.**
+`wa.conf` serves `wa`, `wa-minipc` and `wa-laptop`; `waxum.conf` serves
+`waxum`, `waxum-minipc` and `waxum-laptop`; both read
+`/etc/letsencrypt/live/wa/`, whose SANs cover all six. The waxum vhosts are
+gated by HTTP Basic against the WSM admin credential
+(`/etc/nginx/wa_waxum.htpasswd`) and then have waxum's own token injected for
+them, so the operator never sees waxum's login page and the root token never
+reaches a browser. That token lives in `/etc/nginx/wa_waxum_tokens.conf`,
+mode 640, deliberately **outside** `conf.d/` — because `conf.d/wa.conf` is
+mirrored byte-for-byte into `docs/deploy-nginx-wa.conf.example` and committed,
+so a token written into the vhost file would be committed with it. Two
+consequences worth keeping: nginx replaces the client's whole `Cookie` header
+to inject it, so **waxum's own Logout button cannot work** (the next request
+re-injects); and because nginx must choose that header *before* it picks an
+upstream, the two waxum instances **share one `SUPERADMIN_TOKEN`** — a
+per-instance token could not follow the `waxum.mfardiansyah.id` failover.
+
+**Failing over changes which phone number sends.** `wa_pool`'s backup is a
+different WSM process, a different MySQL, a different waxum volume and a
+different paired handset — that is forced, not a shortcut, because a WhatsApp
+device identity cannot run in two places. Two things follow. Bearer tokens do
+not survive the hop: `api_access_tokens` is per-database, so a caller holding a
+mini-PC-issued token gets 401 on the laptop and must re-login. `api_clients`
+*is* mirrored (same ids, same `secret_hash`) precisely so that re-login
+succeeds; the access tokens deliberately are not. And `proxy_next_upstream`
+names no 4xx on purpose: a 409 means the primary's session is disconnected,
+and retrying that on the backup would quietly send from the other number
+instead of telling the caller what is actually wrong.
+
+**`WSM_HOST_LABEL` is cosmetic and can lie.** The MINIPC/LAPTOP chip in the
+header is operator-supplied text; nothing verifies it against the machine
+actually running the process, so a `.env` copied from one host to the other
+will cheerfully mislabel it. When it matters, `GET /api/v1/health` is the
+honest answer — its `sessions`/`connected` counts differ between the two
+deployments.
+
 ---
 
 ## Layout

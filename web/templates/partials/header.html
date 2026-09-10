@@ -14,6 +14,11 @@
     <div class="header-title">{{.Title}}</div>
   </div>
   <div class="header-actions">
+    <!-- Which of this deployment's machines served the page — hidden entirely
+         when WSM_HOST_LABEL is unset/empty, not rendered empty. Cosmetic
+         operator-supplied text; nothing here verifies it against the machine
+         actually running this process (see config.Config.HostLabel). -->
+    {{if .HostLabel}}<span class="badge badge-host-label" title="Serving host">{{.HostLabel}}</span>{{end}}
     {{template "theme_toggle" .}}
     <span class="header-user">{{.Username}}</span>
     <button class="btn btn-outline" hx-post="{{u "/logout"}}">Logout</button>

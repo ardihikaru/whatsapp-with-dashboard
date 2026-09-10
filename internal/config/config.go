@@ -57,6 +57,25 @@ const (
 	// WA_PLATFORM_URL to an ABSOLUTE url if this ever hangs off something.
 	DefaultPlatformURL = ""
 
+	// DefaultHostLabel is EMPTY, same "unset hides the chip" convention as
+	// DefaultPlatformURL above: this app is about to run on two machines (a
+	// mini-PC, primary, and a laptop, failover) behind the same nginx edge,
+	// and WSM_HOST_LABEL is the operator-supplied text that tells them apart
+	// on the dashboard — see the header chip built from it. It deliberately
+	// names no particular value ("MINIPC"/"LAPTOP" are just what this
+	// deployment happens to use) because a third box getting a third name
+	// should never need a code change.
+	DefaultHostLabel = ""
+
+	// MaxHostLabelLen bounds WSM_HOST_LABEL so a pathological value (someone
+	// pastes a whole paragraph into .env) cannot stretch the header chip
+	// into the logout button on a narrow phone — see responsive.css's
+	// header-actions budget below 480px. Generous enough for a real
+	// hostname or a short free-text tag; boot fails loudly above it rather
+	// than silently truncating, same convention as every other malformed
+	// WSM_* value in this file.
+	MaxHostLabelLen = 40
+
 	// No proxy is trusted unless one is named. See TrustedProxies.
 	DefaultTrustedProxies = ""
 
@@ -158,6 +177,14 @@ type Config struct {
 
 	// PlatformURL is the backoffice link rendered in the sidebar footer ("" hides it).
 	PlatformURL string
+
+	// HostLabel is free operator-supplied text ("MINIPC", "LAPTOP", ...)
+	// rendered as a header chip so an operator can tell which of this
+	// deployment's two machines served the page — see DefaultHostLabel and
+	// MaxHostLabelLen above. "" hides the chip. It is cosmetic only: nothing
+	// here verifies it matches the machine actually running this process, so
+	// a copied .env will happily lie.
+	HostLabel string
 
 	// TrustedProxies are the peers whose X-Forwarded-For this service will
 	// believe, from WSM_TRUSTED_PROXIES. EMPTY BY DEFAULT, and that default is
@@ -354,7 +381,27 @@ func Load() (*Config, error) {
 	if err := loadSelfConvo(cfg); err != nil {
 		return nil, err
 	}
+	if err := loadHostLabel(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// loadHostLabel resolves WSM_HOST_LABEL. LookupEnv, not envOr/Getenv — same
+// reason as WA_PLATFORM_URL above: an explicit "" is a meaningful value ("hide
+// the chip"), distinct from "unset", even though both resolve to the same
+// DefaultHostLabel today. A value longer than MaxHostLabelLen is a boot-time
+// error, not a silent truncation, matching every other malformed WSM_* value
+// in this file.
+func loadHostLabel(cfg *Config) error {
+	cfg.HostLabel = DefaultHostLabel
+	if v, ok := os.LookupEnv("WSM_HOST_LABEL"); ok {
+		if len(v) > MaxHostLabelLen {
+			return fmt.Errorf("invalid WSM_HOST_LABEL: %d bytes, want at most %d", len(v), MaxHostLabelLen)
+		}
+		cfg.HostLabel = v
+	}
+	return nil
 }
 
 // loadMinio resolves the MinIO object-storage config. Endpoint/keys/bucket

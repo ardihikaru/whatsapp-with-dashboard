@@ -31,6 +31,11 @@
   <!-- TWELFTH, after verify.css — /self-convo's badges/participant grid/JSON
        preview. See self-convo.css's own header comment. -->
   <link rel="stylesheet" href="{{u "/static/css/self-convo.css"}}">
+  <!-- THIRTEENTH, after self-convo.css — the header's "which host served this
+       page" chip (partials/header.html). NOT duplicated into login.html: the
+       chip lives in the "header" template, which login.html never renders.
+       See host-chip.css's own header comment. -->
+  <link rel="stylesheet" href="{{u "/static/css/host-chip.css"}}">
   <script src="{{u "/static/js/htmx.min.js"}}" defer></script>
   <script src="{{u "/static/js/nav-drawer.js"}}" defer></script>
   <script src="{{u "/static/js/media-upload.js"}}" defer></script>

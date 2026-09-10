@@ -4,27 +4,85 @@
 # THIS EDGE IS SHARED with several other products. Two consequences that are easy to get
 # wrong and expensive to debug:
 #
-#   * `map` and `limit_req_zone` live in nginx's http context and their names are GLOBAL
-#     across everything in conf.d. Every name here is prefixed `wa_`. Renaming
+#   * `map`, `limit_req_zone` and `upstream` live in nginx's http context and their names
+#     are GLOBAL across everything in conf.d. Every name here is prefixed `wa_`. Renaming
 #     them to something generic can collide with a neighbour and fail the reload for the
-#     whole host, taking every other product down with it.
+#     whole host, taking every other product down with it. As of the multi-host failover
+#     work this also applies to docs/deploy-nginx-waxum.conf.example, which lives in the
+#     SAME conf.d and is `waxum_`-prefixed for the same reason — see
+#     TestNoMapOrZoneOrUpstreamNameIsDefinedTwiceAcrossTheTwoEdgeFiles.
 #   * No `default_server` anywhere in this file. Claiming it would silently steal every
 #     unmatched hostname on the box.
 #
 # Always `sudo nginx -t` before `systemctl reload nginx`.
 #
-# Its own certificate lineage, so a neighbour's broken DNS can never block renewal here:
+# Its own certificate lineage, so a neighbour's broken DNS can never block renewal here.
+# Since the multi-host failover work the cert has been expanded to cover all six wa*/waxum*
+# names (wa, wa-laptop, wa-minipc, waxum, waxum-laptop, waxum-minipc, all .mfardiansyah.id)
+# under one lineage, one path, one renewal:
 #   certbot certonly --webroot -w /var/www/acme --cert-name wa \
-#     -d wa.mfardiansyah.id --deploy-hook 'nginx -t && systemctl reload nginx'
+#     -d wa.mfardiansyah.id -d wa-minipc.mfardiansyah.id -d wa-laptop.mfardiansyah.id \
+#     -d waxum.mfardiansyah.id -d waxum-minipc.mfardiansyah.id -d waxum-laptop.mfardiansyah.id \
+#     --deploy-hook 'nginx -t && systemctl reload nginx'
 
 map $http_upgrade $wa_connection_upgrade { default upgrade; '' close; }
 
+# ── UPSTREAMS: PASSIVE HEALTH CHECKS ONLY ───────────────────────────────────────
+#
+# nginx 1.18.0 Ubuntu is the stock open-source build: no commercial `health_check`,
+# no njs. All failover here is PASSIVE — nginx only learns a peer is bad by trying to
+# use it and having that attempt fail — driven by max_fails/fail_timeout on each
+# `server` line plus proxy_next_upstream below deciding what counts as a failed
+# attempt worth acting on.
+#
+# wa_pool is the public host's group: mini-PC primary, laptop as an explicit `backup`
+# (nginx only sends traffic to a `backup` peer once every non-backup peer in the group
+# is marked down). wa_minipc and wa_laptop are single-peer groups for the two
+# machine-specific hostnames, which exist so an operator can pin a request at one box
+# deliberately (e.g. while diagnosing which host is unhealthy) without going through
+# failover logic at all.
+#
+# A `backup` server with no max_fails/fail_timeout of its own still PARSES —
+# `nginx -t` accepts it — but silently loses the fast-fail behaviour every server here
+# depends on: with the directive's own defaults (max_fails=1 fail_timeout=10s) that is
+# usually harmless, but leaving it unstated invites a future edit to "simplify" the
+# primary's line without noticing the backup quietly drifted from it. Both lines below
+# set both parameters explicitly and identically for that reason. Guarded by
+# TestWaPoolMarksOnlyTheLaptopAsBackupAndBothPeersCarryExplicitHealthParameters.
+upstream wa_pool {
+    server 10.10.0.4:18801 max_fails=2 fail_timeout=10s;
+    server 10.10.0.3:18801 backup max_fails=2 fail_timeout=10s;
+}
+
+upstream wa_minipc {
+    server 10.10.0.4:18801 max_fails=2 fail_timeout=10s;
+}
+
+upstream wa_laptop {
+    server 10.10.0.3:18801 max_fails=2 fail_timeout=10s;
+}
+
 # Shared port register: 1<environment><product>1. whatsapp-with-dashboard owns slot 08.
 # Prod only — there is no dev tier for this product, and 19801 is reserved for one.
+#
+# The map's VALUE is now an upstream GROUP NAME, not a bare addr:port, because
+# `proxy_pass http://$wa_backend;` needs to resolve to a declared `upstream {}` block to
+# get failover at all. nginx's own documented behaviour for a variable proxy_pass is:
+# when the value names a declared upstream group, that group (with its passive checks,
+# `backup` ordering, etc.) is used; if it DIDN'T match any declared group, nginx instead
+# treats it as a hostname and falls back to resolving it via the configured resolver at
+# REQUEST time, failing with a clear `no resolver defined to resolve …` (or an actual DNS
+# lookup, if a resolver were configured) in error.log — loud, not silent. That fallback
+# path is exactly why this must be proven by a real failover test against the live edge
+# (stop the primary's app process, confirm a send still completes off the backup, confirm
+# error.log shows nginx switching peers) rather than assumed from reading this file — see
+# the deploy checklist this comment lives beside.
 map $host $wa_backend {
     hostnames;
-    wa.mfardiansyah.id  10.10.0.4:18801;
-    default             "";
+    wa.mfardiansyah.id         wa_pool;
+    wa-minipc.mfardiansyah.id  wa_minipc;
+    wa-laptop.mfardiansyah.id  wa_laptop;
+    default                    "";
 }
 
 # ── RATE LIMITING THE PUBLIC API ────────────────────────────────────────────────
@@ -52,7 +110,7 @@ limit_req_zone $binary_remote_addr zone=wa_health:1m rate=1r/s;
 server {
     listen 80;
     listen [::]:80;
-    server_name wa.mfardiansyah.id;
+    server_name wa.mfardiansyah.id wa-minipc.mfardiansyah.id wa-laptop.mfardiansyah.id;
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/acme;
@@ -65,7 +123,7 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name wa.mfardiansyah.id;
+    server_name wa.mfardiansyah.id wa-minipc.mfardiansyah.id wa-laptop.mfardiansyah.id;
 
     ssl_certificate     /etc/letsencrypt/live/wa/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/wa/privkey.pem;
@@ -127,7 +185,58 @@ server {
     proxy_read_timeout 300s;
     proxy_send_timeout 300s;
     proxy_buffering off;
-    proxy_request_buffering off;
+
+    # ── FAILOVER REQUIRES A BUFFERED REQUEST BODY ───────────────────────────────
+    #
+    # nginx can only retry a request against the next upstream peer if it still HAS
+    # the request to send — with proxy_request_buffering off (the previous setting,
+    # single-backend, no failover to give) nginx streams the client's body straight
+    # through as it arrives, and once any of it has left for the first peer there is
+    # nothing left to replay. `on` makes nginx read the full body into a buffer (or
+    # spill to a temp file above client_body_buffer_size) before it opens the
+    # upstream connection at all, so the SAME body can be handed to wa_pool's backup
+    # peer if the primary fails before answering.
+    #
+    # proxy_next_upstream deliberately names error/timeout/5xx and NO 4xx status.
+    # A 409 from this app means the primary's WhatsApp session is disconnected —
+    # see CLAUDE.md's "Connected means three different things" and orphaned-client-
+    # wedge hazard notes — and that is a fact about THIS device's pairing state, not
+    # a transient fault the backup peer can fix. Retrying a 409 on wa_pool's backup
+    # would not retry the same send: whatsapp-with-dashboard has no cross-host
+    # session replication (CLAUDE.md: "the WhatsApp session is a hard singleton"),
+    # so the backup's app process is fronting a COMPLETELY DIFFERENT paired phone
+    # number. Failing that request over would silently send the message from a
+    # different sender identity than the caller intended, which is worse than the
+    # 409 it was trying to avoid. http_403/http_404 are correctly excluded from this
+    # list for the same reason nginx never treats them as retryable by default: they
+    # are answers from the app about the request, not evidence the backend is down.
+    #
+    # proxy_next_upstream_tries 2 caps this at exactly one retry (the original
+    # attempt plus one) rather than nginx's unbounded default, which would otherwise
+    # let a request round-trip the whole pool (both wa_pool peers here, but written
+    # to not silently change behaviour if this group ever grows) before giving up.
+    #
+    # WHAT THIS DOES NOT COVER: nginx's own documented behaviour is that a
+    # non-idempotent method (POST, LOCK, PATCH — every write route this API has) is
+    # NOT retried against the next peer once it has been sent to the first one,
+    # UNLESS `non_idempotent` is also listed here (nginx docs, proxy_next_upstream:
+    # "normally, requests with a non-idempotent method … are not passed to the next
+    # server if a request has been sent to an upstream server … enabling this option
+    # explicitly allows retrying such requests"). This file deliberately does NOT
+    # add `non_idempotent`: retrying an already-sent POST /api/v1/messages could
+    # double-send a WhatsApp message if the primary actually processed it and only
+    # the RESPONSE was lost in transit — a worse failure than a client seeing one
+    # error and retrying itself. The practical effect: proxy_request_buffering on
+    # plus this directive buys real failover for the idempotent paths (GET/HEAD
+    # /api/v1/sessions*, /api/v1/health) and for a POST that fails before nginx has
+    # finished writing it to the primary (e.g. a connection refused at TCP connect
+    # time, which nginx counts as `error` before any bytes went out) — but a POST
+    # that reaches the primary and then times out waiting for a reply will NOT be
+    # retried on the backup. Do not assume otherwise without a real test that kills
+    # the primary mid-request and inspects error.log and wa_messages on both hosts.
+    proxy_request_buffering on;
+    proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
+    proxy_next_upstream_tries 2;
 
     # ── THE PUBLIC API IS AN ALLOWLIST ──────────────────────────────────────────
     #
@@ -138,7 +247,7 @@ server {
     #
     # WHAT IS EXCLUDED, AND WHY IT STAYS EXCLUDED. Since 2026-09-10 the session
     # list, the session detail view and /api/v1/health are all published (see the
-    # three blocks below, after the session-scoped messages regex) — but nginx
+    # three blocks below, after the session-scoped messages regexes) — but nginx
     # matches a location by PATH, not method, so publishing those paths bare would
     # also publish every OTHER method served on them. That is why each of those
     # three carries its own $request_method gate rather than appearing in this
@@ -184,21 +293,54 @@ server {
 
     location = /api/v1/messages       { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
     location = /api/v1/messages/group { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
-    location = /api/v1/messages/media { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
     location = /api/v1/inbound        { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
     location = /api/v1/contacts/check { limit_req zone=wa_api burst=20 nodelay; proxy_pass http://$wa_backend; }
 
-    # The session-scoped equivalents of the three above. A regex because the session
-    # id sits mid-path, and anchored at both ends so it cannot be widened by a suffix
-    # — `/sessions/{id}/calls/tts` must not match this.
+    # /api/v1/messages/media is handled by its OWN exact location below, split out of
+    # this file's former bundled session-scoped regex — see the "MEDIA OPTS BACK OUT
+    # OF BUFFERING" block after the session-scoped regexes for why.
+    location = /api/v1/messages/media {
+        limit_req zone=wa_api burst=20 nodelay;
+        proxy_request_buffering off;
+        proxy_pass http://$wa_backend;
+    }
+
+    # The session-scoped equivalents of /messages, /messages/group and
+    # /contacts/check. A regex because the session id sits mid-path, and anchored at
+    # both ends so it cannot be widened by a suffix — `/sessions/{id}/calls/tts` must
+    # not match this. /messages/media is deliberately NOT in this alternation any
+    # more (see the split below); it needs its own proxy_request_buffering setting,
+    # which a shared location cannot give only one branch of an alternation.
     #
     # THE QUOTES ARE REQUIRED. nginx's parser sees `{` and `}` as block delimiters
     # before the regex is ever compiled, so an unquoted repetition quantifier ends
     # the location early and `nginx -t` fails with a bewildering
-    #   unknown directive "1,64}/(messages|messages/media|contacts/check)$"
+    #   unknown directive "1,64}/(messages|contacts/check)$"
     # that points at the quantifier's own tail. Quoting the whole regex is the fix.
-    location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|messages/media|contacts/check)$" {
+    location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|contacts/check)$" {
         limit_req zone=wa_api burst=20 nodelay;
+        proxy_pass http://$wa_backend;
+    }
+
+    # ── MEDIA OPTS BACK OUT OF BUFFERING ─────────────────────────────────────────
+    #
+    # The failover buffering enabled at server level (proxy_request_buffering on,
+    # above) means nginx reads a request body fully into a buffer or a temp file
+    # BEFORE it opens the upstream connection. For a 110 MB media upload on a box
+    # shared with nine other products, that roughly doubles the wall-clock cost of a
+    # large send (write the buffer, then stream it upstream) for a benefit that does
+    # not apply here anyway: media sends draw no POST failover regardless (see the
+    # non_idempotent note above), so there is nothing to buy back with the extra
+    # cost. Both media locations set proxy_request_buffering off explicitly, back to
+    # the file's previous single-backend behaviour, and accept that a primary
+    # failure mid-upload is a failed send, not a retried one.
+    #
+    # Anchored at both ends with its own regex, disjoint from the one above (a
+    # session id followed by exactly `/messages/media` and nothing else), so the two
+    # can never both match the same path.
+    location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/messages/media$" {
+        limit_req zone=wa_api burst=20 nodelay;
+        proxy_request_buffering off;
         proxy_pass http://$wa_backend;
     }
 
@@ -245,7 +387,7 @@ server {
 
     # The detail view. Anchored at both ends so it cannot be widened by a suffix —
     # `/sessions/{id}/calls/tts` and `/sessions/{id}/pairing` must not match this.
-    # Quoted for the same parser reason as the messages regex above.
+    # Quoted for the same parser reason as the messages regexes above.
     #
     # nginx matches the NORMALIZED URI (percent-decoded, `..` resolved, duplicate
     # slashes collapsed, query string excluded), so `/sessions/abc%2Fcalls%2Ftts`

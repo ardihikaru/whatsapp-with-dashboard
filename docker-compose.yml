@@ -150,6 +150,42 @@ services:
       - .env
     environment:
       DATABASE_URL: mysql://${WAXUM_MYSQL_USER}:${WAXUM_MYSQL_PASSWORD}@mysqldb-master:3306/${WAXUM_MYSQL_DATABASE}
+      # NATS_URL is waxum's OWN on/off gate for its NATS integration, not a
+      # WSM setting — NatsConfig::from_env() returns None when it's unset and
+      # every publish becomes a no-op, so the vars below configure the waxum
+      # PROCESS the same way DATABASE_URL/RATE_LIMIT_* above do. When set,
+      # waxum publishes to NATS as a THIRD, independent sink alongside the SSE
+      # tail stream (backend_waxum_events.go) and webhook delivery — nothing
+      # about those two changes; this just gives waxum one more place to
+      # announce the same events, and a `wa.send.>` subject a durable pull
+      # consumer can execute outbound sends from.
+      #
+      # This line hardcodes the container-DNS address exactly as DATABASE_URL
+      # above does, and for the same reason: on this host `nats-master`
+      # resolves because the app joins master-compose-ai-net. A host that
+      # runs only this stack (REMOTE_DB=1) does not have that network, so
+      # docker-compose.remote-db.yml repoints this the same way it repoints
+      # DATABASE_URL — see that file's waxum service.
+      #
+      # Credentials go in NATS_TOKEN, NEVER embedded in this URL. This is not
+      # a style preference: waxum's async-nats 0.38 client silently IGNORES
+      # userinfo in a NATS URL. `ServerAddr` parses username()/password()/
+      # has_user_pass(), but has_user_pass() is called nowhere in
+      # connector.rs or options.rs — connect_info.user/.pass are populated
+      # exclusively from options.auth, which only user_and_password()/
+      # token()/an auth callback ever set. So
+      # `nats://user:pass@host:4222` connects UNAUTHENTICATED, with no error
+      # and no log line — exactly the mistake a future reader makes by
+      # pattern-matching on DATABASE_URL above, which genuinely does carry
+      # its credentials inline. Both NATS servers are on token auth for this
+      # reason; see NATS_TOKEN below and compose_nats_test.go's
+      # TestTheNatsURLNeverCarriesEmbeddedCredentials.
+      NATS_URL: nats://nats-master:4222
+      NATS_TOKEN: ${NATS_TOKEN:?waxum needs NATS_TOKEN in .env}
+      NATS_EVENTS_STREAM: ${NATS_EVENTS_STREAM:-WA_EVENTS}
+      NATS_SEND_STREAM: ${NATS_SEND_STREAM:-WA_SEND}
+      NATS_EVENTS_MAX_AGE_DAYS: ${NATS_EVENTS_MAX_AGE_DAYS:-7}
+      NATS_SEND_MAX_AGE_DAYS: ${NATS_SEND_MAX_AGE_DAYS:-1}
       SUPERADMIN_TOKEN: ${WAXUM_TOKEN:?waxum needs WAXUM_TOKEN in .env}
       WHATSAPP_STORAGE_PATH: /data/whatsapp_sessions
       # waxum's tower_governor rate limiter defaults to a burst of only ~3
@@ -185,12 +221,29 @@ services:
     volumes:
       - waxum-sessions:/data
 
-    # NO ports: block, deliberately. The app reaches waxum at
-    # http://waxum:3451 over the compose network above; nothing else may
-    # reach it. waxum's SUPERADMIN_TOKEN is a root credential for every
-    # WhatsApp session it holds, and publishing this on the host or the LAN
-    # would put that credential's blast radius one network hop away instead
-    # of zero.
+    # ONE host port, AND IT MUST NAME AN INTERFACE. This file carried "NO
+    # ports: block, deliberately" until 2026-09-11, and the reason it gave is
+    # still true: waxum's SUPERADMIN_TOKEN is a root credential for every
+    # WhatsApp session it holds, and its console's "login" IS that token,
+    # pasted into a form and kept in a 30-day cookie. Publishing this on the
+    # LAN or the internet puts that blast radius one hop away instead of zero.
+    #
+    # What changed is that clino's nginx now serves waxum's console at
+    # waxum{,-minipc,-laptop}.mfardiansyah.id, and clino can only reach this
+    # host over WireGuard — the compose network does not span machines. So the
+    # port is published, and WAXUM_BIND_ADDR pins it to the WireGuard address
+    # (10.10.0.4 on the mini-PC, 10.10.0.3 on the laptop) and nothing else.
+    #
+    # `:?` NOT `:-`: an unset value must abort the container, never fall back.
+    # A bare "3451:3451" or a 0.0.0.0 default here would publish a root
+    # credential's front door on every network the host is attached to, and it
+    # would do it silently. TestWaxumPublishesItsHostPortOnlyOnAnExplicitBindAddress
+    # is what keeps that shape from regressing.
+    #
+    # The app still reaches waxum at http://waxum:3451 over the compose
+    # network; this port exists only for the edge.
+    ports:
+      - "${WAXUM_BIND_ADDR:?waxum needs WAXUM_BIND_ADDR in .env - this host's WireGuard address}:3451:3451"
 
     networks: [infra]
 
