@@ -40,9 +40,18 @@ const (
 // MaxTemplateBytes (256 KiB, internal/selfconvo/script.go) — GetTemplate is
 // the only read meant to carry it; every list view uses TemplateSummary
 // instead (see ListTemplateSummaries's doc comment).
+//
+// Topic/Stage/Origin were added in the Convo scheduling phase
+// (migrations/0008_convo_scheduling.sql) so a schedule can draw a candidate
+// template by topic+stage instead of an operator naming one id. Every
+// template created before that migration reads back with Topic="",
+// Stage="" and Origin=OriginUpload (the column's own defaults).
 type Template struct {
 	ID        string
 	Name      string
+	Topic     string
+	Stage     string
+	Origin    string
 	TurnCount int
 	Body      string
 	CreatedAt time.Time
@@ -56,6 +65,9 @@ type Template struct {
 type TemplateSummary struct {
 	ID        string
 	Name      string
+	Topic     string
+	Stage     string
+	Origin    string
 	TurnCount int
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -64,6 +76,13 @@ type TemplateSummary struct {
 // Run is one row of wa_convo_runs. SessionAName/SessionBName and
 // PhoneA/PhoneB are snapshots taken at trigger time (see the migration's
 // header for why there is deliberately no foreign key to wa_sessions here).
+//
+// ScheduleID/OccurrenceDate/ChainPrevRunID/ChainDepth/Topic/ParaphraseSeed
+// were added in the Convo scheduling phase (migrations/0008) and are the
+// planner's provenance for a run it created. Every zero value here — empty
+// ScheduleID, empty OccurrenceDate, ChainDepth 0 — describes exactly what a
+// manually triggered run has always been, so CreateRun/ListRuns/GetRun/
+// DueRuns keep working unchanged for every caller that never sets them.
 type Run struct {
 	ID           string
 	TemplateID   string
@@ -83,6 +102,13 @@ type Run struct {
 	FinishedAt   *time.Time
 	Error        string
 	CreatedAt    time.Time
+
+	ScheduleID     string
+	OccurrenceDate string
+	ChainPrevRunID string
+	ChainDepth     int
+	Topic          string
+	ParaphraseSeed int64
 }
 
 // Turn is one row of wa_convo_turns, keyed (RunID, Seq). MessageID, when
@@ -115,6 +141,11 @@ var (
 	// treats it as "someone else already finished this run" and does not
 	// send.
 	ErrTurnNotPending = errors.New("convo: turn is no longer pending")
+	// ErrScheduleFinished is returned by SetScheduleState when the schedule
+	// has already reached a terminal state (finished/stopped) — mirrors
+	// ErrRunFinished above for the same reason: reanimating it would hide a
+	// caller's mistaken assumption rather than silently no-op.
+	ErrScheduleFinished = errors.New("convo: schedule already finished")
 )
 
 // IsTerminal reports whether state is one a run never leaves once reached.

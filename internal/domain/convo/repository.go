@@ -86,12 +86,13 @@ func requireAffected(res sql.Result) error {
 
 // ---- templates ----
 
-const templateCols = `id, name, turn_count, body, created_at, updated_at`
+const templateCols = `id, name, topic, stage, origin, turn_count, body, created_at, updated_at`
 
 func scanTemplate(s scanner) (Template, error) {
 	var t Template
 	var created, updated string
-	if err := s.Scan(&t.ID, &t.Name, &t.TurnCount, &t.Body, &created, &updated); err != nil {
+	if err := s.Scan(&t.ID, &t.Name, &t.Topic, &t.Stage, &t.Origin, &t.TurnCount, &t.Body,
+		&created, &updated); err != nil {
 		return Template{}, err
 	}
 	t.CreatedAt, _ = time.Parse(timeLayout, created)
@@ -100,7 +101,10 @@ func scanTemplate(s scanner) (Template, error) {
 }
 
 // InsertTemplate fills CreatedAt/UpdatedAt from the injected clock when
-// zero, mirroring message.Repository.Insert.
+// zero, mirroring message.Repository.Insert. Origin defaults to
+// OriginUpload when unset, matching the column's own DB default — every
+// caller from before the Convo scheduling phase never sets it and still
+// gets an "upload" row.
 func (r *Repository) InsertTemplate(ctx context.Context, t *Template) error {
 	if t.CreatedAt.IsZero() {
 		t.CreatedAt = r.now()
@@ -108,22 +112,26 @@ func (r *Repository) InsertTemplate(ctx context.Context, t *Template) error {
 	if t.UpdatedAt.IsZero() {
 		t.UpdatedAt = r.now()
 	}
+	if t.Origin == "" {
+		t.Origin = OriginUpload
+	}
 	_, err := r.pool.ExecContext(ctx,
 		`INSERT INTO wa_convo_templates (`+templateCols+`)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Name, t.TurnCount, t.Body,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Name, t.Topic, t.Stage, t.Origin, t.TurnCount, t.Body,
 		t.CreatedAt.Format(timeLayout), t.UpdatedAt.Format(timeLayout))
 	return err
 }
 
 // templateSummaryCols deliberately excludes body — see ListTemplateSummaries's
 // doc comment for why every list view must not select it.
-const templateSummaryCols = `id, name, turn_count, created_at, updated_at`
+const templateSummaryCols = `id, name, topic, stage, origin, turn_count, created_at, updated_at`
 
 func scanTemplateSummary(s scanner) (TemplateSummary, error) {
 	var t TemplateSummary
 	var created, updated string
-	if err := s.Scan(&t.ID, &t.Name, &t.TurnCount, &created, &updated); err != nil {
+	if err := s.Scan(&t.ID, &t.Name, &t.Topic, &t.Stage, &t.Origin, &t.TurnCount,
+		&created, &updated); err != nil {
 		return TemplateSummary{}, err
 	}
 	t.CreatedAt, _ = time.Parse(timeLayout, created)
@@ -195,22 +203,28 @@ func (r *Repository) DeleteTemplate(ctx context.Context, id string) error {
 
 // ---- runs ----
 
-const runCols = `id, template_id, template_name, session_a_id, session_b_id,
-	session_a_name, session_b_name, phone_a, phone_b, state, turn_count,
-	turns_done, start_at, next_due_at, started_at, finished_at, error, created_at`
+const runCols = `id, template_id, template_name, schedule_id, occurrence_date,
+	chain_prev_run_id, chain_depth, topic, paraphrase_seed,
+	session_a_id, session_b_id, session_a_name, session_b_name, phone_a, phone_b,
+	state, turn_count, turns_done, start_at, next_due_at, started_at, finished_at,
+	error, created_at`
 
 func scanRun(s scanner) (Run, error) {
 	var run Run
-	var templateID sql.NullString
+	var templateID, scheduleID, chainPrevRunID sql.NullString
 	var startAt, createdAt string
 	var nextDue, startedAt, finishedAt sql.NullString
-	if err := s.Scan(&run.ID, &templateID, &run.TemplateName, &run.SessionAID, &run.SessionBID,
+	if err := s.Scan(&run.ID, &templateID, &run.TemplateName, &scheduleID, &run.OccurrenceDate,
+		&chainPrevRunID, &run.ChainDepth, &run.Topic, &run.ParaphraseSeed,
+		&run.SessionAID, &run.SessionBID,
 		&run.SessionAName, &run.SessionBName, &run.PhoneA, &run.PhoneB, &run.State,
 		&run.TurnCount, &run.TurnsDone, &startAt, &nextDue, &startedAt, &finishedAt,
 		&run.Error, &createdAt); err != nil {
 		return Run{}, err
 	}
 	run.TemplateID = templateID.String
+	run.ScheduleID = scheduleID.String
+	run.ChainPrevRunID = chainPrevRunID.String
 	run.StartAt, _ = time.Parse(timeLayout, startAt)
 	run.CreatedAt, _ = time.Parse(timeLayout, createdAt)
 	run.NextDueAt = parseNullableTime(nextDue)
@@ -235,8 +249,10 @@ func (r *Repository) CreateRun(ctx context.Context, run *Run, turns []Turn) erro
 
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO wa_convo_runs (`+runCols+`)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		run.ID, nullIfEmpty(run.TemplateID), run.TemplateName, run.SessionAID, run.SessionBID,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		run.ID, nullIfEmpty(run.TemplateID), run.TemplateName, nullIfEmpty(run.ScheduleID), run.OccurrenceDate,
+		nullIfEmpty(run.ChainPrevRunID), run.ChainDepth, run.Topic, run.ParaphraseSeed,
+		run.SessionAID, run.SessionBID,
 		run.SessionAName, run.SessionBName, run.PhoneA, run.PhoneB, run.State,
 		run.TurnCount, run.TurnsDone, run.StartAt.Format(timeLayout), nullableTime(run.NextDueAt),
 		nullableTime(run.StartedAt), nullableTime(run.FinishedAt), run.Error,
