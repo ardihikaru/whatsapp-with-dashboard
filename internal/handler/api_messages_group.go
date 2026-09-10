@@ -28,9 +28,9 @@ func (h *handlers) PostAPISendGroupMessage(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	s, _, ok := h.Manager.SelectConnected(r.Context(), req.AllowMaster)
+	s, _, ok := selectForSend(r, h.Manager, req.MasterOnly, req.AllowMaster)
 	if !ok {
-		writeError(w, http.StatusConflict, noAutoRouteMessage(h.Manager.Snapshots(), req.AllowMaster))
+		writeError(w, http.StatusConflict, noSendRouteMessage(h.Manager.Snapshots(), req.MasterOnly, req.AllowMaster))
 		return
 	}
 	// Group sends are alerts by default (the alerter's WA_ALERT_GROUP_JID path).
@@ -54,6 +54,12 @@ type groupSendRequest struct {
 	TenantRef   string `json:"tenant_ref"`
 	Category    string `json:"category"`
 	AllowMaster bool   `json:"allow_master"`
+	// MasterOnly pins this send to the master session and fails with 409 if
+	// it is offline — see selectForSend. It OVERRIDES AllowMaster rather than
+	// combining with it: "only the master" already answers the question
+	// "may the master be used", so honouring both would make an
+	// allow_master:false + master_only:true body mean two opposite things.
+	MasterOnly bool `json:"master_only"`
 }
 
 // decodeGroupSendRequest reads and validates the group-send body, returning

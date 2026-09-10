@@ -72,6 +72,58 @@ func (m *Manager) SelectConnected(ctx context.Context, allowMaster bool) (*Manag
 	return chosen, chosen.Snapshot(), true
 }
 
+// SelectMaster chooses the connected MASTER session, and nothing else. It is
+// the routing mode for traffic that must always leave from one known handset —
+// ops alerts, where "which number paged me at 3am" is part of reading the page.
+//
+// This is deliberately NOT expressible through SelectConnected's allowMaster
+// flag, and the difference is easy to misread: allowMaster WIDENS the candidate
+// set (allowMaster || !snap.IsMaster) so a master becomes eligible ALONGSIDE
+// every ordinary session. There is no value of it that means "only the master".
+//
+// ⚠ THIS MODE HAS NO FALLBACK, BY DESIGN AND BY REQUEST. If the master handset
+// is disconnected this returns false and the caller answers 409 — it does not
+// quietly route through another session, because doing so would defeat the only
+// reason to ask for this mode. That makes the master a single point of failure
+// for whoever opts in: on 2026-09-11 the production master (6287748383890) was
+// disconnected while three other sessions were live, so every master_only send
+// would have 409'd. Callers that use this for alerting must therefore monitor
+// the master's own connectivity — see clino-watchdog's watchdog_*_master_down
+// alarms in the yuza-ai-gaming-workshop repo, which exist for exactly this.
+//
+// Ranking is the same as SelectConnected's and matters only in the pathological
+// case of several rows flagged is_master; the UI enforces one, but nothing in
+// the schema does, so this picks deterministically rather than at map order.
+func (m *Manager) SelectMaster(ctx context.Context) (*ManagedSession, Snapshot, bool) {
+	m.mu.RLock()
+	all := make([]*ManagedSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		all = append(all, s)
+	}
+	m.mu.RUnlock()
+	var chosen *ManagedSession
+	var best Snapshot
+	for _, s := range all {
+		snap := s.Snapshot()
+		if !snap.Connected || !snap.IsMaster {
+			continue
+		}
+		if chosen == nil || snap.QueueLen < best.QueueLen ||
+			(snap.QueueLen == best.QueueLen && snap.ID < best.ID) {
+			chosen, best = s, snap
+		}
+	}
+	if chosen == nil {
+		return nil, Snapshot{}, false
+	}
+	now := time.Now().UTC()
+	chosen.mu.Lock()
+	chosen.LastSelectedAt = &now
+	chosen.mu.Unlock()
+	_ = m.repo.MarkSelected(ctx, chosen.ID, now)
+	return chosen, chosen.Snapshot(), true
+}
+
 // SelectSnapshotForSend is the pure ranking helper SelectConnected wraps —
 // see its doc comment for allowMaster's meaning. Exported so handlers can
 // exercise the ranking/exclusion logic directly against a literal

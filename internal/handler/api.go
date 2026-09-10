@@ -108,6 +108,38 @@ const noRouteMessage = "no connected session available"
 // excluded — see that function's doc comment.
 const masterExclusionHint = " (the only connected session(s) are master sessions; set allow_master to route through one)"
 
+// selectForSend picks the session for an automatic-routing send. It is the one
+// place the two routing MODES are chosen between, so every endpoint that offers
+// master_only resolves it identically instead of each re-deriving the
+// precedence. masterOnly wins over allowMaster — see groupSendRequest.MasterOnly.
+func selectForSend(r *http.Request, m *wa.Manager, masterOnly, allowMaster bool) (*wa.ManagedSession, wa.Snapshot, bool) {
+	if masterOnly {
+		return m.SelectMaster(r.Context())
+	}
+	return m.SelectConnected(r.Context(), allowMaster)
+}
+
+// noSendRouteMessage builds the 409 body for whichever mode selectForSend used.
+// Pure, like noAutoRouteMessage, so both branches stay unit-testable without a
+// live session.
+func noSendRouteMessage(snaps []wa.Snapshot, masterOnly, allowMaster bool) string {
+	if masterOnly {
+		return noMasterRouteMessage
+	}
+	return noAutoRouteMessage(snaps, allowMaster)
+}
+
+// noMasterRouteMessage is the 409 body for a master_only send when no
+// connected master exists. It is deliberately NOT noRouteMessage: with
+// master_only the gateway may be perfectly healthy and busy on three other
+// sessions, so "no connected session available" would send an operator hunting
+// a gateway outage that is not happening. It names the real, fixable cause —
+// the master handset is offline — because that is the only thing that will
+// make these sends work again.
+const noMasterRouteMessage = "no connected master session (master_only was set; " +
+	"the master handset is offline — reconnect it, or clear master_only to route " +
+	"through any connected session)"
+
 // noAutoRouteMessage builds the 409 body for every automatic-routing send
 // endpoint (PostAPISendMessageAuto, PostAPISendGroupMessage,
 // PostAPISendMediaAuto, PostAPIContactsCheckAuto). It is a PURE function

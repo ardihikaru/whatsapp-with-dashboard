@@ -320,6 +320,7 @@ paths:
                 tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
                 category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
                 allow_master: {type: boolean, description: 'Automatic routing only; ignored when a session id is in the path. Opts into a master-flagged session for this one request.'}
+                master_only: {type: boolean, description: 'Automatic routing only. Pins this send to the MASTER session and answers 409 when the master is offline - it never falls back to another session. Overrides allow_master, which only WIDENS selection and can never pin. Intended for traffic that must always leave from one known handset, e.g. ops alerts. This mode has no redundancy, so a caller relying on it must monitor the connectivity of the master session itself.'}
       responses:
         '200':
           description: Terminal outcome within 15s; includes selected session metadata.
@@ -378,6 +379,7 @@ paths:
                 tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
                 category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
                 allow_master: {type: boolean, description: 'Automatic routing only; ignored when a session id is in the path. Opts into a master-flagged session for this one request.'}
+                master_only: {type: boolean, description: 'Automatic routing only. Pins this send to the MASTER session and answers 409 when the master is offline - it never falls back to another session. Overrides allow_master, which only WIDENS selection and can never pin. Intended for traffic that must always leave from one known handset, e.g. ops alerts. This mode has no redundancy, so a caller relying on it must monitor the connectivity of the master session itself.'}
       responses:
         '200':
           description: Terminal outcome within 15s; includes selected session metadata.

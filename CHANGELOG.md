@@ -3,6 +3,21 @@
 ## [Unreleased]
 
 ### Added
+- **`master_only` send routing.** `POST /api/v1/messages` and
+  `POST /api/v1/messages/group` accept `master_only: true`, which pins the send
+  to the master session and answers **409** when the master is offline — it
+  never falls back to another session. It is NOT the same as `allow_master`,
+  and the two are easy to confuse: `allow_master` only *widens* automatic
+  selection (`allowMaster || !snap.IsMaster`), so a master becomes eligible
+  *alongside* every ordinary session and an ordinary one may still win. No
+  value of it means "only the master". Added for ops alerting, where "which
+  number paged me at 3am" is part of reading the page.
+  ⚠ This mode has **no redundancy by design**: on 2026-09-11 the production
+  master (6287748383890) was disconnected while three other sessions were live,
+  so every `master_only` send would have 409'd. Anyone using it for alerting
+  must monitor the master session's own connectivity. Omitting the field leaves
+  every existing caller auto-routing exactly as before (`wa.Manager.SelectMaster`,
+  `handler.selectForSend`, `noMasterRouteMessage`).
 - **Convo Scheduling.** Self Convo (a scripted two-party conversation between
   two paired sessions) can now run on a recurring cadence — daily, weekly, or
   every N days — to several receivers at once, and optionally chain a

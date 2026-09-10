@@ -33,9 +33,9 @@ func (h *handlers) PostAPISendMessageAuto(w http.ResponseWriter, r *http.Request
 	if !valid {
 		return
 	}
-	s, _, ok := h.Manager.SelectConnected(r.Context(), req.AllowMaster)
+	s, _, ok := selectForSend(r, h.Manager, req.MasterOnly, req.AllowMaster)
 	if !ok {
-		writeError(w, http.StatusConflict, noAutoRouteMessage(h.Manager.Snapshots(), req.AllowMaster))
+		writeError(w, http.StatusConflict, noSendRouteMessage(h.Manager.Snapshots(), req.MasterOnly, req.AllowMaster))
 		return
 	}
 	h.postAPISendThrough(w, r, s, wa.ToJID(req.Digits), req.Digits, req.Text, req.Attr)
@@ -50,6 +50,11 @@ type textSendRequest struct {
 	Text        string
 	Attr        message.Attribution
 	AllowMaster bool
+	// MasterOnly pins the send to the master session — see
+	// groupSendRequest.MasterOnly and wa.Manager.SelectMaster. Like
+	// AllowMaster it governs AUTOMATIC routing only; PostAPISendMessage
+	// already names its session.
+	MasterOnly bool
 }
 
 // decodeSendRequest parses the send body, including the optional attribution the
@@ -66,6 +71,7 @@ func decodeSendRequest(w http.ResponseWriter, r *http.Request) (textSendRequest,
 		TenantRef   string `json:"tenant_ref"`
 		Category    string `json:"category"`
 		AllowMaster bool   `json:"allow_master"`
+		MasterOnly  bool   `json:"master_only"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -86,7 +92,7 @@ func decodeSendRequest(w http.ResponseWriter, r *http.Request) (textSendRequest,
 		TenantRef: strings.TrimSpace(req.TenantRef),
 		Category:  message.NormalizeCategory(req.Category, message.CategoryNotification),
 	}
-	return textSendRequest{Digits: digits, Text: req.Text, Attr: attr, AllowMaster: req.AllowMaster}, true
+	return textSendRequest{Digits: digits, Text: req.Text, Attr: attr, AllowMaster: req.AllowMaster, MasterOnly: req.MasterOnly}, true
 }
 
 // postAPISendThrough is the shared JSON tail of every machine send path — phone
