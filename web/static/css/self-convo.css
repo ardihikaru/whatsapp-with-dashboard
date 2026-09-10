@@ -63,6 +63,42 @@
 
 .convo-participant-phone { color: var(--text-secondary); font-size: 12px; }
 
+/* ---------- schedule state badges (convo_schedule_rows.html) --------------
+   `active` deliberately reuses datatable.css's own .badge-active — a
+   schedule "in effect right now" reads exactly the same as an active API
+   client, and redefining it here would trip
+   TestSelfConvoStylesheetDoesNotRedefineBadgesDatatableAlreadyOwns
+   (self_convo_stylesheet_test.go), the same guard this file's header
+   already explains for badge-failed. paused/stalled are the pair the
+   scheduling brief calls out by name and must NOT look the same: paused is
+   an operator's own deliberate choice (calm, the same neutral grey as a
+   finished/stopped schedule), stalled is the automatic health stop that
+   needs a look (the same alarm colour a failed run/message already gets).
+   finished/stopped both read as "over", so they share paused's neutral
+   tone rather than inventing a third distinct colour for two states that
+   differ only in HOW they ended, not whether an operator should look. */
+.badge-paused   { color: var(--grey-600);   background: rgba(145, 158, 171, 0.16); }
+.badge-stalled  { color: var(--error-dark); background: rgba(255, 86, 48, 0.16); }
+.badge-finished { color: var(--grey-600);   background: rgba(145, 158, 171, 0.16); }
+.badge-stopped  { color: var(--grey-600);   background: rgba(145, 158, 171, 0.16); }
+
+[data-theme="dark"] .badge-paused,
+[data-theme="dark"] .badge-finished,
+[data-theme="dark"] .badge-stopped { color: var(--grey-400); }
+[data-theme="dark"] .badge-stalled { color: var(--error-light); }
+
+/* ---------- "no end date" marker (schedules.html/schedule_view.html) ------
+   A schedule with EndDate == "" runs forever — the non-stop case an
+   operator must be able to SPOT, not infer from a blank cell (which reads
+   identically to "not loaded yet" or a rendering bug). A distinct badge,
+   not just italic muted text, is the point: it must stand out at a glance
+   in a table full of neutral text. Reuses badge-master's own info colour
+   (datatable.css) under a NEW class name, deliberately not .badge-master
+   itself — that class already means something else (this session is the
+   load-balancing default) on the sessions page. */
+.badge-nonstop { color: var(--info-dark); background: rgba(0, 184, 217, 0.16); }
+[data-theme="dark"] .badge-nonstop { color: var(--info-light); }
+
 /* ---------- template JSON preview (template_view.html) --------------------
    A <pre> long enough to hold a real script must wrap AND scroll inside its
    own box rather than blow out the page width — the same overflow-x hazard

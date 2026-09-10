@@ -100,6 +100,18 @@ type TemplateLink struct {
 	CreatedAt      time.Time
 }
 
+// TopicSummary is one row of the topic dropdown a schedule's create/edit
+// form offers — a topic name plus how many templates (any stage) exist for
+// it, so an operator can see at a glance which topics actually have a
+// corpus behind them before picking one. Count is EVERY template for the
+// topic (opener/middle/closer alike), which is deliberately broader than
+// the opener-only pool PickOpener draws from (chain.go) — see
+// TopicSummaries' own doc comment.
+type TopicSummary struct {
+	Topic string
+	Count int
+}
+
 // IsScheduleTerminal reports whether state is one a schedule never leaves
 // once reached — mirrors IsTerminal for runs.
 func IsScheduleTerminal(state string) bool {

@@ -47,6 +47,11 @@ const (
 	// parties", distinct from iconSend's single paper-plane (one outbound
 	// message) and iconCalls' handset (one voice call).
 	iconSelfConvo template.HTML = `<svg viewBox="0 0 16 16" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M6.5 1a4.5 4.5 0 0 0-3.9 6.7L1.5 10l2.6-.7A4.5 4.5 0 1 0 6.5 1zm4.9 4.6c.06.3.1.6.1.9 0 2.5-2.24 4.5-5 4.5-.24 0-.47-.02-.7-.05A4 4 0 0 0 9.5 15c.5 0 .98-.08 1.43-.22L14 15.5l-.75-1.9A4 4 0 0 0 11.4 5.6z"/></svg>`
+	// a calendar face with a clock hand — "this runs again on its own, on a
+	// cadence", distinct from iconSelfConvo's speech bubbles (one simulated
+	// exchange right now): Convo scheduling turns that one-off into a
+	// recurring plan.
+	iconSchedules template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zM5 10v9h14v-9H5zm8 1.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zm.5 1.5h-1v2.21l1.65 1.65.7-.7-1.35-1.35V13z"/></svg>`
 )
 
 // platformLink is the sidebar footer's way back out to the platform backoffice.
@@ -82,6 +87,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 			{Title: "Voice Calls", Path: "/calls", Icon: iconCalls},
 			{Title: "Verify Number", Path: "/verify", Icon: iconVerify},
 			{Title: "Self Convo", Path: "/self-convo", Icon: iconSelfConvo},
+			{Title: "Convo Schedules", Path: "/self-convo/schedules", Icon: iconSchedules},
 			{Title: "Message Log", Path: "/logs", Icon: iconLogs},
 		}},
 		{Subheader: "Admin", Items: []NavItem{

@@ -377,6 +377,31 @@ func (r *Repository) TemplateLinks(ctx context.Context, fromID string) ([]Templa
 	return out, rows.Err()
 }
 
+// TopicSummaries returns every distinct non-empty topic present in
+// wa_convo_templates, alphabetical, with a COUNT of every template carrying
+// it (any stage) — the schedule create/edit form's topic <select> uses this
+// so an operator sees how much corpus backs each option before picking one.
+// A template with topic="" (every row that predates
+// migrations/0008_convo_scheduling.sql) is excluded: it is not a
+// selectable topic, just an old row with none set.
+func (r *Repository) TopicSummaries(ctx context.Context) ([]TopicSummary, error) {
+	rows, err := r.pool.QueryContext(ctx,
+		`SELECT topic, COUNT(*) FROM wa_convo_templates WHERE topic != '' GROUP BY topic ORDER BY topic`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TopicSummary
+	for rows.Next() {
+		var ts TopicSummary
+		if err := rows.Scan(&ts.Topic, &ts.Count); err != nil {
+			return nil, err
+		}
+		out = append(out, ts)
+	}
+	return out, rows.Err()
+}
+
 // TemplateIDsByTopicStage returns up to limit template ids matching topic
 // and stage, newest first — the planner's draw pool for picking a candidate
 // opener/middle/closer.

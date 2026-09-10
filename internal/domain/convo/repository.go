@@ -171,6 +171,37 @@ func (r *Repository) ListTemplateSummaries(ctx context.Context, limit int) ([]Te
 	return out, rows.Err()
 }
 
+// ListTemplateSummariesByTopic is ListTemplateSummaries scoped to one
+// topic — the templates management page's topic filter (topic == ""
+// callers should use ListTemplateSummaries instead; this is not that
+// case's fallback, to keep the two query shapes each doing exactly one
+// thing). Same [1, 200] limit clamp, same newest-first order, same
+// excluded body column.
+func (r *Repository) ListTemplateSummariesByTopic(ctx context.Context, topic string, limit int) ([]TemplateSummary, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := r.pool.QueryContext(ctx,
+		`SELECT `+templateSummaryCols+` FROM wa_convo_templates WHERE topic = ? ORDER BY created_at DESC LIMIT ?`,
+		topic, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TemplateSummary
+	for rows.Next() {
+		t, err := scanTemplateSummary(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 func (r *Repository) GetTemplate(ctx context.Context, id string) (Template, error) {
 	row := r.pool.QueryRowContext(ctx,
 		`SELECT `+templateCols+` FROM wa_convo_templates WHERE id = ?`, id)
@@ -288,6 +319,34 @@ func (r *Repository) ListRuns(ctx context.Context, limit int) ([]Run, error) {
 	}
 	rows, err := r.pool.QueryContext(ctx,
 		`SELECT `+runCols+` FROM wa_convo_runs ORDER BY created_at DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Run
+	for rows.Next() {
+		run, err := scanRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
+// RunsForSchedule returns every run scheduleID has produced, newest first,
+// limit clamped to [1, 200] the same as ListRuns — the schedule detail
+// page's "recent runs" table.
+func (r *Repository) RunsForSchedule(ctx context.Context, scheduleID string, limit int) ([]Run, error) {
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	rows, err := r.pool.QueryContext(ctx,
+		`SELECT `+runCols+` FROM wa_convo_runs WHERE schedule_id = ? ORDER BY created_at DESC LIMIT ?`,
+		scheduleID, limit)
 	if err != nil {
 		return nil, err
 	}

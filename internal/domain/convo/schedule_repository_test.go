@@ -431,3 +431,93 @@ func TestCountSenderTurnsForDateCountsOnlyThatSendersTurnsOnThatOccurrenceDate(t
 		t.Errorf("CountSenderTurnsForDate(sess-a, 2026-09-10) = %d, want 1 (r4's manually-triggered occurrence_date=\"\" must never be counted against a real day)", n)
 	}
 }
+
+// TestTopicSummariesCountsEveryStageAndExcludesTheEmptyTopic pins the
+// schedule create/edit form's topic <select> data source: one row per
+// distinct topic with a count spanning every stage (not just opener-stage,
+// unlike PickOpener's own pool), and rows with topic="" (every template
+// that predates migrations/0008_convo_scheduling.sql) excluded entirely.
+func TestTopicSummariesCountsEveryStageAndExcludesTheEmptyTopic(t *testing.T) {
+	repo, _ := newTestRepository(t)
+	ctx := context.Background()
+
+	insert := func(id, topic, stage string) {
+		tpl := &Template{ID: id, Name: id, Topic: topic, Stage: stage, TurnCount: 1, Body: "{}"}
+		if err := repo.InsertTemplate(ctx, tpl); err != nil {
+			t.Fatalf("InsertTemplate %s: %v", id, err)
+		}
+	}
+	insert("t1", "futsal", StageOpener)
+	insert("t2", "futsal", StageMiddle)
+	insert("t3", "arisan", StageOpener)
+	insert("t4", "", "") // pre-0008 row: must not appear as a topic at all
+
+	got, err := repo.TopicSummaries(ctx)
+	if err != nil {
+		t.Fatalf("TopicSummaries: %v", err)
+	}
+	want := map[string]int{"arisan": 1, "futsal": 2}
+	if len(got) != len(want) {
+		t.Fatalf("TopicSummaries = %+v, want exactly %v", got, want)
+	}
+	for _, ts := range got {
+		if want[ts.Topic] != ts.Count {
+			t.Errorf("topic %q count = %d, want %d", ts.Topic, ts.Count, want[ts.Topic])
+		}
+	}
+}
+
+// TestListTemplateSummariesByTopicOnlyReturnsThatTopic pins the templates
+// management page's topic filter query.
+func TestListTemplateSummariesByTopicOnlyReturnsThatTopic(t *testing.T) {
+	repo, _ := newTestRepository(t)
+	ctx := context.Background()
+
+	for _, tpl := range []*Template{
+		{ID: "t1", Name: "Futsal opener", Topic: "futsal", Stage: StageOpener, TurnCount: 1, Body: "{}"},
+		{ID: "t2", Name: "Arisan opener", Topic: "arisan", Stage: StageOpener, TurnCount: 1, Body: "{}"},
+	} {
+		if err := repo.InsertTemplate(ctx, tpl); err != nil {
+			t.Fatalf("InsertTemplate %s: %v", tpl.ID, err)
+		}
+	}
+
+	got, err := repo.ListTemplateSummariesByTopic(ctx, "futsal", 50)
+	if err != nil {
+		t.Fatalf("ListTemplateSummariesByTopic: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "t1" {
+		t.Fatalf("ListTemplateSummariesByTopic(futsal) = %+v, want exactly t1", got)
+	}
+}
+
+// TestRunsForScheduleOnlyReturnsThatSchedulesRuns pins the schedule detail
+// page's "recent runs" query: a run belonging to a DIFFERENT schedule, and
+// a manually triggered run with no schedule at all, must never appear.
+func TestRunsForScheduleOnlyReturnsThatSchedulesRuns(t *testing.T) {
+	repo, now := newTestRepository(t)
+	ctx := context.Background()
+
+	mine := newRun("run-mine", RunDone, now())
+	mine.ScheduleID = "sch-1"
+	if err := repo.CreateRun(ctx, mine, newTurns("run-mine")); err != nil {
+		t.Fatalf("CreateRun run-mine: %v", err)
+	}
+	other := newRun("run-other", RunDone, now())
+	other.ScheduleID = "sch-2"
+	if err := repo.CreateRun(ctx, other, newTurns("run-other")); err != nil {
+		t.Fatalf("CreateRun run-other: %v", err)
+	}
+	manual := newRun("run-manual", RunDone, now())
+	if err := repo.CreateRun(ctx, manual, newTurns("run-manual")); err != nil {
+		t.Fatalf("CreateRun run-manual: %v", err)
+	}
+
+	got, err := repo.RunsForSchedule(ctx, "sch-1", 50)
+	if err != nil {
+		t.Fatalf("RunsForSchedule: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "run-mine" {
+		t.Fatalf("RunsForSchedule(sch-1) = %+v, want exactly run-mine", got)
+	}
+}

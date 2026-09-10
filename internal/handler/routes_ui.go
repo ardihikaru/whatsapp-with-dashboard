@@ -105,6 +105,25 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("GET "+bp+"/self-convo/templates/{id}", page(http.HandlerFunc(h.GetSelfConvoTemplateView)))
 	mux.Handle("GET "+bp+"/self-convo/templates/{id}/download", page(http.HandlerFunc(h.GetSelfConvoTemplateDownload)))
 
+	// Convo scheduling — recurring, multi-receiver Self Convo runs
+	// (internal/domain/convo/schedule_model.go, internal/selfconvo/
+	// planner.go). Same static-before-wildcard registration-order
+	// convention as the templates block above: "new"/"rows" are literal
+	// paths that must read as distinct from "{id}" even though Go 1.22's
+	// mux would already resolve them correctly either way.
+	mux.Handle("GET "+bp+"/self-convo/schedules", page(http.HandlerFunc(h.GetSelfConvoSchedules)))
+	mux.Handle("GET "+bp+"/self-convo/schedules/rows", page(http.HandlerFunc(h.GetSelfConvoScheduleRows)))
+	mux.Handle("GET "+bp+"/self-convo/schedules/new", page(http.HandlerFunc(h.GetSelfConvoScheduleNew)))
+	mux.Handle("POST "+bp+"/self-convo/schedules", page(http.HandlerFunc(h.PostSelfConvoScheduleCreate)))
+	mux.Handle("GET "+bp+"/self-convo/schedules/{id}/edit", page(http.HandlerFunc(h.GetSelfConvoScheduleEdit)))
+	mux.Handle("POST "+bp+"/self-convo/schedules/{id}", page(http.HandlerFunc(h.PostSelfConvoScheduleUpdate)))
+	mux.Handle("POST "+bp+"/self-convo/schedules/{id}/pause", page(http.HandlerFunc(h.PostSelfConvoSchedulePause)))
+	mux.Handle("POST "+bp+"/self-convo/schedules/{id}/resume", page(http.HandlerFunc(h.PostSelfConvoScheduleResume)))
+	mux.Handle("POST "+bp+"/self-convo/schedules/{id}/stop", page(http.HandlerFunc(h.PostSelfConvoScheduleStop)))
+	mux.Handle("POST "+bp+"/self-convo/schedules/{id}/delete", page(http.HandlerFunc(h.PostSelfConvoScheduleDelete)))
+	mux.Handle("GET "+bp+"/self-convo/schedules/{id}/runs/rows", page(http.HandlerFunc(h.GetSelfConvoScheduleRunRows)))
+	mux.Handle("GET "+bp+"/self-convo/schedules/{id}", page(http.HandlerFunc(h.GetSelfConvoScheduleView)))
+
 	// Calls page.
 	mux.Handle("GET "+bp+"/calls", page(http.HandlerFunc(h.GetCalls)))
 	mux.Handle("GET "+bp+"/calls/rows", page(http.HandlerFunc(h.GetCallRows)))

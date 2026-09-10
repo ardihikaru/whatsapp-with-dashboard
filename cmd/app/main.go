@@ -235,6 +235,7 @@ func run() error {
 			Convo:                  convoRepo,
 			SelfConvo:              runner,
 			SelfConvoEnabled:       cfg.SelfConvoEnabled,
+			Planner:                planner,
 			Inbound:                inboundRepo,
 			Objects:                objectStore,
 			MediaMaxBytes:          cfg.MediaMaxBytes,
