@@ -1,0 +1,384 @@
+{
+  "topic": "main_game",
+  "title": "Main game bareng (mabar)",
+  "slots": {
+    "detail": [
+      "koneksi internet lemot",
+      "laptop lagi diservis",
+      "ngantuk berat",
+      "server gamenya lagi maintenance"
+    ],
+    "tempat": [
+      "voice call biasa",
+      "warnet langganan",
+      "rumah salah satu dari kita"
+    ],
+    "waktu": [
+      "sabtu sore",
+      "minggu pagi",
+      "abis maghrib nanti",
+      "rabu malem"
+    ]
+  },
+  "scenes": [
+    {
+      "stage": "opener",
+      "name": "opener",
+      "setups": [
+        {
+          "name": "out_of_blue",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "eh, mabar yuk"
+            },
+            {
+              "speaker": "b",
+              "text": "kapan?"
+            }
+          ]
+        },
+        {
+          "name": "callback_kebiasaan",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "udah lama ya kita ga mabar"
+            },
+            {
+              "speaker": "b",
+              "text": "iya bener, kangen juga"
+            }
+          ]
+        },
+        {
+          "name": "react_prompt",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "td liat orang cerita soal mabar, jadi pengen"
+            },
+            {
+              "speaker": "b",
+              "text": "wkwk sama, ayo kapan-kapan"
+            }
+          ]
+        },
+        {
+          "name": "check_in_simple",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "btw availability lo gimana minggu ini, ada rencana mabar gak"
+            },
+            {
+              "speaker": "b",
+              "text": "lumayan luang sih, emang kenapa"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "langsung_oke",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "{{waktu}} di {{tempat}} buat mabar gimana"
+            },
+            {
+              "speaker": "b",
+              "text": "oke gas, jam berapa"
+            }
+          ]
+        },
+        {
+          "name": "tentatif",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "boleh, tapi gue cek jadwal mabar dulu ya"
+            },
+            {
+              "speaker": "a",
+              "text": "oke, kabarin aja kalo udah fix"
+            }
+          ]
+        },
+        {
+          "name": "usul_spesifik",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "{{waktu}} di {{tempat}} aja deh buat mabar, biar gampang"
+            },
+            {
+              "speaker": "b",
+              "text": "sip, gue catet"
+            }
+          ]
+        },
+        {
+          "name": "alihkan",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "gue kayaknya gabisa mabar, coba ajak yang lain aja dulu"
+            },
+            {
+              "speaker": "a",
+              "text": "hmm oke deh, gapapa"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "middle",
+      "name": "middle",
+      "setups": [
+        {
+          "name": "cek_hari_h",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "jadi kan mabar {{waktu}}?"
+            },
+            {
+              "speaker": "b",
+              "text": "jadi kok, td udah siap-siap"
+            }
+          ]
+        },
+        {
+          "name": "nanya_sebelum",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "eh mabar kita jadi kan"
+            },
+            {
+              "speaker": "a",
+              "text": "jadi dong, udah gue tungguin dari td"
+            }
+          ]
+        },
+        {
+          "name": "muncul_kendala",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "eh gawat, {{detail}}, jadi mabar kayaknya kacau nih"
+            },
+            {
+              "speaker": "a",
+              "text": "lah kenapa emang"
+            }
+          ]
+        },
+        {
+          "name": "lanjut_santai",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "gimana rencana mabar kita"
+            },
+            {
+              "speaker": "b",
+              "text": "masih on track kok tenang aja"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "on_track",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "oke berarti fix ya {{waktu}} buat mabar"
+            },
+            {
+              "speaker": "b",
+              "text": "fix, sampe ketemu di {{tempat}}"
+            }
+          ]
+        },
+        {
+          "name": "telat",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "gue kayaknya telat dikit ke mabar, {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "yaudah santai, gue tungguin"
+            }
+          ]
+        },
+        {
+          "name": "reschedule",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "kayaknya mabar {{waktu}} gabisa deh, {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "yaudah kita geser aja kapan-kapan"
+            }
+          ]
+        },
+        {
+          "name": "batal",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "duh maaf banget, mabar kita batal dulu ya, {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "yah gapapa, next time aja"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "closer",
+      "name": "closer",
+      "setups": [
+        {
+          "name": "reaksi_langsung",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "tadi seru banget ya mabar-nya"
+            },
+            {
+              "speaker": "b",
+              "text": "iya gila, capek tapi puas"
+            }
+          ]
+        },
+        {
+          "name": "refleksi_nanti",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "td kepikiran, mabar tadi worth it banget"
+            },
+            {
+              "speaker": "b",
+              "text": "setuju, harus sering-sering nih"
+            }
+          ]
+        },
+        {
+          "name": "share_momen",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "eh gue kirim foto mabar td ya"
+            },
+            {
+              "speaker": "b",
+              "text": "wih mantap, kirim dong"
+            }
+          ]
+        },
+        {
+          "name": "nanya_hasil",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "gimana td abis mabar, lancar?"
+            },
+            {
+              "speaker": "b",
+              "text": "lancar kok alhamdulillah"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "positif_next",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "kapan-kapan mabar lagi ya"
+            },
+            {
+              "speaker": "b",
+              "text": "gas, lo yang ajak duluan aja nanti"
+            }
+          ]
+        },
+        {
+          "name": "grateful",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "makasih banget udah nemenin mabar"
+            },
+            {
+              "speaker": "a",
+              "text": "santai, sama-sama seneng kok"
+            }
+          ]
+        },
+        {
+          "name": "bercanda",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "td lo lemot banget pas mabar"
+            },
+            {
+              "speaker": "b",
+              "text": "diem lu, gantian nanti gue balikin"
+            }
+          ]
+        },
+        {
+          "name": "praktis",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "oh iya soal {{detail}} pas mabar kita omongin lagi nanti ya"
+            },
+            {
+              "speaker": "a",
+              "text": "oke noted"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "from_scene": "opener",
+      "to_scene": "middle",
+      "weight": 3,
+      "min_gap_seconds": 3600,
+      "max_gap_seconds": 86400
+    },
+    {
+      "from_scene": "middle",
+      "to_scene": "closer",
+      "weight": 3,
+      "min_gap_seconds": 1800,
+      "max_gap_seconds": 14400
+    },
+    {
+      "from_scene": "closer",
+      "to_scene": "opener",
+      "weight": 2,
+      "min_gap_seconds": 259200,
+      "max_gap_seconds": 1209600
+    }
+  ]
+}

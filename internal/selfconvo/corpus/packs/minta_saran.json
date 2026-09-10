@@ -1,0 +1,384 @@
+{
+  "topic": "minta_saran",
+  "title": "Minta saran soal keputusan penting",
+  "slots": {
+    "detail": [
+      "gue bingung mau resign apa engga",
+      "ada tawaran pindah kota",
+      "gue ragu mau lanjut kuliah lagi",
+      "ada dua pilihan yang sama beratnya"
+    ],
+    "tempat": [
+      "telpon aja malem ini",
+      "sambil ngopi bareng",
+      "pas ketemu langsung nanti"
+    ],
+    "waktu": [
+      "td siang",
+      "td malem",
+      "tadi sore",
+      "td pagi"
+    ]
+  },
+  "scenes": [
+    {
+      "stage": "opener",
+      "name": "opener",
+      "setups": [
+        {
+          "name": "buka_obrolan",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "eh lo lagi free gak, mau cerita dikit soal keputusan penting"
+            },
+            {
+              "speaker": "b",
+              "text": "free kok, cerita aja"
+            }
+          ]
+        },
+        {
+          "name": "nanya_kabar",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "eh gimana kabar lo, kepikiran soal keputusan penting gak"
+            },
+            {
+              "speaker": "a",
+              "text": "iya nih, lumayan kepikiran"
+            }
+          ]
+        },
+        {
+          "name": "japri_random",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "tiba-tiba kepikiran mau ngobrol soal keputusan penting"
+            },
+            {
+              "speaker": "b",
+              "text": "wah kebetulan, cerita dong"
+            }
+          ]
+        },
+        {
+          "name": "respon_kabar",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "td denger kabar soal keputusan penting, lo gapapa kan"
+            },
+            {
+              "speaker": "a",
+              "text": "gapapa kok, tapi emang lagi mikirin sih"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "mulai_cerita",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "jadi ceritanya soal keputusan penting, {{detail}}"
+            },
+            {
+              "speaker": "b",
+              "text": "oh gitu, terus gimana"
+            }
+          ]
+        },
+        {
+          "name": "nanya_balik",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "emang ada apa nih soal keputusan penting"
+            },
+            {
+              "speaker": "a",
+              "text": "ada {{detail}} sih"
+            }
+          ]
+        },
+        {
+          "name": "nunda_dulu",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "soal keputusan penting nanti deh gue certain pas ketemu, {{tempat}} aja ya"
+            },
+            {
+              "speaker": "b",
+              "text": "oke, gue tungguin"
+            }
+          ]
+        },
+        {
+          "name": "langsung_curhat",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "intinya soal keputusan penting gue lagi {{detail}}"
+            },
+            {
+              "speaker": "b",
+              "text": "wah, sini cerita lebih lengkap"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "middle",
+      "name": "middle",
+      "setups": [
+        {
+          "name": "lanjut_cerita",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "terus soal keputusan penting abis itu gimana"
+            },
+            {
+              "speaker": "a",
+              "text": "abis itu {{detail}}"
+            }
+          ]
+        },
+        {
+          "name": "nanya_perasaan",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "lo sekarang ngerasa gimana soal keputusan penting"
+            },
+            {
+              "speaker": "a",
+              "text": "campur aduk sih jujur"
+            }
+          ]
+        },
+        {
+          "name": "dengerin",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "td {{waktu}} kepikiran soal keputusan penting lagi"
+            },
+            {
+              "speaker": "b",
+              "text": "wajar kok, emang berat"
+            }
+          ]
+        },
+        {
+          "name": "kasih_konteks",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "jadi awalnya soal keputusan penting, {{detail}}"
+            },
+            {
+              "speaker": "b",
+              "text": "oh, pantesan"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "lega_dikit",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "abis cerita soal keputusan penting jadi agak lega dikit"
+            },
+            {
+              "speaker": "b",
+              "text": "syukurlah, emang enakan diomongin"
+            }
+          ]
+        },
+        {
+          "name": "makin_bingung",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "tapi soal keputusan penting jujur masih bingung juga sih"
+            },
+            {
+              "speaker": "b",
+              "text": "pelan-pelan aja, gausah buru-buru"
+            }
+          ]
+        },
+        {
+          "name": "dapet_saran",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "soal keputusan penting menurut gue mending {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "iya juga sih, gue coba deh"
+            }
+          ]
+        },
+        {
+          "name": "masih_berat",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "soal keputusan penting masih berat banget rasanya"
+            },
+            {
+              "speaker": "b",
+              "text": "gue di sini kok, kabarin aja kalo butuh"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "closer",
+      "name": "closer",
+      "setups": [
+        {
+          "name": "ucapan_makasih",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "makasih ya udah mau dengerin soal keputusan penting"
+            },
+            {
+              "speaker": "b",
+              "text": "santai, kapan aja gue ada"
+            }
+          ]
+        },
+        {
+          "name": "cek_kondisi",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "gimana keadaan lo sekarang soal keputusan penting, udah mendingan"
+            },
+            {
+              "speaker": "a",
+              "text": "udah agak mendingan kok"
+            }
+          ]
+        },
+        {
+          "name": "follow_up",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "td kepikiran lagi soal keputusan penting"
+            },
+            {
+              "speaker": "b",
+              "text": "gimana, ada perkembangan?"
+            }
+          ]
+        },
+        {
+          "name": "nutup_obrolan",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "yaudah soal keputusan penting istirahat dulu ya, jangan dipikirin mulu"
+            },
+            {
+              "speaker": "a",
+              "text": "iya, makasih banyak"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "positif",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "makasih banget udah nemenin ngobrol soal keputusan penting"
+            },
+            {
+              "speaker": "b",
+              "text": "sama-sama, jangan dipendem sendiri ya"
+            }
+          ]
+        },
+        {
+          "name": "janji_ngobrol_lagi",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "kapan-kapan cerita lagi ya soal keputusan penting kalo ada apa-apa"
+            },
+            {
+              "speaker": "a",
+              "text": "pasti, makasih udah peduli"
+            }
+          ]
+        },
+        {
+          "name": "doa",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "semoga soal keputusan penting cepet membaik ya"
+            },
+            {
+              "speaker": "b",
+              "text": "aamiin, makasih doanya"
+            }
+          ]
+        },
+        {
+          "name": "santai_penutup",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "yaudah gue cabut dulu ya, soal keputusan penting chat lagi nanti"
+            },
+            {
+              "speaker": "a",
+              "text": "oke, hati-hati"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "from_scene": "opener",
+      "to_scene": "middle",
+      "weight": 3,
+      "min_gap_seconds": 300,
+      "max_gap_seconds": 10800
+    },
+    {
+      "from_scene": "middle",
+      "to_scene": "closer",
+      "weight": 3,
+      "min_gap_seconds": 300,
+      "max_gap_seconds": 7200
+    },
+    {
+      "from_scene": "closer",
+      "to_scene": "opener",
+      "weight": 2,
+      "min_gap_seconds": 172800,
+      "max_gap_seconds": 1209600
+    }
+  ]
+}

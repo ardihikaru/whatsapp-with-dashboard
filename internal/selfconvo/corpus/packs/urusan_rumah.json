@@ -1,0 +1,384 @@
+{
+  "topic": "urusan_rumah",
+  "title": "Beres-beres urusan rumah bareng",
+  "slots": {
+    "detail": [
+      "tukangnya batal dateng",
+      "barangnya kebanyakan numpuk",
+      "alat yang dibutuhin ketinggalan",
+      "hujan jadi ga bisa lanjut"
+    ],
+    "tempat": [
+      "rumah",
+      "gudang belakang rumah",
+      "halaman rumah"
+    ],
+    "waktu": [
+      "besok siang",
+      "nanti sore",
+      "minggu depan",
+      "abis maghrib"
+    ]
+  },
+  "scenes": [
+    {
+      "stage": "opener",
+      "name": "opener",
+      "setups": [
+        {
+          "name": "minta_tolong",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "eh, lo lagi luang gak, mau minta tolong soal beres-beres rumah"
+            },
+            {
+              "speaker": "b",
+              "text": "luang kok, kenapa emang"
+            }
+          ]
+        },
+        {
+          "name": "kasih_kabar",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "btw soal beres-beres rumah, ada progress nih"
+            },
+            {
+              "speaker": "b",
+              "text": "oh iya, gimana"
+            }
+          ]
+        },
+        {
+          "name": "reminder",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "inget kan soal beres-beres rumah yang kemarin"
+            },
+            {
+              "speaker": "b",
+              "text": "inget, kenapa emang"
+            }
+          ]
+        },
+        {
+          "name": "nanya_dulu",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "eh lo tau gak cara ngurus beres-beres rumah"
+            },
+            {
+              "speaker": "a",
+              "text": "tau dikit, emang kenapa"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "siap_bantu",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "oke gas, {{waktu}} kita beresin beres-beres rumah ya"
+            },
+            {
+              "speaker": "a",
+              "text": "sip, makasih banyak"
+            }
+          ]
+        },
+        {
+          "name": "butuh_info",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "gue butuh info soal {{detail}} buat beres-beres rumah dulu nih"
+            },
+            {
+              "speaker": "b",
+              "text": "oke, gue cariin"
+            }
+          ]
+        },
+        {
+          "name": "janjian_ketemu",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "kalo gitu ketemuan di {{tempat}} {{waktu}} yuk bahas beres-beres rumah"
+            },
+            {
+              "speaker": "b",
+              "text": "oke, otw nanti"
+            }
+          ]
+        },
+        {
+          "name": "nunda",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "boleh, tapi soal beres-beres rumah baru bisa {{waktu}} ya"
+            },
+            {
+              "speaker": "a",
+              "text": "gapapa, santai aja"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "middle",
+      "name": "middle",
+      "setups": [
+        {
+          "name": "update",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "gimana progress soal beres-beres rumah"
+            },
+            {
+              "speaker": "b",
+              "text": "lagi jalan, td baru urus soal {{detail}}"
+            }
+          ]
+        },
+        {
+          "name": "nanya_status",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "eh soal beres-beres rumah udah kelar belom"
+            },
+            {
+              "speaker": "a",
+              "text": "belum nih, masih nunggu"
+            }
+          ]
+        },
+        {
+          "name": "muncul_masalah",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "waduh, {{detail}} nih soal beres-beres rumah"
+            },
+            {
+              "speaker": "b",
+              "text": "lah kok bisa gitu"
+            }
+          ]
+        },
+        {
+          "name": "lanjut",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "td lanjut gue urus lagi soal beres-beres rumah"
+            },
+            {
+              "speaker": "a",
+              "text": "oke sip, kabarin ya kalo ada apa-apa"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "beres",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "soal beres-beres rumah udah beres semua kok"
+            },
+            {
+              "speaker": "a",
+              "text": "mantap, makasih banyak ya"
+            }
+          ]
+        },
+        {
+          "name": "molor",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "kayaknya beres-beres rumah molor dikit nih, {{waktu}} baru kelar"
+            },
+            {
+              "speaker": "b",
+              "text": "gapapa, yang penting kelar"
+            }
+          ]
+        },
+        {
+          "name": "ganti_rencana",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "kayaknya {{detail}}, jadi rencana beres-beres rumah diganti ya"
+            },
+            {
+              "speaker": "a",
+              "text": "oke deh, ikut aja"
+            }
+          ]
+        },
+        {
+          "name": "gagal",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "duh beres-beres rumah gagal nih, {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "yah, coba cara lain aja kali ya"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "stage": "closer",
+      "name": "closer",
+      "setups": [
+        {
+          "name": "cek_hasil",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "gimana akhirnya soal beres-beres rumah"
+            },
+            {
+              "speaker": "b",
+              "text": "udah kelar semua, lega banget"
+            }
+          ]
+        },
+        {
+          "name": "ucapan_makasih",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "makasih banget ya udah bantuin soal beres-beres rumah"
+            },
+            {
+              "speaker": "b",
+              "text": "santai, sama-sama"
+            }
+          ]
+        },
+        {
+          "name": "laporan_akhir",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "jadi soal beres-beres rumah td akhirnya {{detail}}"
+            },
+            {
+              "speaker": "a",
+              "text": "oh gitu, oke noted"
+            }
+          ]
+        },
+        {
+          "name": "nanya_lanjutan",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "abis ini soal beres-beres rumah masih ada yang perlu diurus gak"
+            },
+            {
+              "speaker": "b",
+              "text": "kayaknya udah aman semua"
+            }
+          ]
+        }
+      ],
+      "endings": [
+        {
+          "name": "lega",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "lega deh beres-beres rumah akhirnya beres"
+            },
+            {
+              "speaker": "b",
+              "text": "iya, makasih udah dibantuin ya"
+            }
+          ]
+        },
+        {
+          "name": "next_time",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "kalo ada urusan beres-beres rumah lagi gue kabarin ya"
+            },
+            {
+              "speaker": "a",
+              "text": "oke siap, gas aja"
+            }
+          ]
+        },
+        {
+          "name": "santai",
+          "turns": [
+            {
+              "speaker": "a",
+              "text": "yaudah santai dulu deh abis urus beres-beres rumah"
+            },
+            {
+              "speaker": "b",
+              "text": "iya nih, capek juga ngurusnya"
+            }
+          ]
+        },
+        {
+          "name": "catatan",
+          "turns": [
+            {
+              "speaker": "b",
+              "text": "oh iya, {{detail}} soal beres-beres rumah jangan lupa dicatet"
+            },
+            {
+              "speaker": "a",
+              "text": "noted, thanks reminder-nya"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "links": [
+    {
+      "from_scene": "opener",
+      "to_scene": "middle",
+      "weight": 3,
+      "min_gap_seconds": 3600,
+      "max_gap_seconds": 43200
+    },
+    {
+      "from_scene": "middle",
+      "to_scene": "closer",
+      "weight": 3,
+      "min_gap_seconds": 1800,
+      "max_gap_seconds": 21600
+    },
+    {
+      "from_scene": "closer",
+      "to_scene": "opener",
+      "weight": 2,
+      "min_gap_seconds": 604800,
+      "max_gap_seconds": 2592000
+    }
+  ]
+}
