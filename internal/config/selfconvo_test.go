@@ -56,3 +56,53 @@ func TestLoadSelfConvoParsesTrueAndRejectsAMalformedValue(t *testing.T) {
 		}
 	})
 }
+
+// TestLoadSelfConvoDefaultsParaphraseToEnabled pins
+// DefaultSelfConvoParaphrase = true: unlike SelfConvoEnabled, paraphrasing
+// carries no account-safety hazard of its own — it only changes how an
+// already-enabled run's text is worded — so it ships on by default.
+func TestLoadSelfConvoDefaultsParaphraseToEnabled(t *testing.T) {
+	cfg := &Config{}
+	if err := loadSelfConvo(cfg); err != nil {
+		t.Fatalf("loadSelfConvo: %v", err)
+	}
+	if !cfg.SelfConvoParaphrase {
+		t.Error("SelfConvoParaphrase = false, want true by default")
+	}
+}
+
+func TestLoadSelfConvoParaphraseParsesFalseAndRejectsAMalformedValue(t *testing.T) {
+	t.Run("false", func(t *testing.T) {
+		t.Setenv("WSM_SELF_CONVO_PARAPHRASE", "false")
+		cfg := &Config{}
+		if err := loadSelfConvo(cfg); err != nil {
+			t.Fatalf("loadSelfConvo: %v", err)
+		}
+		if cfg.SelfConvoParaphrase {
+			t.Error("SelfConvoParaphrase = true, want false (overridden)")
+		}
+	})
+
+	t.Run("1", func(t *testing.T) {
+		t.Setenv("WSM_SELF_CONVO_PARAPHRASE", "1")
+		cfg := &Config{}
+		if err := loadSelfConvo(cfg); err != nil {
+			t.Fatalf("loadSelfConvo: %v", err)
+		}
+		if !cfg.SelfConvoParaphrase {
+			t.Error(`SelfConvoParaphrase = false, want true (strconv.ParseBool("1") is true)`)
+		}
+	})
+
+	t.Run("nah", func(t *testing.T) {
+		t.Setenv("WSM_SELF_CONVO_PARAPHRASE", "nah")
+		cfg := &Config{}
+		err := loadSelfConvo(cfg)
+		if err == nil {
+			t.Fatal("loadSelfConvo with WSM_SELF_CONVO_PARAPHRASE=nah: got nil error, want a failure")
+		}
+		if !strings.Contains(err.Error(), "WSM_SELF_CONVO_PARAPHRASE") {
+			t.Fatalf("loadSelfConvo error = %q, want it to name WSM_SELF_CONVO_PARAPHRASE", err.Error())
+		}
+	})
+}

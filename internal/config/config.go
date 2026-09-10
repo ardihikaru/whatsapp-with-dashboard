@@ -240,6 +240,12 @@ type Config struct {
 	// default) means no self-convo run is ever scheduled or sent. See
 	// selfconvo.go's DefaultSelfConvoEnabled doc comment.
 	SelfConvoEnabled bool
+	// SelfConvoParaphrase gates internal/selfconvo's paraphrase step (Vary,
+	// via Runner's Options.Paraphrase) — true (the default) means every
+	// self-convo run's message bodies are surface-paraphrased rather than
+	// sent as the exact authored text every time. See selfconvo.go's
+	// DefaultSelfConvoParaphrase doc comment.
+	SelfConvoParaphrase bool
 
 	// Inbound* configure internal/wa's inbound-message pump (see
 	// inbound.go's loadInbound doc comment). InboundEnabled true (the

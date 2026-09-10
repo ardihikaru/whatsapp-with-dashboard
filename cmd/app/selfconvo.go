@@ -25,7 +25,10 @@ func startSelfConvo(ctx context.Context, cfg *config.Config, repo *convo.Reposit
 		log.Print("self-convo: disabled (set WSM_SELF_CONVO_ENABLED=true to enable it)")
 		return nil
 	}
-	runner := selfconvo.New(repo, selfconvo.NewManagerGateway(manager, msgs), selfconvo.Options{})
+	paraphrase := cfg.SelfConvoParaphrase
+	runner := selfconvo.New(repo, selfconvo.NewManagerGateway(manager, msgs), selfconvo.Options{
+		Paraphrase: &paraphrase,
+	})
 	runner.Start(ctx)
 	log.Print("self-convo runner started")
 	return runner

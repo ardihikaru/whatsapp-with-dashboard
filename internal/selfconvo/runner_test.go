@@ -399,6 +399,62 @@ func TestTriggerAppliesVariationSoTwoRunsFromOneTemplateCanDiffer(t *testing.T) 
 	}
 }
 
+// TestTriggerWithParaphraseDisabledStoresThePlainlySubstitutedBodyExactly
+// pins Runner.Options.Paraphrase's disabled path all the way through
+// Trigger: a Runner built with Paraphrase pointing at false must persist
+// turn bodies that are exactly Text/Alternatives with {{place}}
+// substituted, never surface-rewritten — this is what
+// WSM_SELF_CONVO_PARAPHRASE=false has to actually deliver in production.
+func TestTriggerWithParaphraseDisabledStoresThePlainlySubstitutedBodyExactly(t *testing.T) {
+	raw := `{
+		"version": 1,
+		"turns": [
+			{ "speaker": "a", "text": "Halo" },
+			{ "speaker": "b", "text": "Hai" }
+		]
+	}`
+	script, err := Validate([]byte(raw))
+	if err != nil {
+		t.Fatalf("test setup: Validate returned error: %v", err)
+	}
+
+	pool := newTestPool(t)
+	clock := newFakeClock(time.Date(2026, 9, 9, 12, 0, 0, 0, time.UTC))
+	setupRepo := convo.NewRepository(pool)
+	tmpl := convo.Template{ID: "tmpl-noparaphrase", Name: script.Name, TurnCount: len(script.Turns), Body: raw}
+	if err := setupRepo.InsertTemplate(context.Background(), &tmpl); err != nil {
+		t.Fatalf("InsertTemplate: %v", err)
+	}
+
+	disabled := false
+	for seed := uint64(0); seed < 30; seed++ {
+		repo := convo.NewRepository(pool)
+		gw := newFakeGateway()
+		gw.seed(Participant{ID: "sess-a", Name: "Session A", Phone: "628110000001", Connected: true})
+		gw.seed(Participant{ID: "sess-b", Name: "Session B", Phone: "628110000002", Connected: true})
+		r := New(repo, gw, Options{
+			Now: clock.Now, Rand: rand.New(rand.NewPCG(seed, seed+1)), PollInterval: 5 * time.Second,
+			Paraphrase: &disabled,
+		})
+
+		run, err := r.Trigger(context.Background(), TriggerRequest{
+			TemplateID: tmpl.ID, TickedSessionIDs: []string{"sess-a", "sess-b"},
+		})
+		if err != nil {
+			t.Fatalf("seed %d: Trigger: %v", seed, err)
+		}
+		turns, err := repo.Turns(context.Background(), run.ID)
+		if err != nil {
+			t.Fatalf("seed %d: Turns: %v", seed, err)
+		}
+		for _, tu := range turns {
+			if tu.Body != "Halo" && tu.Body != "Hai" {
+				t.Fatalf("seed %d: stored turn body = %q, want exactly \"Halo\" or \"Hai\" with Options.Paraphrase disabled", seed, tu.Body)
+			}
+		}
+	}
+}
+
 // TestToTurnsMirrorsWhatTriggerStores pins ToTurns (the pure helper pulled
 // out of Trigger, for a later seeder to reuse without duplicating the
 // conversion) against the SAME shape Trigger itself persists: every field

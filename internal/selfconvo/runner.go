@@ -54,6 +54,12 @@ type Options struct {
 	// defaultMaxConcurrentRuns.
 	MaxConcurrentRuns int
 	Logger            *slog.Logger
+	// Paraphrase gates Vary's paraphrase step (see vary.go) for every
+	// Trigger this Runner processes. The DEFAULT — nil, the zero value, a
+	// caller that never touches this field — is ENABLED, matching Vary's
+	// own default; set a *bool pointing at false (see cmd/app/selfconvo.go,
+	// wired from WSM_SELF_CONVO_PARAPHRASE) to disable it deployment-wide.
+	Paraphrase *bool
 }
 
 // Runner drives every self-convo run through its persisted state machine:
@@ -70,6 +76,7 @@ type Runner struct {
 	minSleep      time.Duration
 	maxConcurrent int
 	log           *slog.Logger
+	paraphrase    bool // Options.Paraphrase resolved to a concrete bool at New time
 
 	poke chan struct{} // buffered 1; Poke never blocks its caller
 
@@ -114,9 +121,13 @@ func New(repo *convo.Repository, gw Gateway, opt Options) *Runner {
 	if log == nil {
 		log = slog.Default()
 	}
+	paraphrase := true // Options.Paraphrase's documented default
+	if opt.Paraphrase != nil {
+		paraphrase = *opt.Paraphrase
+	}
 	return &Runner{
 		repo: repo, gw: gw, now: now, rng: rng, poll: poll, minSleep: minSleep,
-		maxConcurrent: maxConcurrent, log: log,
+		maxConcurrent: maxConcurrent, log: log, paraphrase: paraphrase,
 		poke: make(chan struct{}, 1),
 	}
 }
@@ -197,7 +208,7 @@ func (r *Runner) Trigger(ctx context.Context, req TriggerRequest) (convo.Run, er
 		}
 		script = parsed
 	}
-	script, err := Vary(script, r.rng)
+	script, err := VaryWithOptions(script, r.rng, VaryOptions{ParaphraseDisabled: !r.paraphrase})
 	if err != nil {
 		return convo.Run{}, err
 	}

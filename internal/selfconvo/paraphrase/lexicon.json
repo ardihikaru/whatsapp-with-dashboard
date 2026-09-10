@@ -1,0 +1,1903 @@
+[
+  {
+    "lemma": "aku",
+    "formal": [
+      "saya"
+    ],
+    "kasual": [
+      "aku"
+    ],
+    "slang": [
+      "gue",
+      "gw"
+    ]
+  },
+  {
+    "lemma": "kamu",
+    "formal": [
+      "Anda"
+    ],
+    "kasual": [
+      "kamu"
+    ],
+    "slang": [
+      "lo",
+      "lu"
+    ]
+  },
+  {
+    "lemma": "dia",
+    "formal": [
+      "dia"
+    ],
+    "kasual": [
+      "dia"
+    ],
+    "slang": [
+      "doi"
+    ]
+  },
+  {
+    "lemma": "kita",
+    "formal": [
+      "kita"
+    ],
+    "kasual": [
+      "kita"
+    ],
+    "slang": [
+      "kita"
+    ]
+  },
+  {
+    "lemma": "kami",
+    "formal": [
+      "kami"
+    ],
+    "kasual": [
+      "kami"
+    ],
+    "slang": [
+      "kami"
+    ]
+  },
+  {
+    "lemma": "mereka",
+    "formal": [
+      "mereka"
+    ],
+    "kasual": [
+      "mereka"
+    ],
+    "slang": [
+      "mereka"
+    ]
+  },
+  {
+    "lemma": "kalian",
+    "formal": [
+      "kalian"
+    ],
+    "kasual": [
+      "kalian"
+    ],
+    "slang": [
+      "kalian"
+    ]
+  },
+  {
+    "lemma": "tidak",
+    "formal": [
+      "tidak"
+    ],
+    "kasual": [
+      "nggak",
+      "enggak"
+    ],
+    "slang": [
+      "gak",
+      "kaga"
+    ]
+  },
+  {
+    "lemma": "belum",
+    "formal": [
+      "belum"
+    ],
+    "kasual": [
+      "belum"
+    ],
+    "slang": [
+      "blm",
+      "belom"
+    ]
+  },
+  {
+    "lemma": "jangan",
+    "formal": [
+      "jangan"
+    ],
+    "kasual": [
+      "jangan"
+    ],
+    "slang": [
+      "jgn"
+    ]
+  },
+  {
+    "lemma": "bukan",
+    "formal": [
+      "bukan"
+    ],
+    "kasual": [
+      "bukan"
+    ],
+    "slang": [
+      "bukan"
+    ]
+  },
+  {
+    "lemma": "apa",
+    "formal": [
+      "apa"
+    ],
+    "kasual": [
+      "apa"
+    ],
+    "slang": [
+      "apaan"
+    ]
+  },
+  {
+    "lemma": "siapa",
+    "formal": [
+      "siapa"
+    ],
+    "kasual": [
+      "siapa"
+    ],
+    "slang": [
+      "sapa"
+    ]
+  },
+  {
+    "lemma": "kenapa",
+    "formal": [
+      "mengapa"
+    ],
+    "kasual": [
+      "kenapa"
+    ],
+    "slang": [
+      "knp"
+    ]
+  },
+  {
+    "lemma": "kapan",
+    "formal": [
+      "kapan"
+    ],
+    "kasual": [
+      "kapan"
+    ],
+    "slang": [
+      "kpn"
+    ]
+  },
+  {
+    "lemma": "dimana",
+    "formal": [
+      "di mana"
+    ],
+    "kasual": [
+      "dimana"
+    ],
+    "slang": [
+      "dmn"
+    ]
+  },
+  {
+    "lemma": "bagaimana",
+    "formal": [
+      "bagaimana"
+    ],
+    "kasual": [
+      "gimana"
+    ],
+    "slang": [
+      "gmn"
+    ]
+  },
+  {
+    "lemma": "berapa",
+    "formal": [
+      "berapa"
+    ],
+    "kasual": [
+      "berapa"
+    ],
+    "slang": [
+      "brp"
+    ]
+  },
+  {
+    "lemma": "kemana",
+    "formal": [
+      "ke mana"
+    ],
+    "kasual": [
+      "kemana"
+    ],
+    "slang": [
+      "kmn"
+    ]
+  },
+  {
+    "lemma": "sekarang",
+    "formal": [
+      "sekarang"
+    ],
+    "kasual": [
+      "sekarang"
+    ],
+    "slang": [
+      "skrg"
+    ]
+  },
+  {
+    "lemma": "nanti",
+    "formal": [
+      "nanti"
+    ],
+    "kasual": [
+      "nanti"
+    ],
+    "slang": [
+      "ntar"
+    ]
+  },
+  {
+    "lemma": "besok",
+    "formal": [
+      "besok"
+    ],
+    "kasual": [
+      "besok"
+    ],
+    "slang": [
+      "bsk"
+    ]
+  },
+  {
+    "lemma": "kemarin",
+    "formal": [
+      "kemarin"
+    ],
+    "kasual": [
+      "kemarin"
+    ],
+    "slang": [
+      "kmrn"
+    ]
+  },
+  {
+    "lemma": "sebentar",
+    "formal": [
+      "sebentar"
+    ],
+    "kasual": [
+      "sebentar"
+    ],
+    "slang": [
+      "bentar"
+    ]
+  },
+  {
+    "lemma": "tadi",
+    "formal": [
+      "tadi"
+    ],
+    "kasual": [
+      "tadi"
+    ],
+    "slang": [
+      "tadi"
+    ]
+  },
+  {
+    "lemma": "lusa",
+    "formal": [
+      "lusa"
+    ],
+    "kasual": [
+      "lusa"
+    ],
+    "slang": [
+      "lusa"
+    ]
+  },
+  {
+    "lemma": "segera",
+    "formal": [
+      "segera"
+    ],
+    "kasual": [
+      "buruan"
+    ],
+    "slang": [
+      "buruan"
+    ]
+  },
+  {
+    "lemma": "selalu",
+    "formal": [
+      "selalu"
+    ],
+    "kasual": [
+      "selalu"
+    ],
+    "slang": [
+      "selalu"
+    ]
+  },
+  {
+    "lemma": "main",
+    "formal": [
+      "bermain"
+    ],
+    "kasual": [
+      "main"
+    ],
+    "slang": [
+      "maen"
+    ]
+  },
+  {
+    "lemma": "makan",
+    "formal": [
+      "makan"
+    ],
+    "kasual": [
+      "makan"
+    ],
+    "slang": [
+      "mam"
+    ]
+  },
+  {
+    "lemma": "pergi",
+    "formal": [
+      "pergi"
+    ],
+    "kasual": [
+      "pergi"
+    ],
+    "slang": [
+      "cabut"
+    ]
+  },
+  {
+    "lemma": "ketemu",
+    "formal": [
+      "bertemu"
+    ],
+    "kasual": [
+      "ketemu"
+    ],
+    "slang": [
+      "ketemuan"
+    ]
+  },
+  {
+    "lemma": "ngobrol",
+    "formal": [
+      "mengobrol"
+    ],
+    "kasual": [
+      "ngobrol"
+    ],
+    "slang": [
+      "ngobrol"
+    ]
+  },
+  {
+    "lemma": "pulang",
+    "formal": [
+      "pulang"
+    ],
+    "kasual": [
+      "pulang"
+    ],
+    "slang": [
+      "balik"
+    ]
+  },
+  {
+    "lemma": "datang",
+    "formal": [
+      "datang"
+    ],
+    "kasual": [
+      "datang"
+    ],
+    "slang": [
+      "dateng"
+    ]
+  },
+  {
+    "lemma": "ikut",
+    "formal": [
+      "ikut"
+    ],
+    "kasual": [
+      "ikutan"
+    ],
+    "slang": [
+      "ikutan"
+    ]
+  },
+  {
+    "lemma": "bisa",
+    "formal": [
+      "dapat"
+    ],
+    "kasual": [
+      "bisa"
+    ],
+    "slang": [
+      "bisa"
+    ]
+  },
+  {
+    "lemma": "mau",
+    "formal": [
+      "ingin"
+    ],
+    "kasual": [
+      "mau"
+    ],
+    "slang": [
+      "pengen"
+    ]
+  },
+  {
+    "lemma": "sudah",
+    "formal": [
+      "sudah"
+    ],
+    "kasual": [
+      "udah"
+    ],
+    "slang": [
+      "udah"
+    ]
+  },
+  {
+    "lemma": "lagi",
+    "formal": [
+      "sedang"
+    ],
+    "kasual": [
+      "lagi"
+    ],
+    "slang": [
+      "lagi"
+    ]
+  },
+  {
+    "lemma": "ya",
+    "formal": [
+      "ya"
+    ],
+    "kasual": [
+      "iya"
+    ],
+    "slang": [
+      "iya"
+    ]
+  },
+  {
+    "lemma": "oke",
+    "formal": [
+      "baiklah"
+    ],
+    "kasual": [
+      "oke"
+    ],
+    "slang": [
+      "oke"
+    ]
+  },
+  {
+    "lemma": "setuju",
+    "formal": [
+      "setuju"
+    ],
+    "kasual": [
+      "setuju"
+    ],
+    "slang": [
+      "sip"
+    ]
+  },
+  {
+    "lemma": "boleh",
+    "formal": [
+      "boleh"
+    ],
+    "kasual": [
+      "boleh"
+    ],
+    "slang": [
+      "boleh"
+    ]
+  },
+  {
+    "lemma": "tentu",
+    "formal": [
+      "tentu"
+    ],
+    "kasual": [
+      "tentu"
+    ],
+    "slang": [
+      "iyalah"
+    ]
+  },
+  {
+    "lemma": "halo",
+    "formal": [
+      "halo"
+    ],
+    "kasual": [
+      "halo"
+    ],
+    "slang": [
+      "halo"
+    ]
+  },
+  {
+    "lemma": "permisi",
+    "formal": [
+      "permisi"
+    ],
+    "kasual": [
+      "permisi"
+    ],
+    "slang": [
+      "permisi"
+    ]
+  },
+  {
+    "lemma": "makasih",
+    "formal": [
+      "terima kasih"
+    ],
+    "kasual": [
+      "makasih"
+    ],
+    "slang": [
+      "thanks"
+    ]
+  },
+  {
+    "lemma": "maaf",
+    "formal": [
+      "mohon maaf"
+    ],
+    "kasual": [
+      "maaf"
+    ],
+    "slang": [
+      "sorry"
+    ]
+  },
+  {
+    "lemma": "dadah",
+    "formal": [
+      "sampai jumpa"
+    ],
+    "kasual": [
+      "dadah"
+    ],
+    "slang": [
+      "bye"
+    ]
+  },
+  {
+    "lemma": "cepat",
+    "formal": [
+      "cepat"
+    ],
+    "kasual": [
+      "cepetan"
+    ],
+    "slang": [
+      "gercep"
+    ]
+  },
+  {
+    "lemma": "lambat",
+    "formal": [
+      "lambat"
+    ],
+    "kasual": [
+      "lambat"
+    ],
+    "slang": [
+      "lelet"
+    ]
+  },
+  {
+    "lemma": "senang",
+    "formal": [
+      "senang"
+    ],
+    "kasual": [
+      "seneng"
+    ],
+    "slang": [
+      "happy"
+    ]
+  },
+  {
+    "lemma": "sedih",
+    "formal": [
+      "sedih"
+    ],
+    "kasual": [
+      "sedih"
+    ],
+    "slang": [
+      "sad"
+    ]
+  },
+  {
+    "lemma": "marah",
+    "formal": [
+      "marah"
+    ],
+    "kasual": [
+      "marah"
+    ],
+    "slang": [
+      "ngambek"
+    ]
+  },
+  {
+    "lemma": "capek",
+    "formal": [
+      "lelah"
+    ],
+    "kasual": [
+      "capek"
+    ],
+    "slang": [
+      "capek"
+    ]
+  },
+  {
+    "lemma": "lapar",
+    "formal": [
+      "lapar"
+    ],
+    "kasual": [
+      "laper"
+    ],
+    "slang": [
+      "laper"
+    ]
+  },
+  {
+    "lemma": "haus",
+    "formal": [
+      "haus"
+    ],
+    "kasual": [
+      "haus"
+    ],
+    "slang": [
+      "haus"
+    ]
+  },
+  {
+    "lemma": "kerja",
+    "formal": [
+      "bekerja"
+    ],
+    "kasual": [
+      "kerja"
+    ],
+    "slang": [
+      "kerja"
+    ]
+  },
+  {
+    "lemma": "belajar",
+    "formal": [
+      "belajar"
+    ],
+    "kasual": [
+      "belajar"
+    ],
+    "slang": [
+      "belajar"
+    ]
+  },
+  {
+    "lemma": "tidur",
+    "formal": [
+      "tidur"
+    ],
+    "kasual": [
+      "tidur"
+    ],
+    "slang": [
+      "bobo"
+    ]
+  },
+  {
+    "lemma": "bangun",
+    "formal": [
+      "bangun"
+    ],
+    "kasual": [
+      "bangun"
+    ],
+    "slang": [
+      "bangun"
+    ]
+  },
+  {
+    "lemma": "mandi",
+    "formal": [
+      "mandi"
+    ],
+    "kasual": [
+      "mandi"
+    ],
+    "slang": [
+      "mandi"
+    ]
+  },
+  {
+    "lemma": "uang",
+    "formal": [
+      "uang"
+    ],
+    "kasual": [
+      "duit"
+    ],
+    "slang": [
+      "duit"
+    ]
+  },
+  {
+    "lemma": "mahal",
+    "formal": [
+      "mahal"
+    ],
+    "kasual": [
+      "mahal"
+    ],
+    "slang": [
+      "mahal"
+    ]
+  },
+  {
+    "lemma": "murah",
+    "formal": [
+      "murah"
+    ],
+    "kasual": [
+      "murah"
+    ],
+    "slang": [
+      "murmer"
+    ]
+  },
+  {
+    "lemma": "bagus",
+    "formal": [
+      "bagus"
+    ],
+    "kasual": [
+      "bagus"
+    ],
+    "slang": [
+      "keren"
+    ]
+  },
+  {
+    "lemma": "jelek",
+    "formal": [
+      "jelek"
+    ],
+    "kasual": [
+      "jelek"
+    ],
+    "slang": [
+      "jelek"
+    ]
+  },
+  {
+    "lemma": "besar",
+    "formal": [
+      "besar"
+    ],
+    "kasual": [
+      "gede"
+    ],
+    "slang": [
+      "gede"
+    ]
+  },
+  {
+    "lemma": "kecil",
+    "formal": [
+      "kecil"
+    ],
+    "kasual": [
+      "kecil"
+    ],
+    "slang": [
+      "kecil"
+    ]
+  },
+  {
+    "lemma": "banyak",
+    "formal": [
+      "banyak"
+    ],
+    "kasual": [
+      "banyak"
+    ],
+    "slang": [
+      "banyak"
+    ]
+  },
+  {
+    "lemma": "sedikit",
+    "formal": [
+      "sedikit"
+    ],
+    "kasual": [
+      "dikit"
+    ],
+    "slang": [
+      "dikit"
+    ]
+  },
+  {
+    "lemma": "cantik",
+    "formal": [
+      "cantik"
+    ],
+    "kasual": [
+      "cantik"
+    ],
+    "slang": [
+      "cakep"
+    ]
+  },
+  {
+    "lemma": "tampan",
+    "formal": [
+      "tampan"
+    ],
+    "kasual": [
+      "ganteng"
+    ],
+    "slang": [
+      "ganteng"
+    ]
+  },
+  {
+    "lemma": "lucu",
+    "formal": [
+      "lucu"
+    ],
+    "kasual": [
+      "lucu"
+    ],
+    "slang": [
+      "lucu"
+    ]
+  },
+  {
+    "lemma": "bosan",
+    "formal": [
+      "bosan"
+    ],
+    "kasual": [
+      "bosen"
+    ],
+    "slang": [
+      "bete"
+    ]
+  },
+  {
+    "lemma": "rumah",
+    "formal": [
+      "rumah"
+    ],
+    "kasual": [
+      "rumah"
+    ],
+    "slang": [
+      "rumah"
+    ]
+  },
+  {
+    "lemma": "sekolah",
+    "formal": [
+      "sekolah"
+    ],
+    "kasual": [
+      "sekolah"
+    ],
+    "slang": [
+      "sekolah"
+    ]
+  },
+  {
+    "lemma": "kantor",
+    "formal": [
+      "kantor"
+    ],
+    "kasual": [
+      "kantor"
+    ],
+    "slang": [
+      "kantor"
+    ]
+  },
+  {
+    "lemma": "teman",
+    "formal": [
+      "teman"
+    ],
+    "kasual": [
+      "temen"
+    ],
+    "slang": [
+      "bestie"
+    ]
+  },
+  {
+    "lemma": "pacar",
+    "formal": [
+      "pacar"
+    ],
+    "kasual": [
+      "pacar"
+    ],
+    "slang": [
+      "gebetan"
+    ]
+  },
+  {
+    "lemma": "keluarga",
+    "formal": [
+      "keluarga"
+    ],
+    "kasual": [
+      "keluarga"
+    ],
+    "slang": [
+      "keluarga"
+    ]
+  },
+  {
+    "lemma": "anak",
+    "formal": [
+      "anak"
+    ],
+    "kasual": [
+      "anak"
+    ],
+    "slang": [
+      "anak"
+    ]
+  },
+  {
+    "lemma": "orangtua",
+    "formal": [
+      "orang tua"
+    ],
+    "kasual": [
+      "ortu"
+    ],
+    "slang": [
+      "ortu"
+    ]
+  },
+  {
+    "lemma": "mobil",
+    "formal": [
+      "mobil"
+    ],
+    "kasual": [
+      "mobil"
+    ],
+    "slang": [
+      "mobil"
+    ]
+  },
+  {
+    "lemma": "motor",
+    "formal": [
+      "motor"
+    ],
+    "kasual": [
+      "motor"
+    ],
+    "slang": [
+      "motor"
+    ]
+  },
+  {
+    "lemma": "telepon",
+    "formal": [
+      "menelepon"
+    ],
+    "kasual": [
+      "telepon"
+    ],
+    "slang": [
+      "telpon"
+    ]
+  },
+  {
+    "lemma": "pesan",
+    "formal": [
+      "pesan"
+    ],
+    "kasual": [
+      "pesan"
+    ],
+    "slang": [
+      "chat"
+    ]
+  },
+  {
+    "lemma": "balas",
+    "formal": [
+      "membalas"
+    ],
+    "kasual": [
+      "balas"
+    ],
+    "slang": [
+      "bales"
+    ]
+  },
+  {
+    "lemma": "kirim",
+    "formal": [
+      "mengirim"
+    ],
+    "kasual": [
+      "kirim"
+    ],
+    "slang": [
+      "kirim"
+    ]
+  },
+  {
+    "lemma": "lihat",
+    "formal": [
+      "melihat"
+    ],
+    "kasual": [
+      "lihat"
+    ],
+    "slang": [
+      "liat"
+    ]
+  },
+  {
+    "lemma": "dengar",
+    "formal": [
+      "mendengar"
+    ],
+    "kasual": [
+      "dengar"
+    ],
+    "slang": [
+      "denger"
+    ]
+  },
+  {
+    "lemma": "bicara",
+    "formal": [
+      "berbicara"
+    ],
+    "kasual": [
+      "ngomong"
+    ],
+    "slang": [
+      "ngomong"
+    ]
+  },
+  {
+    "lemma": "tanya",
+    "formal": [
+      "bertanya"
+    ],
+    "kasual": [
+      "tanya"
+    ],
+    "slang": [
+      "nanya"
+    ]
+  },
+  {
+    "lemma": "jawab",
+    "formal": [
+      "menjawab"
+    ],
+    "kasual": [
+      "jawab"
+    ],
+    "slang": [
+      "jawab"
+    ]
+  },
+  {
+    "lemma": "pikir",
+    "formal": [
+      "berpikir"
+    ],
+    "kasual": [
+      "mikir"
+    ],
+    "slang": [
+      "mikir"
+    ]
+  },
+  {
+    "lemma": "ingat",
+    "formal": [
+      "mengingat"
+    ],
+    "kasual": [
+      "inget"
+    ],
+    "slang": [
+      "inget"
+    ]
+  },
+  {
+    "lemma": "lupa",
+    "formal": [
+      "lupa"
+    ],
+    "kasual": [
+      "lupa"
+    ],
+    "slang": [
+      "lupa"
+    ]
+  },
+  {
+    "lemma": "tahu",
+    "formal": [
+      "mengetahui"
+    ],
+    "kasual": [
+      "tahu"
+    ],
+    "slang": [
+      "tau"
+    ]
+  },
+  {
+    "lemma": "paham",
+    "formal": [
+      "memahami"
+    ],
+    "kasual": [
+      "paham"
+    ],
+    "slang": [
+      "paham"
+    ]
+  },
+  {
+    "lemma": "kerjakan",
+    "formal": [
+      "mengerjakan"
+    ],
+    "kasual": [
+      "kerjain"
+    ],
+    "slang": [
+      "kerjain"
+    ]
+  },
+  {
+    "lemma": "lakukan",
+    "formal": [
+      "melakukan"
+    ],
+    "kasual": [
+      "lakuin"
+    ],
+    "slang": [
+      "lakuin"
+    ]
+  },
+  {
+    "lemma": "buat",
+    "formal": [
+      "membuat"
+    ],
+    "kasual": [
+      "bikin"
+    ],
+    "slang": [
+      "bikin"
+    ]
+  },
+  {
+    "lemma": "minta",
+    "formal": [
+      "meminta"
+    ],
+    "kasual": [
+      "minta"
+    ],
+    "slang": [
+      "minta"
+    ]
+  },
+  {
+    "lemma": "kasih",
+    "formal": [
+      "memberikan"
+    ],
+    "kasual": [
+      "kasih"
+    ],
+    "slang": [
+      "kasih"
+    ]
+  },
+  {
+    "lemma": "beli",
+    "formal": [
+      "membeli"
+    ],
+    "kasual": [
+      "beli"
+    ],
+    "slang": [
+      "beli"
+    ]
+  },
+  {
+    "lemma": "jual",
+    "formal": [
+      "menjual"
+    ],
+    "kasual": [
+      "jual"
+    ],
+    "slang": [
+      "jual"
+    ]
+  },
+  {
+    "lemma": "bayar",
+    "formal": [
+      "membayar"
+    ],
+    "kasual": [
+      "bayar"
+    ],
+    "slang": [
+      "bayar"
+    ]
+  },
+  {
+    "lemma": "pinjam",
+    "formal": [
+      "meminjam"
+    ],
+    "kasual": [
+      "pinjem"
+    ],
+    "slang": [
+      "pinjem"
+    ]
+  },
+  {
+    "lemma": "tunggu",
+    "formal": [
+      "menunggu"
+    ],
+    "kasual": [
+      "tunggu"
+    ],
+    "slang": [
+      "tungguin"
+    ]
+  },
+  {
+    "lemma": "cari",
+    "formal": [
+      "mencari"
+    ],
+    "kasual": [
+      "cari"
+    ],
+    "slang": [
+      "cariin"
+    ]
+  },
+  {
+    "lemma": "temukan",
+    "formal": [
+      "menemukan"
+    ],
+    "kasual": [
+      "nemuin"
+    ],
+    "slang": [
+      "nemuin"
+    ]
+  },
+  {
+    "lemma": "hilang",
+    "formal": [
+      "hilang"
+    ],
+    "kasual": [
+      "ilang"
+    ],
+    "slang": [
+      "ilang"
+    ]
+  },
+  {
+    "lemma": "rusak",
+    "formal": [
+      "rusak"
+    ],
+    "kasual": [
+      "rusak"
+    ],
+    "slang": [
+      "rusak"
+    ]
+  },
+  {
+    "lemma": "baik",
+    "formal": [
+      "baik"
+    ],
+    "kasual": [
+      "baik"
+    ],
+    "slang": [
+      "mantap"
+    ]
+  },
+  {
+    "lemma": "buruk",
+    "formal": [
+      "buruk"
+    ],
+    "kasual": [
+      "parah"
+    ],
+    "slang": [
+      "parah"
+    ]
+  },
+  {
+    "lemma": "penting",
+    "formal": [
+      "penting"
+    ],
+    "kasual": [
+      "penting"
+    ],
+    "slang": [
+      "penting"
+    ]
+  },
+  {
+    "lemma": "mungkin",
+    "formal": [
+      "mungkin"
+    ],
+    "kasual": [
+      "mungkin"
+    ],
+    "slang": [
+      "kayaknya"
+    ]
+  },
+  {
+    "lemma": "pasti",
+    "formal": [
+      "pasti"
+    ],
+    "kasual": [
+      "pasti"
+    ],
+    "slang": [
+      "pasti"
+    ]
+  },
+  {
+    "lemma": "mudah",
+    "formal": [
+      "mudah"
+    ],
+    "kasual": [
+      "gampang"
+    ],
+    "slang": [
+      "gampang"
+    ]
+  },
+  {
+    "lemma": "sulit",
+    "formal": [
+      "sulit"
+    ],
+    "kasual": [
+      "susah"
+    ],
+    "slang": [
+      "susah"
+    ]
+  },
+  {
+    "lemma": "sibuk",
+    "formal": [
+      "sibuk"
+    ],
+    "kasual": [
+      "sibuk"
+    ],
+    "slang": [
+      "sibuk"
+    ]
+  },
+  {
+    "lemma": "santai",
+    "formal": [
+      "santai"
+    ],
+    "kasual": [
+      "santai"
+    ],
+    "slang": [
+      "santuy"
+    ]
+  },
+  {
+    "lemma": "serius",
+    "formal": [
+      "serius"
+    ],
+    "kasual": [
+      "serius"
+    ],
+    "slang": [
+      "serius"
+    ]
+  },
+  {
+    "lemma": "becanda",
+    "formal": [
+      "bercanda"
+    ],
+    "kasual": [
+      "bercanda"
+    ],
+    "slang": [
+      "bercandaan"
+    ]
+  },
+  {
+    "lemma": "benar",
+    "formal": [
+      "benar"
+    ],
+    "kasual": [
+      "bener"
+    ],
+    "slang": [
+      "bener"
+    ]
+  },
+  {
+    "lemma": "salah",
+    "formal": [
+      "salah"
+    ],
+    "kasual": [
+      "salah"
+    ],
+    "slang": [
+      "salah"
+    ]
+  },
+  {
+    "lemma": "semua",
+    "formal": [
+      "semua"
+    ],
+    "kasual": [
+      "semua"
+    ],
+    "slang": [
+      "semua"
+    ]
+  },
+  {
+    "lemma": "sebagian",
+    "formal": [
+      "sebagian"
+    ],
+    "kasual": [
+      "sebagian"
+    ],
+    "slang": [
+      "sebagian"
+    ]
+  },
+  {
+    "lemma": "sendiri",
+    "formal": [
+      "sendiri"
+    ],
+    "kasual": [
+      "sendiri"
+    ],
+    "slang": [
+      "sendirian"
+    ]
+  },
+  {
+    "lemma": "bersama",
+    "formal": [
+      "bersama"
+    ],
+    "kasual": [
+      "bareng"
+    ],
+    "slang": [
+      "bareng"
+    ]
+  },
+  {
+    "lemma": "dulu",
+    "formal": [
+      "dahulu"
+    ],
+    "kasual": [
+      "dulu"
+    ],
+    "slang": [
+      "dulu"
+    ]
+  },
+  {
+    "lemma": "sesudah",
+    "formal": [
+      "setelah"
+    ],
+    "kasual": [
+      "abis"
+    ],
+    "slang": [
+      "abis"
+    ]
+  },
+  {
+    "lemma": "sebelum",
+    "formal": [
+      "sebelum"
+    ],
+    "kasual": [
+      "sebelum"
+    ],
+    "slang": [
+      "sebelum"
+    ]
+  },
+  {
+    "lemma": "hari",
+    "formal": [
+      "hari"
+    ],
+    "kasual": [
+      "hari"
+    ],
+    "slang": [
+      "hari"
+    ]
+  },
+  {
+    "lemma": "minggu",
+    "formal": [
+      "minggu"
+    ],
+    "kasual": [
+      "minggu"
+    ],
+    "slang": [
+      "minggu"
+    ]
+  },
+  {
+    "lemma": "bulan",
+    "formal": [
+      "bulan"
+    ],
+    "kasual": [
+      "bulan"
+    ],
+    "slang": [
+      "bulan"
+    ]
+  },
+  {
+    "lemma": "tahun",
+    "formal": [
+      "tahun"
+    ],
+    "kasual": [
+      "tahun"
+    ],
+    "slang": [
+      "tahun"
+    ]
+  },
+  {
+    "lemma": "pagi",
+    "formal": [
+      "pagi"
+    ],
+    "kasual": [
+      "pagi"
+    ],
+    "slang": [
+      "pagi"
+    ]
+  },
+  {
+    "lemma": "siang",
+    "formal": [
+      "siang"
+    ],
+    "kasual": [
+      "siang"
+    ],
+    "slang": [
+      "siang"
+    ]
+  },
+  {
+    "lemma": "sore",
+    "formal": [
+      "sore"
+    ],
+    "kasual": [
+      "sore"
+    ],
+    "slang": [
+      "sore"
+    ]
+  },
+  {
+    "lemma": "malam",
+    "formal": [
+      "malam"
+    ],
+    "kasual": [
+      "malam"
+    ],
+    "slang": [
+      "malam"
+    ]
+  },
+  {
+    "lemma": "acara",
+    "formal": [
+      "acara"
+    ],
+    "kasual": [
+      "acara"
+    ],
+    "slang": [
+      "acara"
+    ]
+  },
+  {
+    "lemma": "rencana",
+    "formal": [
+      "rencana"
+    ],
+    "kasual": [
+      "rencana"
+    ],
+    "slang": [
+      "plan"
+    ]
+  },
+  {
+    "lemma": "janji",
+    "formal": [
+      "janji"
+    ],
+    "kasual": [
+      "janji"
+    ],
+    "slang": [
+      "janji"
+    ]
+  },
+  {
+    "lemma": "batal",
+    "formal": [
+      "batal"
+    ],
+    "kasual": [
+      "batal"
+    ],
+    "slang": [
+      "batal"
+    ]
+  },
+  {
+    "lemma": "lanjut",
+    "formal": [
+      "lanjut"
+    ],
+    "kasual": [
+      "lanjut"
+    ],
+    "slang": [
+      "gaskeun"
+    ]
+  },
+  {
+    "lemma": "berhenti",
+    "formal": [
+      "berhenti"
+    ],
+    "kasual": [
+      "berhenti"
+    ],
+    "slang": [
+      "stop"
+    ]
+  },
+  {
+    "lemma": "mulai",
+    "formal": [
+      "memulai"
+    ],
+    "kasual": [
+      "mulai"
+    ],
+    "slang": [
+      "mulai"
+    ]
+  },
+  {
+    "lemma": "selesai",
+    "formal": [
+      "selesai"
+    ],
+    "kasual": [
+      "selesai"
+    ],
+    "slang": [
+      "kelar"
+    ]
+  },
+  {
+    "lemma": "dekat",
+    "formal": [
+      "dekat"
+    ],
+    "kasual": [
+      "deket"
+    ],
+    "slang": [
+      "deket"
+    ]
+  },
+  {
+    "lemma": "jauh",
+    "formal": [
+      "jauh"
+    ],
+    "kasual": [
+      "jauh"
+    ],
+    "slang": [
+      "jauh"
+    ]
+  },
+  {
+    "lemma": "disini",
+    "formal": [
+      "di sini"
+    ],
+    "kasual": [
+      "disini"
+    ],
+    "slang": [
+      "sini"
+    ]
+  },
+  {
+    "lemma": "disana",
+    "formal": [
+      "di sana"
+    ],
+    "kasual": [
+      "disana"
+    ],
+    "slang": [
+      "sana"
+    ]
+  },
+  {
+    "lemma": "begitu",
+    "formal": [
+      "begitu"
+    ],
+    "kasual": [
+      "gitu"
+    ],
+    "slang": [
+      "gitu"
+    ]
+  },
+  {
+    "lemma": "begini",
+    "formal": [
+      "begini"
+    ],
+    "kasual": [
+      "gini"
+    ],
+    "slang": [
+      "gini"
+    ]
+  },
+  {
+    "lemma": "karena",
+    "formal": [
+      "karena"
+    ],
+    "kasual": [
+      "soalnya"
+    ],
+    "slang": [
+      "soalnya"
+    ]
+  },
+  {
+    "lemma": "tapi",
+    "formal": [
+      "tetapi"
+    ],
+    "kasual": [
+      "tapi"
+    ],
+    "slang": [
+      "tapi"
+    ]
+  }
+]
