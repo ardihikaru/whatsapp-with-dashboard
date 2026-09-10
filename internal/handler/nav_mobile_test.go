@@ -79,6 +79,45 @@ func TestDrawerToggleTargetsTheSidebarItControls(t *testing.T) {
 	}
 }
 
+// Eleven destinations, four subheaders and the identity block do not fit a
+// 360x740 drawer on one screen (e2e/nav-mobile.spec.ts's "every destination is
+// tappable" caught this the moment "Convo Schedules" became the eleventh).
+// responsive.css's .nav-scroll rule is what makes the destination list itself
+// scroll while the logo and the identity/footer stay put; this pins the
+// markup it depends on so a future template edit can't silently drop the
+// wrapper and reopen that regression.
+func TestSidebarNavIsWrappedInAScrollContainer(t *testing.T) {
+	srv, sessions, _, _ := newLogsTestServer(t)
+	body := authedGet(t, srv, sessions, "/dashboard").Body.String()
+	sidebar := sidebarHTML(t, body)
+
+	scrollStart := strings.Index(sidebar, `<div class="nav-scroll">`)
+	if scrollStart < 0 {
+		t.Fatalf(`the sidebar is missing <div class="nav-scroll">; without it ` +
+			"nothing bounds the destination list and a long enough nav pushes " +
+			"later destinations out of the drawer again:\n%s", sidebar)
+	}
+	scrollEnd := matchingDivClose(t, sidebar, scrollStart)
+
+	logoStart := strings.Index(sidebar, `class="sidebar-logo"`)
+	if logoStart < 0 || logoStart > scrollStart {
+		t.Error("sidebar-logo must appear BEFORE nav-scroll, so it stays pinned " +
+			"above the scrolling destination list, not scroll away with it")
+	}
+
+	userIdx := strings.Index(sidebar, `class="nav-user"`)
+	if userIdx >= 0 && userIdx < scrollEnd {
+		t.Error("nav-user must appear AFTER nav-scroll closes, so the signed-in " +
+			"identity stays pinned below the scrolling destination list")
+	}
+
+	footerIdx := strings.Index(sidebar, `class="nav nav-footer"`)
+	if footerIdx >= 0 && footerIdx < scrollEnd {
+		t.Error("the platform footer link must appear AFTER nav-scroll closes, " +
+			"so it stays pinned below the scrolling destination list")
+	}
+}
+
 // The whole point of the change: the drawer must still contain the complete nav
 // tree. A phone user loses nothing that a desktop user has.
 func TestDrawerCarriesEverySidebarDestination(t *testing.T) {
@@ -156,4 +195,31 @@ func sidebarHTML(t *testing.T, body string) string {
 		t.Fatalf("sidebar is not closed:\n%s", body[start:])
 	}
 	return body[start : start+end]
+}
+
+// matchingDivClose returns the index (within html) of the "</div>" that closes
+// the "<div" opening at openIdx, counting nested divs in between. A plain
+// strings.Index for the first "</div>" is not enough here: nav-scroll's own
+// children include self-closed-on-one-line <div class="nav-subheader">...
+// </div> elements, whose close would be mistaken for nav-scroll's own.
+func matchingDivClose(t *testing.T, html string, openIdx int) int {
+	t.Helper()
+	depth := 0
+	for i := openIdx; i < len(html); {
+		switch {
+		case strings.HasPrefix(html[i:], "<div"):
+			depth++
+			i += len("<div")
+		case strings.HasPrefix(html[i:], "</div>"):
+			depth--
+			if depth == 0 {
+				return i
+			}
+			i += len("</div>")
+		default:
+			i++
+		}
+	}
+	t.Fatalf("no matching </div> for the <div at index %d:\n%s", openIdx, html[openIdx:])
+	return -1
 }

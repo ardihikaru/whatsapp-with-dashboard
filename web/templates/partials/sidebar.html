@@ -4,17 +4,24 @@
     <img src="{{u "/static/img/logo.svg"}}" alt="Clino WhatsApp" width="32" height="32">
     <span>Clino&nbsp;· WhatsApp</span>
   </div>
-  {{range .Nav}}
-  <div class="nav-subheader">{{.Subheader}}</div>
-  <nav class="nav">
-    {{range .Items}}
-    <a class="nav-item{{if .Active}} active{{end}}" href="{{.Path}}">
-      {{if .Icon}}<span class="nav-icon">{{.Icon}}</span>{{else}}<span class="nav-dot" aria-hidden="true"></span>{{end}}
-      <span class="nav-text">{{.Title}}</span>
-    </a>
+  <!-- Scrolls independently of the logo above and the identity/footer below —
+       see responsive.css's .nav-scroll comment for why: eleven destinations
+       plus four subheaders no longer fit a 360x740 drawer in one screen, and
+       this is what keeps every one of them reachable without pushing the
+       identity block off its pinned spot. -->
+  <div class="nav-scroll">
+    {{range .Nav}}
+    <div class="nav-subheader">{{.Subheader}}</div>
+    <nav class="nav">
+      {{range .Items}}
+      <a class="nav-item{{if .Active}} active{{end}}" href="{{.Path}}">
+        {{if .Icon}}<span class="nav-icon">{{.Icon}}</span>{{else}}<span class="nav-dot" aria-hidden="true"></span>{{end}}
+        <span class="nav-text">{{.Title}}</span>
+      </a>
+      {{end}}
+    </nav>
     {{end}}
-  </nav>
-  {{end}}
+  </div>
   {{if .Username}}
   <div class="nav-user">Masuk sebagai <strong>{{.Username}}</strong></div>
   {{end}}
