@@ -246,6 +246,10 @@ type Config struct {
 	// sent as the exact authored text every time. See selfconvo.go's
 	// DefaultSelfConvoParaphrase doc comment.
 	SelfConvoParaphrase bool
+	// SelfConvoMaxMsgsPerDay caps how many turns internal/selfconvo's
+	// Planner will schedule from one SENDER session per day — see
+	// selfconvo.go's DefaultSelfConvoMaxMsgsPerDay doc comment.
+	SelfConvoMaxMsgsPerDay int
 
 	// Inbound* configure internal/wa's inbound-message pump (see
 	// inbound.go's loadInbound doc comment). InboundEnabled true (the

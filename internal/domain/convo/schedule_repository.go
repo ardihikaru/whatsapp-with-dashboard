@@ -291,6 +291,28 @@ func (r *Repository) CountRunsForOccurrence(ctx context.Context, scheduleID, dat
 	return n, err
 }
 
+// CountSenderTurnsForDate counts turns actually sent FROM senderSessionID
+// (i.e. t.session_id = senderSessionID) across every run whose
+// occurrence_date is date — the planner's per-sender daily cap
+// (WSM_SELF_CONVO_MAX_MSGS_PER_DAY, see internal/selfconvo.PlannerOptions.
+// MaxMsgsPerDay): how many messages this sender session is ALREADY
+// committed to sending on date, scheduled or already gone out, so the cap
+// is checked BEFORE the planner starts a further set, not only after
+// something has already been sent. Scoped to occurrence_date (VARCHAR
+// YYYY-MM-DD, same lexical-comparison convention as every other date column
+// in this schema) rather than every run ever, so a manually triggered run
+// (occurrence_date == "") never counts against a schedule's own daily
+// budget.
+func (r *Repository) CountSenderTurnsForDate(ctx context.Context, senderSessionID, date string) (int, error) {
+	var n int
+	err := r.pool.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM wa_convo_turns t
+		 JOIN wa_convo_runs run ON run.id = t.run_id
+		 WHERE t.session_id = ? AND run.occurrence_date = ?`,
+		senderSessionID, date).Scan(&n)
+	return n, err
+}
+
 // ---- template correlation graph ----
 
 const templateLinkCols = `from_template_id, to_template_id, weight, min_gap_seconds, max_gap_seconds, created_at`

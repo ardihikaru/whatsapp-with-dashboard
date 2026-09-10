@@ -75,6 +75,13 @@ type fakeGateway struct {
 	// actually inserted, which is exactly the fake's default state (no
 	// production Send path runs in these tests unless a test wires one).
 	messageStatuses map[string]fakeMessageStatus
+
+	// unhealthy backs Healthy — a session id present here (any string value,
+	// even "") is reported unhealthy with that value as the reason; an id
+	// absent from the map is healthy, matching a real deployment where every
+	// seeded/connected participant can send. nil (the default) means every
+	// participant is healthy.
+	unhealthy map[string]string
 }
 
 // fakeMessageStatus is one configured MessageStatus answer.
@@ -157,6 +164,30 @@ func (g *fakeGateway) MessageStatus(ctx context.Context, messageID string) (stat
 		return "", "", false, nil
 	}
 	return s.status, s.reason, true, nil
+}
+
+// setUnhealthy configures Healthy to report id as unhealthy with reason —
+// see the unhealthy field's own doc comment. setUnhealthy(id, "") followed
+// by never calling it again for a different id leaves every OTHER
+// participant healthy.
+func (g *fakeGateway) setUnhealthy(id, reason string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.unhealthy == nil {
+		g.unhealthy = map[string]string{}
+	}
+	g.unhealthy[id] = reason
+}
+
+func (g *fakeGateway) Healthy(ids []string) (sessionID, reason string, ok bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	for _, id := range ids {
+		if r, bad := g.unhealthy[id]; bad {
+			return id, r, false
+		}
+	}
+	return "", "", true
 }
 
 func (g *fakeGateway) sendCount() int {

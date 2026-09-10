@@ -27,12 +27,23 @@ const DefaultSelfConvoEnabled = false
 // its own; it only changes HOW an already-enabled run's text is worded.
 const DefaultSelfConvoParaphrase = true
 
-// loadSelfConvo resolves WSM_SELF_CONVO_ENABLED and
-// WSM_SELF_CONVO_PARAPHRASE, gating internal/selfconvo's runner (wired in
-// cmd/app/main.go via cmd/app/selfconvo.go). Follows loadMedia's
-// WSM_CALLS_ENABLED block (media.go:141-148) exactly for each: unset
-// resolves to the default, an unparseable value is a boot-time error naming
-// the variable and the raw value, never a silent fallback.
+// DefaultSelfConvoMaxMsgsPerDay bounds how many turns internal/selfconvo's
+// Planner will schedule FROM one sender session in one day — see
+// selfconvo.PlannerOptions.MaxMsgsPerDay's own doc comment for what happens
+// at the cap (planning simply stops for that sender; nothing is stalled).
+// 200 is generous enough for a handful of daily conversations across
+// several receivers while still bounding the account-safety exposure
+// DefaultSelfConvoEnabled's own doc comment describes — an unbounded
+// scheduler is a worse version of the same hazard a manual Trigger already
+// carries, just automated.
+const DefaultSelfConvoMaxMsgsPerDay = 200
+
+// loadSelfConvo resolves WSM_SELF_CONVO_ENABLED, WSM_SELF_CONVO_PARAPHRASE
+// and WSM_SELF_CONVO_MAX_MSGS_PER_DAY, gating internal/selfconvo's runner
+// and planner (wired in cmd/app/main.go via cmd/app/selfconvo.go). Follows
+// loadMedia's WSM_CALLS_ENABLED block (media.go:141-148) exactly for each:
+// unset resolves to the default, an unparseable value is a boot-time error
+// naming the variable and the raw value, never a silent fallback.
 func loadSelfConvo(cfg *Config) error {
 	cfg.SelfConvoEnabled = DefaultSelfConvoEnabled
 	if raw := os.Getenv("WSM_SELF_CONVO_ENABLED"); raw != "" {
@@ -50,6 +61,15 @@ func loadSelfConvo(cfg *Config) error {
 			return fmt.Errorf("invalid WSM_SELF_CONVO_PARAPHRASE %q: %v", raw, err)
 		}
 		cfg.SelfConvoParaphrase = b
+	}
+
+	cfg.SelfConvoMaxMsgsPerDay = DefaultSelfConvoMaxMsgsPerDay
+	if raw := os.Getenv("WSM_SELF_CONVO_MAX_MSGS_PER_DAY"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			return fmt.Errorf("invalid WSM_SELF_CONVO_MAX_MSGS_PER_DAY %q: must be a positive integer", raw)
+		}
+		cfg.SelfConvoMaxMsgsPerDay = n
 	}
 	return nil
 }

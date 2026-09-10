@@ -383,3 +383,51 @@ func TestARunCreatedWithNoScheduleFieldsStillRoundTrips(t *testing.T) {
 		t.Errorf("ParaphraseSeed = %d, want 0", got.ParaphraseSeed)
 	}
 }
+
+// TestCountSenderTurnsForDateCountsOnlyThatSendersTurnsOnThatOccurrenceDate
+// pins the planner's per-sender daily cap query: it must count turns SENT
+// FROM the given session (never turns sent TO it, i.e. the other speaker's
+// own outbound turns in the same run), scoped to occurrence_date, and a
+// manually triggered run (occurrence_date == "") must never contribute.
+func TestCountSenderTurnsForDateCountsOnlyThatSendersTurnsOnThatOccurrenceDate(t *testing.T) {
+	repo, now := newTestRepository(t)
+	ctx := context.Background()
+
+	mk := func(id, occurrenceDate string) {
+		run := newRun(id, RunDone, now())
+		run.OccurrenceDate = occurrenceDate
+		// newTurns: seq1 from sess-a, seq2 from sess-b — one turn per
+		// speaker per run.
+		if err := repo.CreateRun(ctx, run, newTurns(id)); err != nil {
+			t.Fatalf("CreateRun %s: %v", id, err)
+		}
+	}
+	mk("r1", "2026-09-09")
+	mk("r2", "2026-09-09")
+	mk("r3", "2026-09-10") // same sender, different day
+	mk("r4", "")           // manual trigger — must not count toward any day
+
+	n, err := repo.CountSenderTurnsForDate(ctx, "sess-a", "2026-09-09")
+	if err != nil {
+		t.Fatalf("CountSenderTurnsForDate: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("CountSenderTurnsForDate(sess-a, 2026-09-09) = %d, want 2 (one turn from sess-a per run r1/r2)", n)
+	}
+
+	n, err = repo.CountSenderTurnsForDate(ctx, "sess-b", "2026-09-09")
+	if err != nil {
+		t.Fatalf("CountSenderTurnsForDate: %v", err)
+	}
+	if n != 2 {
+		t.Errorf("CountSenderTurnsForDate(sess-b, 2026-09-09) = %d, want 2", n)
+	}
+
+	n, err = repo.CountSenderTurnsForDate(ctx, "sess-a", "2026-09-10")
+	if err != nil {
+		t.Fatalf("CountSenderTurnsForDate: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("CountSenderTurnsForDate(sess-a, 2026-09-10) = %d, want 1 (r4's manually-triggered occurrence_date=\"\" must never be counted against a real day)", n)
+	}
+}

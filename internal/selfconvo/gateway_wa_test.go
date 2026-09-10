@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
@@ -79,6 +80,50 @@ func TestManagerGatewayReportsAnUnknownSessionAsAbsent(t *testing.T) {
 	_, ok := gw.Participant("does-not-exist")
 	if ok {
 		t.Fatal("Participant reported ok=true for an unknown session id")
+	}
+}
+
+// TestManagerGatewayHealthyReportsAnUnknownSessionByName pins Healthy's
+// not-found branch against a REAL Manager: an id with no session at all
+// must fail with a reason naming that id, not silently pass.
+func TestManagerGatewayHealthyReportsAnUnknownSessionByName(t *testing.T) {
+	mgr, msgs := newGatewayTestManager(t)
+	gw := NewManagerGateway(mgr, msgs)
+
+	sessionID, reason, ok := gw.Healthy([]string{"does-not-exist"})
+	if ok {
+		t.Fatal("Healthy([\"does-not-exist\"]) ok = true, want false")
+	}
+	if sessionID != "does-not-exist" {
+		t.Errorf("sessionID = %q, want %q", sessionID, "does-not-exist")
+	}
+	if !strings.Contains(reason, "does-not-exist") {
+		t.Errorf("reason = %q, want it to name the session", reason)
+	}
+}
+
+// TestManagerGatewayHealthyReportsAFreshlyCreatedSessionAsUnhealthy pins
+// Healthy against a REAL Manager/Session that exists but was never
+// connected (state=new): Connected is false the same way Participant
+// reports it, so Healthy must refuse it too and name the session.
+func TestManagerGatewayHealthyReportsAFreshlyCreatedSessionAsUnhealthy(t *testing.T) {
+	mgr, msgs := newGatewayTestManager(t)
+	gw := NewManagerGateway(mgr, msgs)
+
+	s, err := mgr.Create(context.Background(), "session a", "+62 812-0000-1111")
+	if err != nil {
+		t.Fatalf("mgr.Create: %v", err)
+	}
+
+	sessionID, reason, ok := gw.Healthy([]string{s.ID})
+	if ok {
+		t.Fatalf("Healthy([%q]) ok = true, want false (a freshly created session was never connected)", s.ID)
+	}
+	if sessionID != s.ID {
+		t.Errorf("sessionID = %q, want %q", sessionID, s.ID)
+	}
+	if !strings.Contains(reason, s.ID) {
+		t.Errorf("reason = %q, want it to name the session", reason)
 	}
 }
 
