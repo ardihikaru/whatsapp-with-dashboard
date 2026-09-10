@@ -3,6 +3,20 @@
 ## [Unreleased]
 
 ### Added
+- **Convo Scheduling.** Self Convo (a scripted two-party conversation between
+  two paired sessions) can now run on a recurring cadence — daily, weekly, or
+  every N days — to several receivers at once, and optionally chain a
+  finished conversation into a follow-up drawn from a weighted, cyclic
+  template correlation graph instead of simply stopping. Backed by a
+  50-topic, ~2,400-template corpus (`internal/selfconvo/corpus`,
+  `cmd/convoseed`, `make convo-seed`) generated from a small number of
+  hand-authored packs rather than one script per topic. New operator UI at
+  `/self-convo/schedules` (create/edit/pause/resume/stop/delete) and
+  `/self-convo/templates`' topic filter. Gated by the same
+  `WSM_SELF_CONVO_ENABLED` flag Self Convo already used — no new flag. See
+  `docs/brief-convo-scheduling.md` for the design reasoning (why fan-out is
+  one run per receiver, why the link graph is cyclic and depth-capped, why
+  resume never back-fills a missed occurrence).
 - **Remote-DB deployment mode.** `docker-compose.remote-db.yml` plus
   `make up REMOTE_DB=1` run the app on a host that does **not** carry the shared
   `master-compose-ai` stack: it undeclares that stack's external network and

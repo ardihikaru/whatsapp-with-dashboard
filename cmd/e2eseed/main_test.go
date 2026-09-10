@@ -271,3 +271,116 @@ func TestSeedSelfConvoIsNotIndependentlyIdempotentSoItMustStayInsideTheExistingS
 			"it must collide on its fixed ids so run()'s existing-sessions guard is the only thing keeping this idempotent")
 	}
 }
+
+// The Convo Scheduling pages (/self-convo/schedules,
+// /self-convo/templates' topic filter, a template's own outgoing-links
+// table) need real content the same way self-convo's runs do — see this
+// file's own header comment. This pins seedConvoScheduling's three
+// promises: a full corpus pack lands with real outgoing links, an
+// "active" schedule carries several receivers and no end date, and a
+// "stalled" schedule carries a reason.
+func TestSeedConvoSchedulingWritesACorpusPackAndTwoSchedulesWithTheStatesThePagesRender(t *testing.T) {
+	pool, err := db.Open(filepath.Join(t.TempDir(), "t.db"), db.SQLiteDialect)
+	if err != nil {
+		t.Fatalf("db.Open: %v", err)
+	}
+	defer pool.Close()
+	ctx := context.Background()
+	if err := db.EnsureSchema(ctx, pool); err != nil {
+		t.Fatalf("db.EnsureSchema: %v", err)
+	}
+
+	base := time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC)
+	if err := seedSessions(ctx, wasession.NewRepository(pool), base); err != nil {
+		t.Fatalf("seedSessions: %v", err)
+	}
+	// seedSelfConvo's own upload-origin template (no topic) is what gives
+	// the unfiltered-vs-filtered assertion below something to narrow FROM
+	// — the same two calls run() itself makes, in the same order.
+	if err := seedSelfConvo(ctx, pool, base); err != nil {
+		t.Fatalf("seedSelfConvo: %v", err)
+	}
+
+	nTemplates, nSchedules, err := seedConvoScheduling(ctx, pool, base)
+	if err != nil {
+		t.Fatalf("seedConvoScheduling: %v", err)
+	}
+	if nTemplates == 0 {
+		t.Fatal("seedConvoScheduling reported 0 templates")
+	}
+	if nSchedules != 2 {
+		t.Fatalf("seedConvoScheduling reported %d schedules, want 2", nSchedules)
+	}
+
+	repo := convo.NewRepository(pool)
+
+	// A real corpus topic, filterable, with at least one template that
+	// carries an outgoing link — otherwise "a template view shows its
+	// outgoing chain links" has nothing to assert against.
+	byTopic, err := repo.ListTemplateSummariesByTopic(ctx, e2eConvoTopic, 500)
+	if err != nil {
+		t.Fatalf("ListTemplateSummariesByTopic: %v", err)
+	}
+	if len(byTopic) != nTemplates {
+		t.Fatalf("ListTemplateSummariesByTopic(%q) returned %d rows, want %d (seedConvoScheduling's own count)",
+			e2eConvoTopic, len(byTopic), nTemplates)
+	}
+	linked := false
+	for _, tmpl := range byTopic {
+		links, err := repo.TemplateLinks(ctx, tmpl.ID)
+		if err != nil {
+			t.Fatalf("TemplateLinks(%s): %v", tmpl.ID, err)
+		}
+		if len(links) > 0 {
+			linked = true
+			break
+		}
+	}
+	if !linked {
+		t.Fatalf("none of the %d seeded %q templates carries an outgoing link", nTemplates, e2eConvoTopic)
+	}
+
+	// The unfiltered list must include something OUTSIDE this topic too
+	// (seedSelfConvo's own upload-origin template has no topic at all), or
+	// the topic filter test has nothing to narrow FROM.
+	all, err := repo.ListTemplateSummaries(ctx, 500)
+	if err != nil {
+		t.Fatalf("ListTemplateSummaries: %v", err)
+	}
+	if len(all) <= len(byTopic) {
+		t.Fatalf("unfiltered template list (%d) is not larger than the %q-filtered list (%d); "+
+			"the topic filter would not visibly narrow anything", len(all), e2eConvoTopic, len(byTopic))
+	}
+
+	active, err := repo.GetSchedule(ctx, "e2e-convo-sched-active")
+	if err != nil {
+		t.Fatalf("GetSchedule(active): %v", err)
+	}
+	if active.State != convo.ScheduleActive {
+		t.Errorf("active schedule state = %q, want %q", active.State, convo.ScheduleActive)
+	}
+	if active.EndDate != "" {
+		t.Errorf("active schedule EndDate = %q, want empty (the no-end-date fixture)", active.EndDate)
+	}
+	if active.Recurrence != convo.RecurrenceWeekly {
+		t.Errorf("active schedule Recurrence = %q, want %q", active.Recurrence, convo.RecurrenceWeekly)
+	}
+	activeReceivers, err := repo.ScheduleReceivers(ctx, active.ID)
+	if err != nil {
+		t.Fatalf("ScheduleReceivers(active): %v", err)
+	}
+	if len(activeReceivers) < 2 {
+		t.Errorf("active schedule has %d receivers, want at least 2 (\"several\")", len(activeReceivers))
+	}
+
+	stalled, err := repo.GetSchedule(ctx, "e2e-convo-sched-stalled")
+	if err != nil {
+		t.Fatalf("GetSchedule(stalled): %v", err)
+	}
+	if stalled.State != convo.ScheduleStalled {
+		t.Errorf("stalled schedule state = %q, want %q", stalled.State, convo.ScheduleStalled)
+	}
+	if stalled.PausedReason == "" {
+		t.Error("stalled schedule has no PausedReason — schedule_view.html/convo_schedule_rows.html have nothing to render")
+	}
+}

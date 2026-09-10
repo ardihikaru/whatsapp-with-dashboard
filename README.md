@@ -372,6 +372,33 @@ is at-least-once when a send times out.
 Swagger UI is at `/docs`, the spec at `/openapi.yaml`, and `/api/v1/health` is
 public and unauthenticated.
 
+## Self Convo & Convo Scheduling
+
+Two of this deployment's own paired sessions can exchange a scripted
+conversation, either once (**Self Convo**, `/self-convo`) or on a recurring
+cadence to several receivers at once (**Convo Scheduling**,
+`/self-convo/schedules`). Both are gated behind
+`WSM_SELF_CONVO_ENABLED=false` by default — two paired identities messaging
+each other automatically is exactly the traffic pattern that gets a WhatsApp
+account flagged, and neither identity has a second copy anywhere to fall
+back on (see `docs/brief-self-convo.md`/`docs/brief-convo-scheduling.md` for
+the full design reasoning). Template management (upload, view, delete) works
+regardless of the flag; only sending is gated.
+
+A schedule draws its opening line from a large, generated corpus rather than
+an operator hand-authoring one script per topic. Materialise it into the
+configured store with:
+
+```sh
+make convo-seed                    # ~2,400 templates across 50 topics
+make convo-seed ARGS="-dry-run"    # preview counts, write nothing
+make convo-seed ARGS="-replace"    # regenerate, replacing prior corpus rows
+```
+
+`cmd/convoseed` refuses to write to anything but a `sqlite:` DSN unless
+`-i-know-this-is-production` is passed — the only reachable MySQL from a dev
+machine is the shared production server (see CLAUDE.md).
+
 ## Backup and restore
 
 The two stores need different treatment, and only one of them is irreplaceable:

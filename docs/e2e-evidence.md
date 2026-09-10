@@ -1772,3 +1772,151 @@ this stack costs about a minute of send capacity even when nothing goes wrong.
 The public surface was re-probed after the redeploy and is unchanged:
 `GET /api/v1/health` 200 anonymously, `GET /api/v1/sessions` 200 with the
 credential, `DELETE /api/v1/sessions/000…000` still 404 `text/html` from nginx.
+
+## 2026-09-10 — Convo Scheduling (Phase 7), browser verification
+
+This laptop had none of the usual e2e fixtures — no `_data/` directory at
+all, no `e2e/.auth`, and `.env` carried no `WSM_MINIO_*` keys — so the
+throwaway bootstrap below was built from scratch rather than reusing a prior
+run's state.
+
+Base URL: `http://127.0.0.1:8801` (throwaway instance booted by
+`scripts/e2e-env.sh`, app tables in a fresh SQLite file, `WSM_WA_BACKEND`
+defaulting to `whatsmeow` there — **no MySQL contacted**).
+`WSM_SELF_CONVO_ENABLED=true` was exported for this run (the feature defaults
+to false, and every schedule/template page renders its disabled placeholder
+without it) — the only env var this run set beyond the MinIO block and the
+password file.
+
+Browser: Playwright 1.62.1 (`package.json`), Chromium 1234 — already present
+under `~/.cache/ms-playwright`, so `make e2e-install` was not needed.
+
+Browser user: admin `ardihikaru`, from a throwaway password file generated
+into this session's scratch directory (never named `_data/paswd`, never
+committed), pointed to via `WSM_E2E_PASSWORD_FILE`.
+
+MinIO: a disposable `minio/minio` container, `wsm-e2e-minio`, bound to
+`127.0.0.1:19000` only, throwaway root credentials generated for this run and
+exported straight into the shell running Playwright (never written to a
+file, `.env`, or this document). **One correction to the bootstrap recipe as
+given**: `WSM_MINIO_ENDPOINT` must be an absolute URL
+(`internal/config/minio.go`'s `parseMinioEndpoint` rejects a bare
+`host:port` with "is not a URL" / "must be absolute (scheme://host)") — the
+working value was `http://127.0.0.1:19000`, not `127.0.0.1:19000`. Confirmed
+by first booting with the bare form (boot failed with exactly that error)
+and then with the `http://` form (boot succeeded).
+
+Changed for this task: `cmd/e2eseed/main.go` (`seedConvoScheduling` — one
+full "ngopi" corpus pack, 48 templates with real outgoing links including
+the closer→opener cycle, plus two `convo.Schedule` rows: `e2e-convo-sched-
+active` (weekly recurrence, two receivers, no end date) and
+`e2e-convo-sched-stalled` (stalled via `SetScheduleState`, carrying a reason
+in the same `"session <id>: <text>"` shape `Planner.planSchedule`'s own
+health-gate stall writes) — called inside `run()`'s existing "sessions
+already seeded → skip" guard, the same convention `seedSelfConvo` already
+established), `cmd/e2eseed/main_test.go`
+(`TestSeedConvoSchedulingWritesACorpusPackAndTwoSchedulesWithTheStatesThePagesRender`),
+`.env.example` (`WSM_SELF_CONVO_PARAPHRASE` was undocumented; added), and the
+new `e2e/convo-schedules.spec.ts`.
+
+**A harness limitation found and worked around, not hidden.** The create/
+edit schedule form's Sender `<select>`/Receiver checkboxes
+(`scheduleSessions()`, `self_convo_schedule_ui.go`) are fed from
+`connectedSnapshots(h.Manager.Snapshots())` — deliberately the same
+connected-only picker the Self Convo trigger page already uses. This e2e
+harness's `whatsmeow` backend never pairs a real device (same root cause
+`e2e/media.spec.ts`'s header documents for `/send`'s media tab), so
+`Connected` is never true here and both pickers render with **no session
+option at all** — confirmed against a live boot:
+
+```
+$ curl .../self-convo/schedules/new
+<select name="sender_id" class="select" required>
+        <option value="">Choose a session…</option>
+</select>                                    (no other <option> at all)
+```
+
+`validateScheduleForm` itself does not require `Connected` — only that
+`h.Manager.Get(id)` knows the session — confirmed the same way: a direct
+`POST` with `sender_id=e2e-sess-0001, receiver_id=e2e-sess-0002` against a
+live boot returned `303` to `/self-convo/schedules` and the row appeared.
+The gap is entirely in what the rendered form offers to click. Rather than
+weakening the "create form submits successfully" assertion into a
+request-level bypass, `e2e/convo-schedules.spec.ts`'s
+`selectDisconnectedSender`/`checkDisconnectedReceiver` inject the exact
+`<option>`/`<input>` the form would already contain if this harness could
+ever report a session connected, then drive them through Playwright's
+ordinary `selectOption`/`check` — the real `<select>`/`<input>` elements and
+the real native form submission, not a bypass through `page.request`.
+
+The same connectivity gap decided which schedule the "pause then resume"
+test targets: `Planner.Resume` only re-checks `Gateway.Healthy` when the
+schedule is `stalled`, not when it is merely `paused` (`planner.go`), so
+pausing-then-resuming the seeded **active** schedule round-trips cleanly
+with zero sessions ever connected, while resuming the seeded **stalled**
+schedule would correctly be refused in this harness — confirmed live via
+curl on both schedules before writing the test around the one that succeeds.
+
+Results:
+
+| Check | Result |
+|---|---|
+| `go build ./...` | clean |
+| `go vet ./...` | clean |
+| `go test ./...` | `ok` for every package |
+| `go test ./cmd/e2eseed/...` (`TestSeedConvoScheduling…`, red-then-green) | RED first: `undefined: seedConvoScheduling` / `undefined: e2eConvoTopic` (compile failure) with the test present and the function/consts missing (checked via `git stash push -- cmd/e2eseed/main.go`); GREEN after — `ok github.com/ardihikaru/whatsapp-with-dashboard/cmd/e2eseed` |
+| Playwright, full suite, all projects (`setup`, `mobile-portrait`, `mobile-small`, `desktop`) | **111 passed, 1 failed, 33 skipped** (145 total) in 2.5m |
+| `e2e/convo-schedules.spec.ts`, all three content projects (`mobile-portrait`, `mobile-small`, `desktop`) | **27 passed, 0 failed** (9 tests × 3 projects) |
+| `e2e/overflow.spec.ts`, `e2e/nav-mobile.spec.ts`, `e2e/media.spec.ts`, `e2e/screenshots.spec.ts` | unaffected by this task's changes; passed except the one pre-existing failure below |
+
+**The one failure is pre-existing and unrelated to Convo Scheduling.**
+`[mobile-small] nav-mobile.spec.ts:72 › every destination is tappable, not
+merely painted` fails with `"API Docs" is covered by another element` at the
+360×740 viewport. Verified this is **not** caused by this task's changes:
+stashed every file this task touched (`git stash push -u -- .env.example
+cmd/e2eseed/main.go cmd/e2eseed/main_test.go e2e/convo-schedules.spec.ts`,
+restoring the tree to Phase 6's own committed state) and re-ran
+`e2e/nav-mobile.spec.ts --project=mobile-small` with `WSM_SELF_CONVO_ENABLED`
+unset (its default, false) — same failure, same "API Docs is covered"
+message. The `nav.go` entries this traces to (`"Self Convo"` and `"Convo
+Schedules"`, the latter added in Phase 6) predate this task; the sidebar
+drawer apparently does not have enough vertical room for the full six-plus
+destination list at 360×740. Left unfixed: out of this task's scope ("no new
+features") and already broken before this task started — not reported as a
+consequence of Phase 7.
+
+**A second, environment-only red herring worth naming so it is not
+rediscovered.** The very first full-suite attempt (via `make e2e`, which
+`-include`s and exports `.env` wholesale into every target) failed three
+`nav-mobile.spec.ts` tests instead of one, all on a `.nav-user` text
+mismatch ("Masuk sebagai admin" vs the test's hardcoded "ardihikaru"). This
+machine's own `.env` sets `WSM_ADMIN_USER=admin`; `scripts/e2e-env.sh`
+`export WSM_ADMIN_USER="${WSM_ADMIN_USER:-ardihikaru}"` only *defaults* that
+variable, so `make e2e`'s wholesale `.env` export overrides it — the app
+logged in as `admin`, matching what `.env` actually configures, while the
+spec's assertion is hardcoded to `ardihikaru`. Re-running via
+`./scripts/e2e-run.sh` directly (bypassing `make e2e`'s `.env` sourcing, per
+this task's own bootstrap recipe) removed all three failures at once,
+leaving only the pre-existing one above. Not a Convo Scheduling bug and not
+fixed here — recorded so a future run on this same machine does not
+re-diagnose it as a new regression.
+
+Teardown: `docker rm -f wsm-e2e-minio` (confirmed gone from `docker ps -a`),
+`make e2e-reset` (`_data/e2e`, `e2e/.auth` removed), the throwaway password
+file and MinIO credentials left to die with the scratch directory they were
+generated into.
+
+**No secret was written into this file.** The admin password, the throwaway
+MinIO credentials, and the session cookie value were all read/generated and
+used only inside the process that needed them, and none of the three appears
+above.
+
+**Not verified: a real recurring fire.** `PlanDay` was never invoked live in
+this run (the planner's own 5-minute poll never lined up with the test
+run's ~3-minute duration, and no test forced a tick) — every schedule
+reaching a browser page in this run was inserted directly by
+`seedConvoScheduling`, not materialised by the planner from a schedule
+definition. The planner's own unit tests (`internal/selfconvo/planner_test.go`)
+are the evidence for that path; this run's evidence is scoped to the
+operator UI rendering and mutating already-persisted schedules/templates
+correctly.
