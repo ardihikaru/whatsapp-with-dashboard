@@ -17,7 +17,11 @@ type PageBase struct {
 	DarkModeEnabled bool
 	Nav             []NavSection
 	PlatformLink    NavItem // sidebar footer link back to the backoffice ("" Path = hidden)
-	NeedECharts     bool
+	// HostLabel is operator-supplied text naming the machine serving this
+	// page ("MINIPC"/"LAPTOP"); "" means render no chip at all — see
+	// header.html's {{if .HostLabel}} guard.
+	HostLabel   string
+	NeedECharts bool
 }
 
 // newPageBase assembles the shared page chrome for a request: session
@@ -32,5 +36,6 @@ func (h *handlers) newPageBase(r *http.Request, title, currentPath string) PageB
 		DarkModeEnabled: h.DarkMode,
 		Nav:             buildNav(h.BasePath, currentPath),
 		PlatformLink:    platformLink(h.PlatformURL),
+		HostLabel:       h.HostLabel,
 	}
 }

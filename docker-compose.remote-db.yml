@@ -43,7 +43,16 @@ services:
 
   # waxum doesn't read WSM_MYSQL_*; it takes one DSN in DATABASE_URL. Same
   # repoint, spelled the way waxum actually consumes it.
+  #
+  # NATS_URL gets the same repoint for the same reason: the base file's
+  # nats-master resolves only on master-compose-ai-net, which this overlay
+  # has just reset above. Only the ADDRESS is redeclared here — compose
+  # merges a service's `environment:` map key-by-key across `-f` files, so
+  # NATS_TOKEN and the NATS_*_STREAM/NATS_*_MAX_AGE_DAYS vars carry over from
+  # the base file untouched, the same reason SUPERADMIN_TOKEN and
+  # RATE_LIMIT_* are not repeated here either.
   waxum:
     networks: !reset null
     environment:
       DATABASE_URL: mysql://${WAXUM_MYSQL_USER}:${WAXUM_MYSQL_PASSWORD}@${WSM_MYSQL_HOST:?remote-db mode needs WSM_MYSQL_HOST in .env}:${WSM_MYSQL_PORT:?remote-db mode needs WSM_MYSQL_PORT in .env}/${WAXUM_MYSQL_DATABASE}
+      NATS_URL: nats://${NATS_HOST:?remote-db mode needs NATS_HOST in .env}:${NATS_PORT:?remote-db mode needs NATS_PORT in .env}

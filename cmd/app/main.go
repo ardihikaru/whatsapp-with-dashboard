@@ -250,6 +250,7 @@ func run() error {
 			SessionTTL:             cfg.SessionTTL,
 			DarkMode:               cfg.DarkMode,
 			PlatformURL:            cfg.PlatformURL,
+			HostLabel:              cfg.HostLabel,
 			AssetsFS:               wsm.FS,
 			Admin: auth.AdminCredential{
 				Username:     cfg.AdminUser,

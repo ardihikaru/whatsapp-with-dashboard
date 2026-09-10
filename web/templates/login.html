@@ -18,6 +18,10 @@
   <link rel="stylesheet" href="{{u "/static/css/media.css"}}">
   <link rel="stylesheet" href="{{u "/static/css/verify.css"}}">
   <link rel="stylesheet" href="{{u "/static/css/self-convo.css"}}">
+  <!-- host-chip.css deliberately NOT linked here: it styles the "header"
+       template's host-label chip, and this page never renders "header" (its
+       own .auth-layout/.auth-card markup is self-contained) — see
+       host-chip.css's own header comment for the full reasoning. -->
   <script src="{{u "/static/js/htmx.min.js"}}" defer></script>
   <script src="{{u "/static/js/self-convo.js"}}" defer></script>
 </head>

@@ -219,20 +219,64 @@ func TestMakefileComposeVariableAddsTheOverlayUnderRemoteDB(t *testing.T) {
 // nothing else may. A `ports:` block added here "just to debug" and left in
 // place would put that credential's blast radius one network hop away instead
 // of zero — this is the guard against forgetting to remove it.
-func TestWaxumPublishesNoHostPort(t *testing.T) {
+func TestWaxumPublishesItsHostPortOnlyOnAnExplicitBindAddress(t *testing.T) {
 	services := composeServices(t, composeSource(t, baseCompose))
 	block, ok := services["waxum"]
 	if !ok {
 		t.Fatal(`no "waxum" service found in ` + baseCompose)
 	}
+
+	// Until 2026-09-11 this test forbade a host port outright. clino's nginx now
+	// serves waxum's console over WireGuard, and the compose network does not
+	// span machines, so one port has to exist. What must NOT come back is the
+	// thing the old test was really guarding against: a port published on every
+	// interface. waxum's SUPERADMIN_TOKEN is a root credential for every session
+	// it holds and its console login IS that token, so "3451:3451" or an
+	// 0.0.0.0 binding hands that front door to the whole LAN, silently.
+	//
+	// Hence: a ports entry is allowed ONLY when it opens with a ${...}
+	// substitution supplying the bind address, and that substitution must use
+	// `:?` so an unset value aborts the container instead of defaulting to
+	// every interface.
+	// The bind address arrives as a ${VAR:?message} substitution whose message
+	// contains spaces and an apostrophe, so these patterns must not assume the
+	// mapping is whitespace-free.
+	bind := regexp.MustCompile(`^\s*-\s*"\$\{[A-Z_]+:\?[^}]*\}:\d+:\d+"\s*$`)
+	portMapping := regexp.MustCompile(`:\d+:\d+`)
+	bare := regexp.MustCompile(`^\s*-\s*["']?\d+:\d+`)
+
+	var found int
 	for i, line := range strings.Split(block, "\n") {
 		code, _, _ := strings.Cut(line, "#")
-		if regexp.MustCompile(`^\s*ports:\s*$`).MatchString(code) ||
-			regexp.MustCompile(`^\s*-\s*["']?\d+:\d+`).MatchString(code) {
-			t.Errorf("%s waxum service line %d publishes a host port: %q — "+
-				"waxum is reachable ONLY at http://waxum:3451 on the compose network; "+
-				"nothing else may reach it", baseCompose, i+1, strings.TrimSpace(line))
+		if !strings.HasPrefix(strings.TrimSpace(code), "-") {
+			continue
 		}
+		if bare.MatchString(code) {
+			t.Errorf("%s waxum service line %d publishes a bare host port: %q — "+
+				"that binds 0.0.0.0, putting a root credential's front door on every "+
+				"network this host is attached to. Bind it to ${WAXUM_BIND_ADDR:?...}",
+				baseCompose, i+1, strings.TrimSpace(line))
+			continue
+		}
+		if !portMapping.MatchString(code) {
+			continue
+		}
+		found++
+		if !bind.MatchString(code) {
+			t.Errorf("%s waxum service line %d publishes a port without a "+
+				"${VAR:?...} bind address: %q — an unset or 0.0.0.0 binding must be "+
+				"impossible, not merely discouraged", baseCompose, i+1, strings.TrimSpace(line))
+			continue
+		}
+		if strings.Contains(code, "0.0.0.0") {
+			t.Errorf("%s waxum service line %d hardcodes 0.0.0.0: %q",
+				baseCompose, i+1, strings.TrimSpace(line))
+		}
+	}
+	if found != 1 {
+		t.Errorf("%s waxum service publishes %d host ports, want exactly 1 (3451 for "+
+			"the edge); the app itself reaches waxum over the compose network and needs none",
+			baseCompose, found)
 	}
 }
 
