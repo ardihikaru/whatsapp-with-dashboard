@@ -18,6 +18,18 @@
       <input type="checkbox" name="is_master" value="true">
       <span>Master session (excluded from automatic routing)</span>
     </label>
+    <label class="textfield">
+      <span class="textfield-label">Routing group (optional)</span>
+      <!-- Same open-set control as sessions/ops.html's editor — see that
+           template's comment for why <input list>+<datalist> and not a
+           <select>. -->
+      <input list="wa-group-codes" name="group_code" maxlength="32" placeholder="none — ungrouped" autocomplete="off">
+      <datalist id="wa-group-codes">
+        {{range .GroupCodes}}<option value="{{.}}">{{end}}
+      </datalist>
+      <small class="muted">Assigning a group takes this session OUT of default automatic routing —
+        it becomes reachable only by a request naming this same group code.</small>
+    </label>
     <div class="form-actions">
       <button class="btn btn-primary" type="submit">Create &amp; pair</button>
       <a class="btn btn-outline" href="{{u "/sessions"}}">Cancel</a>

@@ -7,4 +7,43 @@
      hx-trigger="load, every 5s" hx-swap="innerHTML">
   <p>Loading…</p>
 </div>
+
+<!-- A SECOND, STATIC card, deliberately OUTSIDE #ops-panel above: that panel
+     re-polls itself every 5s with hx-swap="innerHTML" (same rule
+     session_rows.html's comment gives for why its own group-code cell is
+     read-only), which would wipe a half-typed group code out from under an
+     operator mid-edit. This card is never touched by that poll. -->
+<div class="card form-card">
+  <h5>Routing group</h5>
+  <p class="muted">Assigning a group takes this session OUT of default automatic
+     routing — it becomes reachable only by a request naming this same
+     <span class="mono">group_code</span>. Leave blank to keep it in the
+     ungrouped automatic pool.</p>
+  <div id="group-code-result"></div>
+  <form hx-post="{{u "/sessions"}}/{{.Session.ID}}/group-code" hx-target="#group-code-result" hx-swap="innerHTML"
+        action="{{u "/sessions"}}/{{.Session.ID}}/group-code" method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Group code</span>
+      <!-- <input list> + <datalist> is the whole control, on purpose: it is
+           the native HTML element for an OPEN set — it drops down the
+           existing codes on focus AND accepts a brand-new one typed in
+           place, with no JS, no framework, one field name and one
+           server-side read. A <select> plus a separate "new code" input
+           would need JS to toggle between them and would give the server
+           two fields to reconcile instead of one. Presentation varies by
+           browser (Safari surfaces suggestions only after typing begins);
+           that degrades to a plain text input, which is still fully valid
+           input here — the field is optional and free text is always
+           acceptable. -->
+      <input list="wa-group-codes" name="group_code" value="{{.Session.GroupCode}}"
+             maxlength="32" placeholder="none — ungrouped" autocomplete="off">
+      <datalist id="wa-group-codes">
+        {{range .GroupCodes}}<option value="{{.}}">{{end}}
+      </datalist>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+</div>
 {{end}}

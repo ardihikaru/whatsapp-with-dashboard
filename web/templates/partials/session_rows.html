@@ -8,6 +8,13 @@
       {{if .IsMaster}}<span class="badge badge-master">Master</span>{{end}}
       {{if gt .QueueLen 0}}<small>({{.QueueLen}} queued)</small>{{end}}
       {{if .Stalled}}<br><small class="muted" title="{{.StalledReason}}">needs attention — automatic reconnect stopped, see title / Activate to retry</small>{{end}}</td>
+  <!-- READ-ONLY, deliberately: this tbody re-polls itself every 5s with
+       hx-swap="innerHTML" (list.html), which would wipe a half-typed value
+       out of a text input mid-edit. The "Set master" button above survives
+       that poll only because a button holds no state — a live input does
+       not. Editing the group code happens on the Ops page instead
+       (sessions/ops.html), whose card sits OUTSIDE the polled panel. -->
+  <td>{{if .GroupCode}}<span class="badge badge-group">{{.GroupCode}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
   <td class="row-actions">
     {{if eq .State "connected"}}
       <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.ID}}/deactivate"
@@ -35,6 +42,6 @@
   </td>
 </tr>
 {{else}}
-<tr><td colspan="5">No sessions yet — <a href="{{u "/sessions/new"}}">create one</a>.</td></tr>
+<tr><td colspan="6">No sessions yet — <a href="{{u "/sessions/new"}}">create one</a>.</td></tr>
 {{end}}
 {{end}}

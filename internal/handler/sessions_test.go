@@ -1,8 +1,11 @@
 package handler
 
 import (
+	"fmt"
 	"io/fs"
+	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -177,5 +180,156 @@ func TestTheDeleteConfirmationDoesNotPromiseAnUnlinkTheWaxumBackendCannotDo(t *t
 				"handset too, or the account's linked-device slots leak; body:\n%s",
 				want, body)
 		}
+	}
+}
+
+// TestASessionRowShowsItsGroupCodeBadge is the group-code equivalent of
+// TestAMasterSessionRowShowsTheMasterBadge: proves session_rows.html
+// actually renders wa.Snapshot.GroupCode, rather than silently dropping it
+// on the floor the way a template-only change is easy to get wrong without
+// a test watching it.
+func TestASessionRowShowsItsGroupCodeBadge(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := sessionRowsData{Sessions: []wa.Snapshot{
+		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected, GroupCode: "kemang"},
+	}}
+	res := httptest.NewRecorder()
+	rend.RenderPartial(res, "session_rows", data)
+	body := res.Body.String()
+
+	if !strings.Contains(body, `class="badge badge-group"`) {
+		t.Errorf("a grouped session's row does not carry the badge-group pill; body:\n%s", body)
+	}
+	if !strings.Contains(body, "kemang") {
+		t.Errorf("a grouped session's row does not say its group code anywhere; body:\n%s", body)
+	}
+}
+
+// TestASessionRowWithNoGroupCodeShowsNoGroupBadge is the test that stops
+// TestASessionRowShowsItsGroupCodeBadge above passing against a template
+// that renders the group badge unconditionally.
+func TestASessionRowWithNoGroupCodeShowsNoGroupBadge(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := sessionRowsData{Sessions: []wa.Snapshot{
+		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected, GroupCode: ""},
+	}}
+	res := httptest.NewRecorder()
+	rend.RenderPartial(res, "session_rows", data)
+	body := res.Body.String()
+
+	if strings.Contains(body, "badge-group") {
+		t.Errorf("an ungrouped session's row carries the badge-group pill; body:\n%s", body)
+	}
+}
+
+// TestTheSessionsTableColspanMatchesItsHeaderCount guards a two-file drift
+// with no visual symptom until the table is empty or loading: list.html's
+// header row and session_rows.html's own loading/empty-state rows each
+// hardcode a colspan that must equal the header's <th> count, or an
+// operator sees a table that visually shifts (or an empty row that does not
+// span the whole table) the moment there are zero sessions, or before the
+// first poll lands.
+func TestTheSessionsTableColspanMatchesItsHeaderCount(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pageRec := httptest.NewRecorder()
+	rend.RenderPage(pageRec, "sessions", sessionsPageData{})
+	pageBody := pageRec.Body.String()
+
+	headerCount := strings.Count(pageBody, "<th>")
+	if headerCount == 0 {
+		t.Fatalf("sessions page has no <th> at all:\n%s", pageBody)
+	}
+
+	wantColspan := fmt.Sprintf(`colspan="%d"`, headerCount)
+	if !strings.Contains(pageBody, wantColspan) {
+		t.Errorf("sessions page's loading row does not carry %s (header has %d <th>); body:\n%s",
+			wantColspan, headerCount, pageBody)
+	}
+
+	rowsRec := httptest.NewRecorder()
+	rend.RenderPartial(rowsRec, "session_rows", sessionRowsData{})
+	rowsBody := rowsRec.Body.String()
+	if !strings.Contains(rowsBody, wantColspan) {
+		t.Errorf("session_rows' empty-state row does not carry %s (header has %d <th>); body:\n%s",
+			wantColspan, headerCount, rowsBody)
+	}
+}
+
+// TestTheSessionFormOffersEveryExistingGroupCodeAndStillAcceptsANewOne
+// pins session-new's routing-group control to an <input>+<datalist>, not a
+// bare <select>: swapping to a <select> would remove "type a new one" with
+// no other symptom, since a <select> can also legitimately carry <option>
+// elements built from the same GroupCodes slice.
+func TestTheSessionFormOffersEveryExistingGroupCodeAndStillAcceptsANewOne(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	rend.RenderPage(rec, "session-new", sessionsPageData{GroupCodes: []string{"kemang", "ops"}})
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `<input list="wa-group-codes" name="group_code"`) {
+		t.Fatalf("session-new does not carry an <input name=\"group_code\"> wired to a <datalist> — free text must still reach the server; body:\n%s", body)
+	}
+	if !strings.Contains(body, `<datalist id="wa-group-codes">`) {
+		t.Errorf("session-new does not carry the <datalist id=\"wa-group-codes\">; body:\n%s", body)
+	}
+	for _, code := range []string{"kemang", "ops"} {
+		if !strings.Contains(body, `<option value="`+code+`">`) {
+			t.Errorf("session-new's datalist is missing an <option> for %q; body:\n%s", code, body)
+		}
+	}
+}
+
+// TestCreatingASessionWithAMalformedGroupCodeCreatesNothingAndShowsTheError
+// pins the normalise-first ordering PostSessionCreate's doc comment
+// describes: a malformed group_code must be rejected BEFORE Manager.Create
+// ever runs, so a typo creates no orphaned, silently-ungrouped session.
+func TestCreatingASessionWithAMalformedGroupCodeCreatesNothingAndShowsTheError(t *testing.T) {
+	srv, sessions, _, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+
+	res := authedPostForm(t, srv, sessions, "/sessions", url.Values{
+		"name": {"New Gateway"}, "phone": {"+62 812-1111-2222"}, "group_code": {"Ops Alert"},
+	})
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST /sessions with a malformed group_code = %d, want 200 (form_error partial); body:\n%s", res.Code, res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "alert-error") {
+		t.Errorf("a malformed group_code did not render the form_error partial; body:\n%s", res.Body.String())
+	}
+
+	rows := authedGet(t, srv, sessions, "/sessions/rows")
+	if strings.Contains(rows.Body.String(), "New Gateway") {
+		t.Errorf("a session was created despite the malformed group_code — normalise-first ordering was lost; rows:\n%s", rows.Body.String())
 	}
 }

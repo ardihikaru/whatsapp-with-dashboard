@@ -45,12 +45,13 @@ type rowSession struct {
 	Stalled       bool
 	StalledReason string
 	IsMaster      bool
+	GroupCode     string
 }
 
 type rowsData struct{ Sessions []rowSession }
 
 func TestPartialURLsCarryTheMount(t *testing.T) {
-	data := rowsData{Sessions: []rowSession{{ID: "abc", Name: "Kasir", Phone: "628", JID: "628@s", State: "connected", IsMaster: true}}}
+	data := rowsData{Sessions: []rowSession{{ID: "abc", Name: "Kasir", Phone: "628", JID: "628@s", State: "connected", IsMaster: true, GroupCode: "kemang"}}}
 
 	mounted := renderPartial(t, "/wsm", "session_rows", data)
 	if !strings.Contains(mounted, `/wsm/sessions/abc/`) {
@@ -64,6 +65,9 @@ func TestPartialURLsCarryTheMount(t *testing.T) {
 	}
 	if !strings.Contains(mounted, `badge-master`) {
 		t.Errorf("mounted session_rows dropped the master badge:\n%s", mounted)
+	}
+	if !strings.Contains(mounted, `badge-group`) || !strings.Contains(mounted, `kemang`) {
+		t.Errorf("mounted session_rows dropped the group badge:\n%s", mounted)
 	}
 	// The failure this guards: a URL that kept its root-relative form. On a
 	// shared origin `/sessions/abc/delete` is not a 404 — it is a POST at the

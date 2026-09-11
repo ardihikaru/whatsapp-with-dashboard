@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -33,6 +34,11 @@ type sendPageData struct {
 	// literal numbers here, which could silently drift from what the
 	// server actually enforces.
 	MediaLimits []mediaKindDisplay
+	// GroupCodes feeds both panels' "Routing group" <select> — see
+	// selectSendSession for how the posted value is consumed. A <select>
+	// over this list, not the sessions pages' <input list>+<datalist>: see
+	// send.html's own comment for why a closed set is right here.
+	GroupCodes []string
 }
 
 type sendResultData struct {
@@ -61,7 +67,7 @@ func (h *handlers) GetSend(w http.ResponseWriter, r *http.Request) {
 			connected = append(connected, s)
 		}
 	}
-	data := sendPageData{Connected: connected, MediaMaxBytes: h.MediaMaxBytes, MediaLimits: h.mediaKindDisplays()}
+	data := sendPageData{Connected: connected, MediaMaxBytes: h.MediaMaxBytes, MediaLimits: h.mediaKindDisplays(), GroupCodes: h.Manager.GroupCodes()}
 	data.PageBase = h.newPageBase(r, "Send Message", "/send")
 	h.Renderer.RenderPage(w, "send", data)
 }
@@ -254,22 +260,36 @@ func dispatchEnqueueOutcome(reqCtxErr error, msgID string, err error) (sendOutco
 }
 
 // selectSendSession resolves the /send page's routing form fields
-// ("routing", "session_id") to a connected session — shared by the text
-// form (PostSend) and the media form (PostSendMedia, media_send_ui.go), so
-// the two forms cannot silently drift on what "Automatic routing" means.
-// Returns a human-readable error, never a wa.Err* sentinel: the browser
-// forms render it straight into send_result's Error field.
+// ("routing", "session_id", "group_code") to a connected session — shared by
+// the text form (PostSend) and the media form (PostSendMedia,
+// media_send_ui.go), so the two forms cannot silently drift on what
+// "Automatic routing" means. Returns a human-readable error, never a wa.Err*
+// sentinel: the browser forms render it straight into send_result's Error
+// field.
+//
+// group_code narrows automatic routing to that scope via SelectForRoute —
+// "" (the <select>'s default, empty option) is the ordinary ungrouped pool,
+// unchanged from before this field existed; the "no connected sessions
+// available" message for that case is kept BYTE-IDENTICAL (an existing test
+// surface) and only names the group when one was actually requested.
 func (h *handlers) selectSendSession(r *http.Request) (*wa.ManagedSession, string) {
 	s, ok := h.Manager.Get(r.FormValue("session_id"))
 	if r.FormValue("routing") == "auto" || r.FormValue("session_id") == "" {
-		// Always false: the UI's "Automatic routing" picker never opts into
-		// a master session (unlike the API's allow_master flag) — an
-		// operator who genuinely wants to send from a master session
-		// selects it explicitly from the session dropdown instead, which IS
-		// the direct-send path (session_id set, routing != "auto").
-		s, _, ok = h.Manager.SelectConnected(r.Context(), false)
+		code, err := wa.NormalizeGroupCode(r.FormValue("group_code"))
+		if err != nil {
+			return nil, err.Error()
+		}
+		// AllowMaster always false: the UI's "Automatic routing" picker
+		// never opts into a master session (unlike the API's allow_master
+		// flag) — an operator who genuinely wants to send from a master
+		// session selects it explicitly from the session dropdown instead,
+		// which IS the direct-send path (session_id set, routing != "auto").
+		s, _, ok = h.Manager.SelectForRoute(r.Context(), wa.Route{GroupCode: code, AllowMaster: false})
 		if !ok {
-			return nil, "no connected sessions available"
+			if code == "" {
+				return nil, "no connected sessions available"
+			}
+			return nil, fmt.Sprintf("no connected sessions available in routing group %q", code)
 		}
 		return s, ""
 	}

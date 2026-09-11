@@ -23,7 +23,7 @@ func TestTheTextSendDecoderReadsAllowMasterFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeSendRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if !got.AllowMaster {
+		if !got.Route.AllowMaster {
 			t.Error("AllowMaster = false, want true")
 		}
 	})
@@ -35,7 +35,7 @@ func TestTheTextSendDecoderReadsAllowMasterFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeSendRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if got.AllowMaster {
+		if got.Route.AllowMaster {
 			t.Error("AllowMaster = true, want false when the field is omitted")
 		}
 	})
@@ -53,7 +53,7 @@ func TestTheGroupSendDecoderReadsAllowMasterFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeGroupSendRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if !got.AllowMaster {
+		if !got.Route.AllowMaster {
 			t.Error("AllowMaster = false, want true")
 		}
 	})
@@ -65,7 +65,7 @@ func TestTheGroupSendDecoderReadsAllowMasterFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeGroupSendRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if got.AllowMaster {
+		if got.Route.AllowMaster {
 			t.Error("AllowMaster = true, want false when the field is omitted")
 		}
 	})
@@ -82,7 +82,7 @@ func TestTheContactsCheckDecoderReadsAllowMasterFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeContactsCheckRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if !got.AllowMaster {
+		if !got.Route.AllowMaster {
 			t.Error("AllowMaster = false, want true")
 		}
 	})
@@ -94,7 +94,7 @@ func TestTheContactsCheckDecoderReadsAllowMasterFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeContactsCheckRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if got.AllowMaster {
+		if got.Route.AllowMaster {
 			t.Error("AllowMaster = true, want false when the field is omitted")
 		}
 	})
@@ -129,7 +129,7 @@ func TestTheMediaSendDecoderReadsAllowMasterFromTheMultipartForm(t *testing.T) {
 		if derr != nil {
 			t.Fatalf("parseMediaSendRequest rejected a valid form: %d %s", derr.status, derr.msg)
 		}
-		if !got.AllowMaster {
+		if !got.Route.AllowMaster {
 			t.Error("AllowMaster = false, want true")
 		}
 	})
@@ -140,7 +140,7 @@ func TestTheMediaSendDecoderReadsAllowMasterFromTheMultipartForm(t *testing.T) {
 		if derr != nil {
 			t.Fatalf("parseMediaSendRequest rejected a valid form: %d %s", derr.status, derr.msg)
 		}
-		if got.AllowMaster {
+		if got.Route.AllowMaster {
 			t.Error("AllowMaster = true, want false when the field is omitted")
 		}
 	})

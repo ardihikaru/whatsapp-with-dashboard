@@ -1,0 +1,6 @@
+{{define "session_group_code_result"}}
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>
+{{else if .GroupCode}}<p class="muted">Saved — routing group set to <span class="badge badge-group">{{.GroupCode}}</span>. Excluded from ungrouped automatic routing.</p>
+{{else}}<p class="muted">Saved — ungrouped, back in the default automatic routing pool.</p>
+{{end}}
+{{end}}

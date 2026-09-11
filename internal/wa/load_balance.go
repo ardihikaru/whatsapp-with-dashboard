@@ -6,23 +6,74 @@ import (
 	"time"
 )
 
-// SelectConnected chooses the best live session for automatic routing:
-// lowest queue length, then oldest last selection, then oldest created row,
-// then session id. It records the selection before returning so concurrent
-// callers distribute ties predictably within this single-process app.
+// Route is one automatic-routing request's candidate scope. It is the single
+// input to EligibleForRoute and therefore to every automatic pick this
+// package makes — SelectConnected, SelectMaster and the group-scoped paths
+// added alongside it are all thin wrappers around Route + SelectForRoute.
+type Route struct {
+	// GroupCode selects the routing scope: "" is the UNGROUPED pool, not
+	// "any group" — a session carrying a non-empty group_code is invisible
+	// to a Route with GroupCode == "" and vice versa (see EligibleForRoute).
+	// Callers must pass an already-normalized value (wa.NormalizeGroupCode).
+	GroupCode string
+	// MasterOnly restricts the scope (GroupCode's pool, ungrouped or named)
+	// to sessions flagged is_master, and overrides AllowMaster — it is a
+	// different axis from AllowMaster, not a stronger version of it. See
+	// SelectMaster's doc comment for why "only the master" cannot be
+	// expressed by any value of AllowMaster.
+	MasterOnly bool
+	// AllowMaster widens the scope to include masters ALONGSIDE ordinary
+	// sessions, rather than picking only the master. Ignored when
+	// MasterOnly is set.
+	AllowMaster bool
+}
+
+// EligibleForRoute is the SINGLE eligibility predicate every automatic pick
+// in this package now funnels through. It replaces what used to be two
+// separate, subtly different inline filters (SelectConnected's
+// `allowMaster || !snap.IsMaster` and SelectMaster's `!snap.IsMaster`) with
+// one rule that also knows about group scope:
 //
-// allowMaster gates whether a session flagged is_master (see
-// ManagedSession.isMaster) is eligible for this AUTOMATIC pick — it is
-// always still reachable by naming its session id explicitly. Callers must
-// pass an explicit answer (no default): false unless the caller has an
-// opt-in signal (e.g. a request's allow_master flag) to route through one.
-func (m *Manager) SelectConnected(ctx context.Context, allowMaster bool) (*ManagedSession, Snapshot, bool) {
+//  1. the session must be connected;
+//  2. its group_code must match the route's scope EXACTLY — "" only matches
+//     "", a named group only matches that same name; there is no fallback
+//     between scopes in either direction;
+//  3. within that scope, MasterOnly requires IsMaster and ignores
+//     AllowMaster; otherwise AllowMaster widens the pool to include masters,
+//     and its absence excludes them.
+func EligibleForRoute(snap Snapshot, rt Route) bool {
+	if !snap.Connected || snap.GroupCode != rt.GroupCode {
+		return false
+	}
+	if rt.MasterOnly {
+		return snap.IsMaster
+	}
+	return rt.AllowMaster || !snap.IsMaster
+}
+
+// SelectForRoute is the general-purpose automatic pick: it filters every
+// live session through EligibleForRoute for the given Route, ranks survivors
+// with SelectSnapshotForRoute's four-key tiebreak, and records the
+// selection. SelectConnected and SelectMaster below are documented, signature
+// -stable wrappers over this for their existing call sites.
+//
+// Lock order: copy m.sessions under m.mu.RLock, release it, THEN call
+// Snapshot() on each — never hold m.mu across a ManagedSession.Snapshot call
+// (docs/04 §2's Manager.mu → ManagedSession.mu order). There is only one
+// filter pass now (EligibleForRoute), so — unlike the old SelectConnected —
+// there is no second, unreachable-in-practice guard to apologize for: every
+// candidate handed to SelectSnapshotForRoute already satisfies the same
+// predicate the ranking step re-derives its candidate set from, and either
+// both pools agree or something is broken in a way that guard could never
+// have caught either.
+func (m *Manager) SelectForRoute(ctx context.Context, rt Route) (*ManagedSession, Snapshot, bool) {
 	m.mu.RLock()
 	all := make([]*ManagedSession, 0, len(m.sessions))
 	for _, s := range m.sessions {
 		all = append(all, s)
 	}
 	m.mu.RUnlock()
+
 	type candidate struct {
 		session *ManagedSession
 		snap    Snapshot
@@ -30,30 +81,21 @@ func (m *Manager) SelectConnected(ctx context.Context, allowMaster bool) (*Manag
 	candidates := make([]candidate, 0, len(all))
 	for _, s := range all {
 		snap := s.Snapshot()
-		if snap.Connected && (allowMaster || !snap.IsMaster) {
+		if EligibleForRoute(snap, rt) {
 			candidates = append(candidates, candidate{session: s, snap: snap})
 		}
 	}
 	if len(candidates) == 0 {
 		return nil, Snapshot{}, false
 	}
-	best, ok := SelectSnapshotForSend(func() []Snapshot {
-		out := make([]Snapshot, 0, len(candidates))
-		for _, c := range candidates {
-			out = append(out, c.snap)
-		}
-		return out
-	}(), allowMaster)
+	snaps := make([]Snapshot, 0, len(candidates))
+	for _, c := range candidates {
+		snaps = append(snaps, c.snap)
+	}
+	best, ok := SelectSnapshotForRoute(snaps, rt)
 	if !ok {
-		// candidates is non-empty (checked above) but SelectSnapshotForSend's
-		// own Connected/master filter found nothing — every entry in
-		// `candidates` was already required to be Connected and (allowMaster
-		// || !IsMaster) by the pre-filter loop above, so this should be
-		// unreachable in practice; treat it the same as "nothing to select"
-		// rather than falling through with a zero-value best.
 		return nil, Snapshot{}, false
 	}
-	sort.Slice(candidates, func(i, j int) bool { return candidates[i].snap.ID < candidates[j].snap.ID })
 	var chosen *ManagedSession
 	for _, c := range candidates {
 		if c.snap.ID == best.ID {
@@ -72,14 +114,43 @@ func (m *Manager) SelectConnected(ctx context.Context, allowMaster bool) (*Manag
 	return chosen, chosen.Snapshot(), true
 }
 
-// SelectMaster chooses the connected MASTER session, and nothing else. It is
-// the routing mode for traffic that must always leave from one known handset —
-// ops alerts, where "which number paged me at 3am" is part of reading the page.
+// SelectConnected chooses the best live session for automatic routing from
+// the UNGROUPED pool (group_code == ""): lowest queue length, then oldest
+// last selection, then oldest created row, then session id. It records the
+// selection before returning so concurrent callers distribute ties
+// predictably within this single-process app.
+//
+// allowMaster gates whether a session flagged is_master (see
+// ManagedSession.isMaster) is eligible for this AUTOMATIC pick — it is
+// always still reachable by naming its session id explicitly. Callers must
+// pass an explicit answer (no default): false unless the caller has an
+// opt-in signal (e.g. a request's allow_master flag) to route through one.
+//
+// Thin wrapper over SelectForRoute — kept so existing call sites and
+// load_balance_test.go/select_master_test.go's coverage of this exact
+// signature stay untouched and serve as proof the wrapper preserves
+// behaviour.
+func (m *Manager) SelectConnected(ctx context.Context, allowMaster bool) (*ManagedSession, Snapshot, bool) {
+	return m.SelectForRoute(ctx, Route{AllowMaster: allowMaster})
+}
+
+// SelectMaster chooses the connected MASTER session from the UNGROUPED pool,
+// and nothing else. It is the routing mode for traffic that must always
+// leave from one known handset — ops alerts, where "which number paged me at
+// 3am" is part of reading the page.
 //
 // This is deliberately NOT expressible through SelectConnected's allowMaster
 // flag, and the difference is easy to misread: allowMaster WIDENS the candidate
 // set (allowMaster || !snap.IsMaster) so a master becomes eligible ALONGSIDE
 // every ordinary session. There is no value of it that means "only the master".
+//
+// A session in a named group is never returned here even if it is a master:
+// this call is Route{MasterOnly: true} with GroupCode left at "", so it is
+// pinned to the ungrouped pool exactly like SelectConnected above — a
+// grouped master must be reached via SelectForRoute(Route{GroupCode: "x",
+// MasterOnly: true}) instead. Closing that leak (a global master_only pick
+// silently reaching into a group) is the whole reason EligibleForRoute checks
+// group scope before it ever looks at MasterOnly.
 //
 // ⚠ THIS MODE HAS NO FALLBACK, BY DESIGN AND BY REQUEST. If the master handset
 // is disconnected this returns false and the caller answers 409 — it does not
@@ -91,47 +162,28 @@ func (m *Manager) SelectConnected(ctx context.Context, allowMaster bool) (*Manag
 // the master's own connectivity — see clino-watchdog's watchdog_*_master_down
 // alarms in the yuza-ai-gaming-workshop repo, which exist for exactly this.
 //
-// Ranking is the same as SelectConnected's and matters only in the pathological
-// case of several rows flagged is_master; the UI enforces one, but nothing in
-// the schema does, so this picks deterministically rather than at map order.
+// Ranking is now the SAME four-key ranking SelectConnected uses (QueueLen,
+// then oldest LastSelectedAt with "never selected" winning ties, then oldest
+// CreatedAt, then ID) — unifying SelectMaster and SelectConnected onto one
+// ranking function (SelectSnapshotForRoute) is what makes this comment true;
+// before this change SelectMaster ranked on (QueueLen, ID) only, which this
+// same doc comment already claimed was untrue. It matters only in the
+// pathological case of several rows flagged is_master; the UI enforces one,
+// but nothing in the schema does, so this still picks deterministically
+// rather than at map order — see TestSelectMasterRotatesBetweenSeveralConnectedMasters
+// for the case where the two rankings actually disagree.
 func (m *Manager) SelectMaster(ctx context.Context) (*ManagedSession, Snapshot, bool) {
-	m.mu.RLock()
-	all := make([]*ManagedSession, 0, len(m.sessions))
-	for _, s := range m.sessions {
-		all = append(all, s)
-	}
-	m.mu.RUnlock()
-	var chosen *ManagedSession
-	var best Snapshot
-	for _, s := range all {
-		snap := s.Snapshot()
-		if !snap.Connected || !snap.IsMaster {
-			continue
-		}
-		if chosen == nil || snap.QueueLen < best.QueueLen ||
-			(snap.QueueLen == best.QueueLen && snap.ID < best.ID) {
-			chosen, best = s, snap
-		}
-	}
-	if chosen == nil {
-		return nil, Snapshot{}, false
-	}
-	now := time.Now().UTC()
-	chosen.mu.Lock()
-	chosen.LastSelectedAt = &now
-	chosen.mu.Unlock()
-	_ = m.repo.MarkSelected(ctx, chosen.ID, now)
-	return chosen, chosen.Snapshot(), true
+	return m.SelectForRoute(ctx, Route{MasterOnly: true})
 }
 
-// SelectSnapshotForSend is the pure ranking helper SelectConnected wraps —
-// see its doc comment for allowMaster's meaning. Exported so handlers can
-// exercise the ranking/exclusion logic directly against a literal
-// []Snapshot without a live Manager (see load_balance_test.go).
-func SelectSnapshotForSend(snaps []Snapshot, allowMaster bool) (Snapshot, bool) {
+// SelectSnapshotForRoute is the pure ranking helper SelectForRoute wraps —
+// see EligibleForRoute for the filter and Route for the scope it filters by.
+// Exported so handlers/tests can exercise ranking/exclusion against a
+// literal []Snapshot without a live Manager.
+func SelectSnapshotForRoute(snaps []Snapshot, rt Route) (Snapshot, bool) {
 	candidates := make([]Snapshot, 0, len(snaps))
 	for _, snap := range snaps {
-		if snap.Connected && (allowMaster || !snap.IsMaster) {
+		if EligibleForRoute(snap, rt) {
 			candidates = append(candidates, snap)
 		}
 	}
@@ -158,6 +210,15 @@ func SelectSnapshotForSend(snaps []Snapshot, allowMaster bool) (Snapshot, bool) 
 		return a.ID < b.ID
 	})
 	return candidates[0], true
+}
+
+// SelectSnapshotForSend is SelectSnapshotForRoute restricted to the
+// UNGROUPED pool — see that function's doc comment for the ranking, and
+// Route's doc comment for why GroupCode: "" is a scope, not "no scope".
+// Thin wrapper kept for load_balance_test.go's existing coverage of this
+// exact signature.
+func SelectSnapshotForSend(snaps []Snapshot, allowMaster bool) (Snapshot, bool) {
+	return SelectSnapshotForRoute(snaps, Route{AllowMaster: allowMaster})
 }
 
 func sameSelectionTime(a, b *time.Time) bool {

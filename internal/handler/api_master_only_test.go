@@ -24,7 +24,7 @@ func TestTheSendDecodersReadMasterOnlyFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeGroupSendRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if !got.MasterOnly {
+		if !got.Route.MasterOnly {
 			t.Error("MasterOnly = false, want true")
 		}
 	})
@@ -36,7 +36,7 @@ func TestTheSendDecodersReadMasterOnlyFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeGroupSendRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if got.MasterOnly {
+		if got.Route.MasterOnly {
 			t.Error("MasterOnly = true, want false when omitted — every existing caller " +
 				"must keep auto-routing unchanged")
 		}
@@ -49,7 +49,7 @@ func TestTheSendDecodersReadMasterOnlyFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeSendRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if !got.MasterOnly {
+		if !got.Route.MasterOnly {
 			t.Error("MasterOnly = false, want true")
 		}
 	})
@@ -61,7 +61,7 @@ func TestTheSendDecodersReadMasterOnlyFromTheBody(t *testing.T) {
 		if !ok {
 			t.Fatalf("decodeSendRequest rejected a valid body: %s", rec.Body.String())
 		}
-		if got.MasterOnly {
+		if got.Route.MasterOnly {
 			t.Error("MasterOnly = true, want false when omitted")
 		}
 	})
@@ -78,7 +78,7 @@ func TestNoSendRouteMessageNamesTheRealCause(t *testing.T) {
 		{ID: "m", Connected: false, IsMaster: true},
 	}
 
-	got := noSendRouteMessage(healthyGatewayOfflineMaster, true, false)
+	got := noSendRouteMessage(healthyGatewayOfflineMaster, wa.Route{MasterOnly: true})
 	if got != noMasterRouteMessage {
 		t.Fatalf("master_only 409 = %q, want the master-specific body", got)
 	}
@@ -87,7 +87,7 @@ func TestNoSendRouteMessageNamesTheRealCause(t *testing.T) {
 	}
 
 	// Not master_only: the pre-existing wording, unchanged.
-	if got := noSendRouteMessage(healthyGatewayOfflineMaster, false, false); got != noRouteMessage {
+	if got := noSendRouteMessage(healthyGatewayOfflineMaster, wa.Route{}); got != noRouteMessage {
 		t.Fatalf("auto-route 409 = %q, want the unchanged %q", got, noRouteMessage)
 	}
 }

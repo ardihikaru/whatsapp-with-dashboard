@@ -195,6 +195,29 @@ func TestStartAllHydratesTheMasterFlagFromTheStoredRow(t *testing.T) {
 	m.Close()
 }
 
+// TestStartAllHydratesTheGroupCodeFromTheStoredRow is
+// TestStartAllHydratesTheMasterFlagFromTheStoredRow's twin for group_code.
+// Losing this hydration is worse than losing is_master's: it silently
+// returns EVERY scoped handset in the fleet to the default automatic-
+// routing pool on every restart, not just widens one session's eligibility.
+func TestStartAllHydratesTheGroupCodeFromTheStoredRow(t *testing.T) {
+	repo := newStubSessions(
+		wasession.Session{ID: "g", Name: "g", Phone: "62899", JID: "", LastStatus: "new", GroupCode: "alpha"},
+	)
+	m := newTestManager(repo, newStubMsgs())
+	if err := m.StartAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	s, ok := m.Get("g")
+	if !ok {
+		t.Fatal("session g missing after StartAll")
+	}
+	if snap := s.Snapshot(); snap.GroupCode != "alpha" {
+		t.Errorf("Snapshot().GroupCode = %q, want %q (StartAll must hydrate group_code from the stored row)", snap.GroupCode, "alpha")
+	}
+	m.Close()
+}
+
 func TestNewIDShapeAndUniqueness(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 100; i++ {

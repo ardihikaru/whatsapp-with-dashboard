@@ -1920,3 +1920,134 @@ definition. The planner's own unit tests (`internal/selfconvo/planner_test.go`)
 are the evidence for that path; this run's evidence is scoped to the
 operator UI rendering and mutating already-persisted schedules/templates
 correctly.
+
+---
+
+## 2026-09-11 — `group_code` routing scopes, browser + live-HTTP verification
+
+Branch `worktree-group-code-routing` (worktree off `f7bb99f`), laptop, SQLite
+only. **MySQL was never touched**: `scripts/e2e-env.sh` pins
+`WSM_APP_DSN=sqlite:_data/e2e/app.db`, and the running production stack on this
+host (`whatsapp-with-dashboard-app-1`, `master-compose-ai-mysqldb-master-1`,
+both shared MinIO instances) was left alone throughout.
+
+### Bootstrap on this machine
+
+`_data/` here holds only `.gitkeep` — no `paswd`, and there is no `.env` at all,
+so the suite could not start (`e2e-env: cannot read …/_data/paswd`). Rather than
+write a credential into the tree, the whole run was driven through the script's
+own override hooks, with every value living outside the repo and dying with the
+process:
+
+- `WSM_E2E_PASSWORD_FILE` → a throwaway random password generated into the
+  session scratch directory (never into `_data/`, never echoed).
+- `WSM_MINIO_*` → a **disposable** MinIO container,
+  `docker run --rm --name wsm-e2e-minio-throwaway -p 19000:9000`, deliberately
+  NOT the shared `ardi-ai-minio` / `master-compose-ai-minio-master-1` already
+  running here: pointing a test run at either would create a bucket on shared
+  infrastructure. The app refuses to boot without a *reachable* MinIO, so this
+  is required, not optional.
+- `node_modules` symlinked from the main checkout (worktrees start without it).
+
+### Full suite
+
+`./scripts/e2e-run.sh` → **109 passed, 6 failed, 30 skipped (2.6m)**.
+
+All six failures are in `e2e/convo-schedules.spec.ts` (`the create form submits
+a valid weekly schedule…` and `pause then resume round-trips…`, once per
+viewport) and none of them touches routing. **Confirmed pre-existing, not
+assumed**: a second detached worktree was checked out at unmodified `main`
+(`f7bb99f`), given the same bootstrap, and produced the *identical* six
+failures with 19 passed. This change is not implicated.
+
+`./scripts/e2e-run.sh e2e/overflow.spec.ts` → **62 passed, 0 failed**. This is
+the suite genuinely at risk here: `/sessions` gained a sixth column (`Group`),
+and these tests measure against `page.viewportSize().width`, never
+`window.innerWidth`, and run after `waitForContent()` rather than
+`networkidle`. `every table is inside a horizontal scroller` passes, so the
+`.table-scroll` wrapper still absorbs the extra width.
+
+A temporary spec (written, run, then deleted — it is not in the tree) asserted
+the new UI on all three viewports, **10 passed**:
+
+- `/sessions` renders exactly two `.badge-group` badges — `kemang` from
+  `cmd/e2eseed`, `pondok-indah` assigned live over the API earlier in this same
+  run, which also demonstrates an API write reaching the table — across three
+  session rows, the third showing `—`.
+- `documentElement.scrollWidth <= viewportSize().width` at 360px: the sixth
+  column scrolls inside `.table-scroll`, the document does not.
+- `/sessions/{id}/ops` renders the group-code editor pre-filled with `kemang`
+  and a non-empty `<datalist>`. It sits in a static card *below* `#ops-panel`,
+  the only polled region on that page, so the 5s poll cannot wipe a half-typed
+  code.
+
+Screenshots captured to the scratch directory (desktop + both phone widths) for
+`/sessions`, `/sessions/{id}/ops` and `/send`; not committed as binaries.
+
+### Live HTTP, app on 127.0.0.1:8801, SQLite, 3 seeded sessions, 0 connected
+
+Bodies below are pasted verbatim from the run, not recalled:
+
+```
+POST /api/v1/messages {"group_code":"typo-here"}              -> 409
+  no connected session for group_code "typo-here" (no session is currently
+  assigned to this group_code — check the spelling, or the Group column on
+  /sessions; omit group_code to route through any connected session)
+
+POST /api/v1/messages {"group_code":"kemang"}                 -> 409
+  no connected session for group_code "kemang" (omit group_code to route
+  through any connected session)
+
+POST /api/v1/messages {"group_code":"kemang","master_only":true} -> 409
+  master_only was set, but no connected master session exists for group_code
+  "kemang" (omit group_code to route through any connected session)
+
+POST /api/v1/messages {"group_code":"Ops Alert"}              -> 400
+  group_code may contain only lowercase letters, digits, "-" and "_"
+
+POST /api/v1/messages {}                                      -> 409
+  no connected session available          <- BYTE-IDENTICAL to before
+```
+
+The last line is the backward-compatibility claim: an existing caller that
+sends no `group_code` still gets exactly the string it always got.
+
+All four auto-routing endpoints were exercised and all four go through the one
+seam — `/messages`, `/messages/group` (JSON), `/contacts/check` (JSON) and
+`/messages/media`, where `group_code` is a **multipart form field**
+(`-F group_code=typo-here` returned the same rule-1 409; `-F "group_code=Bad
+Code"` returned 400).
+
+`PUT /api/v1/sessions/{id}/group-code` with `{"group_code":" Pondok-Indah "}`
+answered 200 and echoed `"group_code":"pondok-indah"` — trim + lower-case
+normalisation working end to end — and an invalid code answered **400, not
+500**, which is the `*wa.ValidationError` case added to `writeWAError` for
+exactly this.
+
+### Not verified, and why
+
+**No send ever succeeded, so no 200 body with `session_group_code` /
+`routing` was observed in the browser or over HTTP.** Nothing can be connected
+here: `wa.Snapshot.Connected` gates on a state assigned only inside package
+`wa`'s own backends, which is a pre-existing constraint this repo already
+documents three times (`internal/handler/send.go:223`,
+`self_convo_ui_test.go:608`, `verify_ui_test.go:20`). For the same reason
+`/send` renders no form at all with nothing connected, so its two group
+pickers were verified by unit test against a connected fixture
+(`TestBothSendPanelsCarryTheGroupPicker`) rather than in a browser. The
+"picks/excludes a genuinely live session" semantics are covered at the
+`internal/wa` layer (`select_route_test.go`), which can construct connected
+sessions.
+
+**`migrations/0009_session_group_code.sql` was not run against MySQL.** It is
+exercised only by goose's parsing and by the SQLite mirror
+(`TestEnsureSchemaAddsGroupCodeToALegacySessionsTable`) until a real deploy.
+
+### Teardown
+
+Temporary spec and helper command deleted, `test-results/` removed, app stopped,
+`docker rm -f wsm-e2e-minio-throwaway` (confirmed gone), baseline worktree
+removed. **No secret was written into this file or into the repository**: the
+throwaway admin password, the disposable MinIO credentials and the minted API
+client secret were all generated outside the tree and used only in the processes
+that needed them.

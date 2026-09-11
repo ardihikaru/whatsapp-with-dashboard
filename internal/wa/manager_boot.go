@@ -39,6 +39,21 @@ func (m *Manager) StartAll(ctx context.Context) error {
 			// silently un-flags the session in memory, failing OPEN and
 			// putting the master back into automatic-selection rotation.
 			isMaster: row.IsMaster,
+			// groupCode hydrates RAW from the stored row — deliberately NOT
+			// re-normalized through NormalizeGroupCode here. A hand-edited
+			// row (e.g. "Group X", written directly against the database)
+			// then matches no Route's GroupCode and stays OUT of the
+			// automatic pool: it fails CLOSED, and the raw value is still
+			// visible in the UI so an operator can fix it. Re-normalizing
+			// and silently dropping an invalid value on error would instead
+			// move that session INTO the ungrouped pool — the fail-OPEN
+			// direction, and a worse mistake here than missing is_master's
+			// hydration above: an unhydrated is_master merely lets a master
+			// numbers get picked, but an unhydrated/mis-normalized
+			// group_code silently returns every scoped handset in the
+			// fleet to the default automatic-routing pool on every
+			// restart.
+			groupCode: row.GroupCode,
 		}
 		switch {
 		case row.JID == "":

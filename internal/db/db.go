@@ -137,6 +137,7 @@ var schema = []string{
 	  jid         TEXT NOT NULL DEFAULT '',
 	  active      INTEGER NOT NULL DEFAULT 0,
 	  is_master   INTEGER NOT NULL DEFAULT 0,
+	  group_code  TEXT NOT NULL DEFAULT '',
 	  last_status TEXT NOT NULL DEFAULT 'new',
 	  owner_type  TEXT NOT NULL DEFAULT 'platform',
 	  client_id   INTEGER,
@@ -374,6 +375,10 @@ func EnsureSchema(ctx context.Context, pool *sql.DB) error {
 	}
 	// 0005 master-session flag, same reason.
 	if err := ensureColumn(ctx, pool, "wa_sessions", "is_master", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	// 0009 routing group code, same reason.
+	if err := ensureColumn(ctx, pool, "wa_sessions", "group_code", "TEXT NOT NULL DEFAULT ''"); err != nil {
 		return err
 	}
 	// 0002 attribution columns, for a SQLite dev DB created before they existed.

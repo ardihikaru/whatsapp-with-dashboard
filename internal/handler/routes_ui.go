@@ -71,6 +71,7 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("POST "+bp+"/sessions/{id}/activate", page(http.HandlerFunc(h.PostSessionActivate)))
 	mux.Handle("POST "+bp+"/sessions/{id}/deactivate", page(http.HandlerFunc(h.PostSessionDeactivate)))
 	mux.Handle("POST "+bp+"/sessions/{id}/master", page(http.HandlerFunc(h.PostSessionSetMaster)))
+	mux.Handle("POST "+bp+"/sessions/{id}/group-code", page(http.HandlerFunc(h.PostSessionSetGroupCode)))
 	mux.Handle("POST "+bp+"/sessions/{id}/delete", page(http.HandlerFunc(h.PostSessionDelete)))
 	mux.Handle("GET "+bp+"/sessions/{id}/pair", page(http.HandlerFunc(h.GetPair)))
 	mux.Handle("POST "+bp+"/sessions/{id}/pair/start", page(http.HandlerFunc(h.PostPairStart)))

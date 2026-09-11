@@ -4,11 +4,58 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
+
+// TestBothSendPanelsCarryTheGroupPicker guards send.html's own named trap
+// (the hx-encoding/enctype comment above the media form): a field added to
+// one panel and forgotten on the other. Exactly 2 occurrences of
+// name="group_code" proves both the text and media forms carry the field,
+// not just one of them.
+func TestBothSendPanelsCarryTheGroupPicker(t *testing.T) {
+	rend := sendTestRenderer(t)
+	data := sendPageData{
+		Connected:  []wa.Snapshot{{ID: "sess-1", Name: "Gateway 1", Phone: "628000"}},
+		GroupCodes: []string{"kemang", "ops"},
+	}
+	rec := httptest.NewRecorder()
+	rend.RenderPage(rec, "send", data)
+	body := rec.Body.String()
+
+	got := strings.Count(body, `name="group_code"`)
+	if got != 2 {
+		t.Fatalf(`/send has %d occurrence(s) of name="group_code", want exactly 2 (one per panel); body:\n%s`, got, body)
+	}
+	if !strings.Contains(body, `<option value="kemang">kemang</option>`) {
+		t.Errorf("/send's group picker does not list the \"kemang\" group; body:\n%s", body)
+	}
+	if !strings.Contains(body, `<option value="ops">ops</option>`) {
+		t.Errorf("/send's group picker does not list the \"ops\" group; body:\n%s", body)
+	}
+}
+
+// TestTheSendGroupPickerDefaultsToUngrouped proves the empty option is both
+// first and selected, so a caller that ignores the field still gets today's
+// behaviour (ordinary ungrouped automatic routing).
+func TestTheSendGroupPickerDefaultsToUngrouped(t *testing.T) {
+	rend := sendTestRenderer(t)
+	data := sendPageData{
+		Connected:  []wa.Snapshot{{ID: "sess-1", Name: "Gateway 1", Phone: "628000"}},
+		GroupCodes: []string{"kemang"},
+	}
+	rec := httptest.NewRecorder()
+	rend.RenderPage(rec, "send", data)
+	body := rec.Body.String()
+
+	if !strings.Contains(body, `<option value="" selected>Ungrouped (default)</option>`) {
+		t.Fatalf(`/send's group picker does not default to the selected, empty "Ungrouped" option; body:\n%s`, body)
+	}
+}
 
 // TestDispatchEnqueueOutcomeAnswersFiveHundredForAnyOtherEnqueueError is the
 // regression test for the review finding this pins: dispatchSend's old

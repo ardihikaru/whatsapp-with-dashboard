@@ -320,12 +320,17 @@ func parseFormBool(v string) bool {
 // not a JSON body key — this endpoint is multipart end to end (see
 // parseMediaSendRequest below) and has no JSON body to add a key to.
 type mediaSendRequest struct {
-	Data        []byte
-	Kind        wa.MediaKind
-	Digits      string
-	Caption     string
-	PTT         bool
-	AllowMaster bool
+	Data    []byte
+	Kind    wa.MediaKind
+	Digits  string
+	Caption string
+	PTT     bool
+	// Route carries allow_master/group_code, folded together like every
+	// other send request — see textSendRequest.Route. MasterOnly is always
+	// false: this endpoint was not asked to gain master_only, and the
+	// multipart form is never even read for a "master_only" field (see
+	// parseMediaSendRequest and PostAPISendMediaAuto's own comments).
+	Route       wa.Route
 	Filename    string
 	ContentType string
 	Attr        message.Attribution
@@ -420,6 +425,14 @@ func (h *handlers) parseMediaSendRequest(w http.ResponseWriter, r *http.Request)
 		return mediaSendRequest{}, &mediaDecodeError{http.StatusBadRequest, err.Error()}
 	}
 
+	// group_code arrives as a multipart FORM FIELD, like allow_master,
+	// because this endpoint has no JSON body. Never reads a "master_only"
+	// form field — see mediaSendRequest.Route's doc comment.
+	groupCode, err := wa.NormalizeGroupCode(r.FormValue("group_code"))
+	if err != nil {
+		return mediaSendRequest{}, &mediaDecodeError{http.StatusBadRequest, err.Error()}
+	}
+
 	// Step 6: sniff, never trust the part's declared Content-Type.
 	contentType, ok := sniffAndValidate(kind, data)
 	if !ok {
@@ -435,12 +448,13 @@ func (h *handlers) parseMediaSendRequest(w http.ResponseWriter, r *http.Request)
 	}
 
 	return mediaSendRequest{
-		Data:        data,
-		Kind:        kind,
-		Digits:      digits,
-		Caption:     strings.TrimSpace(r.FormValue("caption")),
-		PTT:         parseFormBool(r.FormValue("ptt")),
-		AllowMaster: parseFormBool(r.FormValue("allow_master")),
+		Data:    data,
+		Kind:    kind,
+		Digits:  digits,
+		Caption: strings.TrimSpace(r.FormValue("caption")),
+		PTT:     parseFormBool(r.FormValue("ptt")),
+		// MasterOnly hardcoded false: see mediaSendRequest.Route's doc comment.
+		Route:       wa.Route{GroupCode: groupCode, AllowMaster: parseFormBool(r.FormValue("allow_master")), MasterOnly: false},
 		Filename:    sanitizeFilename(header.Filename), // step 7
 		ContentType: contentType,
 		Attr: message.Attribution{
@@ -475,23 +489,26 @@ func (h *handlers) PostAPISessionSendMedia(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	h.sendMedia(w, r, s, req)
+	h.sendMedia(w, r, s, req, routingExplicit)
 }
 
 // PostAPISendMediaAuto is POST /api/v1/messages/media — auto-routed,
 // mirroring PostAPISendMessageAuto's shape: decode first (the body is the
-// expensive part here), THEN pick a connected session.
+// expensive part here), THEN pick a connected session. Route.MasterOnly is
+// always false — hardcoded in parseMediaSendRequest — because this endpoint
+// was NOT asked to gain master_only and its wire contract stays unchanged;
+// do not add a "master_only" form field here.
 func (h *handlers) PostAPISendMediaAuto(w http.ResponseWriter, r *http.Request) {
 	req, ok := h.decodeMediaSendRequest(w, r)
 	if !ok {
 		return
 	}
-	s, _, ok := h.Manager.SelectConnected(r.Context(), req.AllowMaster)
+	s, _, ok := selectForSend(r, h.Manager, req.Route)
 	if !ok {
-		writeError(w, http.StatusConflict, noAutoRouteMessage(h.Manager.Snapshots(), req.AllowMaster))
+		writeError(w, http.StatusConflict, noSendRouteMessage(h.Manager.Snapshots(), req.Route))
 		return
 	}
-	h.sendMedia(w, r, s, req)
+	h.sendMedia(w, r, s, req, routingModeFor(req.Route))
 }
 
 // archiveMedia writes the uploaded bytes to MinIO BEFORE the backend
@@ -556,8 +573,10 @@ func (h *handlers) uploadAndDescribeMedia(ctx context.Context, s *wa.ManagedSess
 
 // sendMedia is the shared orchestration tail for both JSON media-send
 // routes: mint the id, archive+upload via uploadAndDescribeMedia, then
-// dispatch through sendMediaThroughJID — steps 8-11 of the phase brief.
-func (h *handlers) sendMedia(w http.ResponseWriter, r *http.Request, s *wa.ManagedSession, req mediaSendRequest) {
+// dispatch through sendMediaThroughJID — steps 8-11 of the phase brief. mode
+// reports the routing decision, matching postAPISendThrough's own
+// routingExplicit/routingModeFor split.
+func (h *handlers) sendMedia(w http.ResponseWriter, r *http.Request, s *wa.ManagedSession, req mediaSendRequest, mode routingMode) {
 	msgID := wa.NewID()
 	media, err := h.uploadAndDescribeMedia(r.Context(), s, msgID, req)
 	if err != nil {
@@ -570,10 +589,14 @@ func (h *handlers) sendMedia(w http.ResponseWriter, r *http.Request, s *wa.Manag
 		writeError(w, status, outcome.Error)
 		return
 	}
+	snap := s.Snapshot()
 	resp := map[string]any{
 		"id": outcome.ID, "status": outcome.Status,
-		"session_id": s.ID, "session_name": s.Snapshot().Name,
+		"session_id": s.ID, "session_name": snap.Name,
 		"kind": string(req.Kind), "filename": req.Filename,
+	}
+	for k, v := range sendResponseFields(snap, mode) {
+		resp[k] = v
 	}
 	if outcome.WAMessageID != "" {
 		resp["wa_message_id"] = outcome.WAMessageID

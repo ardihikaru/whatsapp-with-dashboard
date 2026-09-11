@@ -15,6 +15,7 @@ type Repository interface {
 	UpdateStatus(ctx context.Context, id, status string) error
 	SetActive(ctx context.Context, id string, active bool) error
 	SetMaster(ctx context.Context, id string, master bool) error
+	SetGroupCode(ctx context.Context, id, code string) error
 	MarkSelected(ctx context.Context, id string, at time.Time) error
 	// SetPaired records a successful pairing: jid, active=1, last_status=connected.
 	SetPaired(ctx context.Context, id, jid string) error
@@ -31,7 +32,7 @@ func now() string { return time.Now().UTC().Format(timeLayout) }
 
 func (r *SQLRepository) All(ctx context.Context) ([]Session, error) {
 	rows, err := r.pool.QueryContext(ctx,
-		`SELECT id, name, phone, jid, active, is_master, last_status, created_at, updated_at, last_selected_at
+		`SELECT id, name, phone, jid, active, is_master, group_code, last_status, created_at, updated_at, last_selected_at
 		 FROM wa_sessions ORDER BY created_at`)
 	if err != nil {
 		return nil, err
@@ -43,7 +44,7 @@ func (r *SQLRepository) All(ctx context.Context) ([]Session, error) {
 		var active, isMaster int
 		var created, updated string
 		var selected sql.NullString
-		if err := rows.Scan(&s.ID, &s.Name, &s.Phone, &s.JID, &active, &isMaster,
+		if err := rows.Scan(&s.ID, &s.Name, &s.Phone, &s.JID, &active, &isMaster, &s.GroupCode,
 			&s.LastStatus, &created, &updated, &selected); err != nil {
 			return nil, err
 		}
@@ -64,9 +65,9 @@ func (r *SQLRepository) All(ctx context.Context) ([]Session, error) {
 func (r *SQLRepository) Insert(ctx context.Context, s *Session) error {
 	ts := now()
 	_, err := r.pool.ExecContext(ctx,
-		`INSERT INTO wa_sessions (id, name, phone, jid, active, is_master, last_status, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		s.ID, s.Name, s.Phone, s.JID, boolToInt(s.Active), boolToInt(s.IsMaster), s.LastStatus, ts, ts)
+		`INSERT INTO wa_sessions (id, name, phone, jid, active, is_master, group_code, last_status, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		s.ID, s.Name, s.Phone, s.JID, boolToInt(s.Active), boolToInt(s.IsMaster), s.GroupCode, s.LastStatus, ts, ts)
 	return err
 }
 
@@ -93,6 +94,13 @@ func (r *SQLRepository) SetMaster(ctx context.Context, id string, master bool) e
 	_, err := r.pool.ExecContext(ctx,
 		`UPDATE wa_sessions SET is_master = ?, updated_at = ? WHERE id = ?`,
 		boolToInt(master), now(), id)
+	return err
+}
+
+func (r *SQLRepository) SetGroupCode(ctx context.Context, id, code string) error {
+	_, err := r.pool.ExecContext(ctx,
+		`UPDATE wa_sessions SET group_code = ?, updated_at = ? WHERE id = ?`,
+		code, now(), id)
 	return err
 }
 

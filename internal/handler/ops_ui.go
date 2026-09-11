@@ -18,6 +18,11 @@ import (
 type sessionOpsPageData struct {
 	PageBase
 	Session wa.Snapshot
+	// GroupCodes feeds the routing-group editor's <datalist> — the second,
+	// static card GetSessionOps renders below #ops-panel (see ops.html);
+	// unlike Session above this is NOT re-fetched by the panel's own poll,
+	// since that card sits outside #ops-panel entirely.
+	GroupCodes []string
 }
 
 // sessionOpsPanelData feeds the session_ops_panel partial — rendered by the
@@ -115,7 +120,7 @@ func (h *handlers) GetSessionOps(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	snap := s.Snapshot()
-	data := sessionOpsPageData{Session: snap}
+	data := sessionOpsPageData{Session: snap, GroupCodes: h.Manager.GroupCodes()}
 	data.PageBase = h.newPageBase(r, "Session Operations — "+snap.Name, "/sessions")
 	h.Renderer.RenderPage(w, "session-ops", data)
 }

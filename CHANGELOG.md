@@ -3,6 +3,35 @@
 ## [Unreleased]
 
 ### Added
+- **`group_code` routing scopes.** A session can now carry an optional
+  `group_code`, and the four auto-routing endpoints (`POST /api/v1/messages`,
+  `/messages/group`, `/messages/media` — a multipart form field there — and
+  `/contacts/check`) accept one.
+  ⚠ **Read this first: assigning a group code REMOVES that session from default
+  automatic routing.** The match is exact in both directions — `""` matches only
+  `""`, a named group only that same name — so a caller that sends no
+  `group_code` will stop seeing a session the moment one is assigned to it. That
+  is the entire point of the feature and also the way it will most often bite.
+  Within a scope the master rules are unchanged: masters are excluded unless
+  `allow_master`, and `group_code` + `master_only` means *that group's* master.
+  Like `master_only`, a scope has **no fallback by design** — a `group_code` send
+  whose group is offline answers 409 even while a dozen other sessions are
+  connected, because quietly routing through one of them would defeat the only
+  reason to ask for a scope. The 409 bodies say which of those two situations it
+  is, since a scoped failure on a healthy gateway must not read as an outage.
+  Codes are trimmed, lower-cased, limited to `[a-z0-9_-]` and 32 characters;
+  anything else is a 400 rather than a silently separate cluster. Every send
+  response now also reports the decision it made (`session_group_code`, always
+  present and `""` when ungrouped; `session_is_master`; `routing`). Operators set
+  it on `/sessions/new` and `/sessions/{id}/ops`, and `/sessions` gained a Group
+  column; `PUT /api/v1/sessions/{id}/group-code` is the machine equivalent and is
+  deliberately not published at the edge. Built because master flags are being
+  clustered: one gateway now hosts several independent routing groups, each with
+  its own master (`wa.Route`, `wa.EligibleForRoute`, `wa.Manager.SelectForRoute`).
+  One incidental change: `SelectMaster` used to rank on `(queue, id)` only while
+  every other pick used four keys, contradicting its own doc comment — the two
+  are now unified, which is observable only when several sessions in one scope
+  are flagged master.
 - **`master_only` send routing.** `POST /api/v1/messages` and
   `POST /api/v1/messages/group` accept `master_only: true`, which pins the send
   to the master session and answers **409** when the master is offline — it
