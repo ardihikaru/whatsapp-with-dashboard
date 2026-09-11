@@ -244,7 +244,10 @@ paths:
         AUTOMATIC selection (POST /api/v1/messages,
         /api/v1/messages/group, /api/v1/messages/media,
         /api/v1/contacts/check) unless the caller opts in with
-        allow_master on that request.
+        allow_master on that request. Master exclusion applies WITHIN a
+        routing scope: see group_code on those same endpoints and
+        PUT /api/v1/sessions/{id}/group-code — a master in a group is the one
+        a group_code + master_only request selects.
       operationId: setSessionMaster
       tags: [sessions]
       security: [{bearerAuth: []}, {basicAuth: []}]
@@ -263,6 +266,44 @@ paths:
               schema: {$ref: '#/components/schemas/Session'}
         '400':
           description: Malformed JSON body.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/group-code:
+    put:
+      summary: Assign or clear a session's routing group_code scope
+      description: >
+        WSM-native routing state, not a backend capability — works
+        identically on whatsmeow and waxum, same as
+        PUT /api/v1/sessions/{id}/master above. A grouped session stays
+        fully connected and directly sendable
+        (POST /api/v1/sessions/{id}/messages); the code only scopes
+        AUTOMATIC selection to sessions carrying the same group_code — see
+        wa.EligibleForRoute. An empty string clears it back to the
+        ungrouped pool.
+      operationId: setSessionGroupCode
+      tags: [sessions]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [group_code], properties: {group_code: {type: string, description: 'Lowercase letters, digits, "-", "_", max 32 chars; "" clears it'}}}
+      responses:
+        '200':
+          description: Snapshot after the change.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Session'}
+        '400':
+          description: Malformed JSON body, or an invalid group_code.
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
@@ -319,6 +360,7 @@ paths:
                 client_ref: {type: string, description: 'Optional laundry client uid; surfaces in the message log per-client breakdown'}
                 tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
                 category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
+                group_code: {type: string, maxLength: 32, pattern: '^[a-z0-9_-]*$', description: 'Automatic routing only. Narrows selection to sessions carrying this SAME group_code; omitted or "" selects among sessions with NO group code. The match is exact in both directions, so a session with a group code is invisible to a request without one. There is no fallback between scopes: a group whose sessions are all offline answers 409 even while other sessions are connected. Combines with master_only to mean that group''s master.'}
                 allow_master: {type: boolean, description: 'Automatic routing only; ignored when a session id is in the path. Opts into a master-flagged session for this one request.'}
                 master_only: {type: boolean, description: 'Automatic routing only. Pins this send to the MASTER session and answers 409 when the master is offline - it never falls back to another session. Overrides allow_master, which only WIDENS selection and can never pin. Intended for traffic that must always leave from one known handset, e.g. ops alerts. This mode has no redundancy, so a caller relying on it must monitor the connectivity of the master session itself.'}
       responses:
@@ -339,9 +381,18 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '409':
           description: >
-            No connected session exists to auto-route through. If the only
-            connected session(s) are flagged is_master, the message names that
-            (see PUT /api/v1/sessions/{id}/master) and suggests allow_master.
+            No connected session exists to auto-route through, IN THE SCOPE THE
+            REQUEST ASKED FOR. The body names the actual cause rather than the
+            symptom, because a scoped send can fail while the gateway is
+            perfectly healthy: if the only connected session(s) are flagged
+            is_master it says so (see PUT /api/v1/sessions/{id}/master) and
+            suggests allow_master; with a group_code it distinguishes "nothing
+            carries that code" (likely a typo) from "that group is offline
+            while other sessions are connected" from "the group is up but has
+            no master". Every group-scoped body ends with the same escape
+            hatch - omit group_code to route through any connected session.
+            Note GET /api/v1/health counts sessions across ALL scopes, so
+            connected > 0 and a 409 here are not a contradiction.
             Note GET /api/v1/health and Manager.Counts() still count a master
             session as connected, so an operator can legitimately see
             connected: 1 here and still get this 409.
@@ -373,11 +424,12 @@ paths:
               type: object
               required: [group_jid, text]
               properties:
-                group_jid: {type: string, description: 'Group JID, e.g. 120363021234567890@g.us (the bare id is accepted)'}
+                group_jid: {type: string, description: 'Group JID, e.g. 120363021234567890@g.us (the bare id is accepted). NOTE: unrelated to group_code below — group_jid is a WhatsApp CHAT, group_code is a WSM ROUTING SCOPE. This is the one body where both words appear.'}
                 text: {type: string, maxLength: 4096, description: 'Plain text; line breaks preserved'}
                 client_ref: {type: string, description: 'Optional laundry client uid; surfaces in the message log per-client breakdown'}
                 tenant_ref: {type: string, description: 'Optional laundry tenant/outlet uid; surfaces in the per-tenant breakdown'}
                 category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; defaults to notification (group defaults to alert)'}
+                group_code: {type: string, maxLength: 32, pattern: '^[a-z0-9_-]*$', description: 'Automatic routing only. Narrows selection to sessions carrying this SAME group_code; omitted or "" selects among sessions with NO group code. The match is exact in both directions, so a session with a group code is invisible to a request without one. There is no fallback between scopes. Combines with master_only to mean that group''s master. Unrelated to group_jid above.'}
                 allow_master: {type: boolean, description: 'Automatic routing only; ignored when a session id is in the path. Opts into a master-flagged session for this one request.'}
                 master_only: {type: boolean, description: 'Automatic routing only. Pins this send to the MASTER session and answers 409 when the master is offline - it never falls back to another session. Overrides allow_master, which only WIDENS selection and can never pin. Intended for traffic that must always leave from one known handset, e.g. ops alerts. This mode has no redundancy, so a caller relying on it must monitor the connectivity of the master session itself.'}
       responses:
@@ -400,9 +452,18 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '409':
           description: >
-            No connected session exists to auto-route through. If the only
-            connected session(s) are flagged is_master, the message names that
-            (see PUT /api/v1/sessions/{id}/master) and suggests allow_master.
+            No connected session exists to auto-route through, IN THE SCOPE THE
+            REQUEST ASKED FOR. The body names the actual cause rather than the
+            symptom, because a scoped send can fail while the gateway is
+            perfectly healthy: if the only connected session(s) are flagged
+            is_master it says so (see PUT /api/v1/sessions/{id}/master) and
+            suggests allow_master; with a group_code it distinguishes "nothing
+            carries that code" (likely a typo) from "that group is offline
+            while other sessions are connected" from "the group is up but has
+            no master". Every group-scoped body ends with the same escape
+            hatch - omit group_code to route through any connected session.
+            Note GET /api/v1/health counts sessions across ALL scopes, so
+            connected > 0 and a 409 here are not a contradiction.
             Note GET /api/v1/health and Manager.Counts() still count a master
             session as connected, so an operator can legitimately see
             connected: 1 here and still get this 409.
@@ -605,6 +666,7 @@ paths:
                 client_ref: {type: string}
                 tenant_ref: {type: string}
                 category: {type: string, enum: [otp, notification, alert, manual]}
+                group_code: {type: string, maxLength: 32, pattern: '^[a-z0-9_-]*$', description: 'A MULTIPART FORM FIELD, not a JSON key — this endpoint has no JSON body. Automatic routing only. Narrows selection to sessions carrying this SAME group_code; omitted or "" selects among sessions with NO group code. Exact match in both directions, no fallback between scopes. This endpoint does not accept master_only.'}
                 allow_master: {type: boolean, description: 'A MULTIPART FORM FIELD, not a JSON key — this endpoint has no JSON body. Automatic routing only.'}
       responses:
         '200':
@@ -624,9 +686,18 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '409':
           description: >
-            No connected session exists to auto-route through. If the only
-            connected session(s) are flagged is_master, the message names that
-            (see PUT /api/v1/sessions/{id}/master) and suggests allow_master.
+            No connected session exists to auto-route through, IN THE SCOPE THE
+            REQUEST ASKED FOR. The body names the actual cause rather than the
+            symptom, because a scoped send can fail while the gateway is
+            perfectly healthy: if the only connected session(s) are flagged
+            is_master it says so (see PUT /api/v1/sessions/{id}/master) and
+            suggests allow_master; with a group_code it distinguishes "nothing
+            carries that code" (likely a typo) from "that group is offline
+            while other sessions are connected" from "the group is up but has
+            no master". Every group-scoped body ends with the same escape
+            hatch - omit group_code to route through any connected session.
+            Note GET /api/v1/health counts sessions across ALL scopes, so
+            connected > 0 and a 409 here are not a contradiction.
             Note GET /api/v1/health and Manager.Counts() still count a master
             session as connected, so an operator can legitimately see
             connected: 1 here and still get this 409.
@@ -1523,6 +1594,7 @@ paths:
                   type: array
                   items: {type: string}
                   description: 'International format accepted with human formatting, e.g. "+62 812-0000-0000" or "6289900000000"'
+                group_code: {type: string, maxLength: 32, pattern: '^[a-z0-9_-]*$', description: 'Automatic routing only. Narrows selection to sessions carrying this SAME group_code; omitted or "" selects among sessions with NO group code. Exact match in both directions, no fallback between scopes. This endpoint does not accept master_only.'}
                 allow_master: {type: boolean, description: 'Automatic routing only; ignored when a session id is in the path. Opts into a master-flagged session for this one request.'}
       responses:
         '200':
@@ -1537,9 +1609,18 @@ paths:
               schema: {$ref: '#/components/schemas/Error'}
         '409':
           description: >
-            No connected session exists to auto-route through. If the only
-            connected session(s) are flagged is_master, the message names that
-            (see PUT /api/v1/sessions/{id}/master) and suggests allow_master.
+            No connected session exists to auto-route through, IN THE SCOPE THE
+            REQUEST ASKED FOR. The body names the actual cause rather than the
+            symptom, because a scoped send can fail while the gateway is
+            perfectly healthy: if the only connected session(s) are flagged
+            is_master it says so (see PUT /api/v1/sessions/{id}/master) and
+            suggests allow_master; with a group_code it distinguishes "nothing
+            carries that code" (likely a typo) from "that group is offline
+            while other sessions are connected" from "the group is up but has
+            no master". Every group-scoped body ends with the same escape
+            hatch - omit group_code to route through any connected session.
+            Note GET /api/v1/health counts sessions across ALL scopes, so
+            connected > 0 and a 409 here are not a contradiction.
             Note GET /api/v1/health and Manager.Counts() still count a master
             session as connected, so an operator can legitimately see
             connected: 1 here and still get this 409.
@@ -1669,6 +1750,7 @@ components:
         connected: {type: boolean, description: 'Live socket check, not just state'}
         queue_len: {type: integer}
         is_master: {type: boolean, description: 'Routing-exclusion flag; still connected and directly sendable, just skipped by automatic selection unless allow_master is set. See PUT /api/v1/sessions/{id}/master.'}
+        group_code: {type: string, description: 'Routing scope; "" means ungrouped. Automatic selection only matches sessions with the SAME group_code as the request. See PUT /api/v1/sessions/{id}/group-code.'}
     SendResponse:
       type: object
       properties:
@@ -1678,6 +1760,9 @@ components:
         error: {type: string}
         session_id: {type: string}
         session_name: {type: string}
+        session_group_code: {type: string, description: 'Routing scope of the session that actually sent. ALWAYS present; "" means the session is ungrouped. An absent key would be indistinguishable from an older gateway that never had group_code at all.'}
+        session_is_master: {type: boolean, description: 'Whether the session that actually sent is master-flagged.'}
+        routing: {type: string, enum: [auto, master_only, group, group_master_only, explicit], description: 'Which routing decision produced this session. "explicit" is reported by the /sessions/{id}/... routes, which name their own session and ignore group_code/master_only/allow_master entirely.'}
     Message:
       type: object
       properties:
@@ -1698,6 +1783,9 @@ components:
         error: {type: string}
         session_id: {type: string}
         session_name: {type: string}
+        session_group_code: {type: string, description: 'Routing scope of the session that actually sent. ALWAYS present; "" means ungrouped.'}
+        session_is_master: {type: boolean, description: 'Whether the session that actually sent is master-flagged.'}
+        routing: {type: string, enum: [auto, master_only, group, group_master_only, explicit], description: 'Which routing decision produced this session.'}
         kind: {type: string, enum: [image, video, audio, document]}
         filename: {type: string}
     MediaDescriptor:

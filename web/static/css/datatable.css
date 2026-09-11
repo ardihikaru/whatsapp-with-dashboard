@@ -81,6 +81,11 @@
    colour rather than reusing a state colour. */
 .badge-master   { color: var(--info-dark);    background: rgba(0, 184, 217, 0.16); }
 
+/* /sessions' routing-SCOPE flag (session_rows.html, sessions/ops.html) —
+   parallel to badge-master above but a distinct token (secondary, not info)
+   since a session can carry a group code independently of being a master. */
+.badge-group    { color: var(--secondary-dark); background: rgba(142, 51, 255, 0.16); }
+
 /* The badge inks above are tuned for the light surface; lift them on dark. */
 [data-theme="dark"] .badge-queued,
 [data-theme="dark"] .badge-pairing      { color: var(--warning-light); }
@@ -92,6 +97,7 @@
 [data-theme="dark"] .badge-inactive,
 [data-theme="dark"] .badge-new          { color: var(--grey-400); }
 [data-theme="dark"] .badge-master       { color: var(--info-light); }
+[data-theme="dark"] .badge-group        { color: var(--secondary-light); }
 
 /* Status cell can carry both the state badge and the master badge
    (session_rows.html) — space them apart like webhook rows' pair above,

@@ -3,6 +3,7 @@ package handler
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -58,9 +59,10 @@ func writeBackendBusy(w http.ResponseWriter, message string) {
 	writeError(w, http.StatusServiceUnavailable, message)
 }
 
-// writeWAError maps a wa.Err* sentinel to its HTTP status and writes it.
-// internal/wa/errors.go's header comment documents this exact map — keep
-// the two in step whenever either changes.
+// writeWAError maps a wa.Err* sentinel (or a *wa.ValidationError, matched
+// first via errors.As since it is a struct type, not a sentinel) to its HTTP
+// status and writes it. internal/wa/errors.go's header comment documents
+// this exact map — keep the two in step whenever either changes.
 //
 // Extracted from apiToggle (previously the only hand-rolled copy of this
 // switch, covering ErrNotPaired/ErrDeviceGone/ErrBackendBusy) as the FIRST
@@ -70,9 +72,12 @@ func writeBackendBusy(w http.ResponseWriter, message string) {
 // some copies get updated. Every handler this package adds from here on
 // funnels its wa.* errors through this one function instead.
 func writeWAError(w http.ResponseWriter, err error) {
+	var verr *wa.ValidationError
 	switch {
 	case err == nil:
 		return
+	case errors.As(err, &verr):
+		writeError(w, http.StatusBadRequest, verr.Msg)
 	case errors.Is(err, wa.ErrNotFound):
 		writeError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, wa.ErrNotPaired),
@@ -108,25 +113,193 @@ const noRouteMessage = "no connected session available"
 // excluded — see that function's doc comment.
 const masterExclusionHint = " (the only connected session(s) are master sessions; set allow_master to route through one)"
 
-// selectForSend picks the session for an automatic-routing send. It is the one
-// place the two routing MODES are chosen between, so every endpoint that offers
-// master_only resolves it identically instead of each re-deriving the
-// precedence. masterOnly wins over allowMaster — see groupSendRequest.MasterOnly.
-func selectForSend(r *http.Request, m *wa.Manager, masterOnly, allowMaster bool) (*wa.ManagedSession, wa.Snapshot, bool) {
-	if masterOnly {
-		return m.SelectMaster(r.Context())
-	}
-	return m.SelectConnected(r.Context(), allowMaster)
+// selectForSend picks the session for an automatic-routing send. It is the
+// single delegation to wa.Manager.SelectForRoute every auto-routing endpoint
+// goes through — the actual MODE precedence (group scope vs ungrouped,
+// master_only vs allow_master) now lives entirely in wa.Route and
+// wa.EligibleForRoute (internal/wa/load_balance.go), not here. This function
+// stays the single grep target for "where HTTP chooses a route" even though
+// it no longer branches on mode itself; ALL FOUR auto-routing endpoints
+// (PostAPISendMessageAuto, PostAPISendGroupMessage, PostAPISendMediaAuto,
+// PostAPIContactsCheckAuto) call it.
+func selectForSend(r *http.Request, m *wa.Manager, rt wa.Route) (*wa.ManagedSession, wa.Snapshot, bool) {
+	return m.SelectForRoute(r.Context(), rt)
 }
 
-// noSendRouteMessage builds the 409 body for whichever mode selectForSend used.
-// Pure, like noAutoRouteMessage, so both branches stay unit-testable without a
-// live session.
-func noSendRouteMessage(snaps []wa.Snapshot, masterOnly, allowMaster bool) string {
-	if masterOnly {
+// noSendRouteMessage builds the 409 body for whichever scope/mode
+// selectForSend was asked for. Pure, like noAutoRouteMessage — no Manager
+// call, just the caller's own snapshot list — so every branch stays
+// unit-testable without a live session. The ungrouped paths (rt.GroupCode
+// == "") are BYTE-IDENTICAL to what this returned before group_code
+// existed: see noRouteMessage/masterExclusionHint/noMasterRouteMessage's own
+// doc comments below, which this never rewrites.
+func noSendRouteMessage(snaps []wa.Snapshot, rt wa.Route) string {
+	if rt.GroupCode != "" {
+		return noGroupRouteMessage(snaps, rt)
+	}
+	if rt.MasterOnly {
 		return noMasterRouteMessage
 	}
-	return noAutoRouteMessage(snaps, allowMaster)
+	return noAutoRouteMessage(snaps, rt.AllowMaster)
+}
+
+// Hint fragments noGroupRouteMessage appends to its base message — kept as
+// named constants, mirroring masterExclusionHint above, so each is checkable
+// as its own literal rather than only as a shape.
+const (
+	// groupNoAssignmentHint fires when NO snapshot at all carries the
+	// requested group_code — the most common real mistake (a typo, or a
+	// session moved out of the group) and the one most likely to otherwise
+	// read as a mysterious outage.
+	groupNoAssignmentHint = "no session is currently assigned to this group_code — check the spelling, or the Group column on /sessions"
+	// groupMasterOnlyExclusionHint fires when master_only is set and the
+	// group has a connected session, just not one flagged master.
+	groupMasterOnlyExclusionHint = "sessions in this group are connected, but none is flagged master — flag one master, or clear master_only"
+	// groupMasterExclusionHint is masterExclusionHint's scoped twin: the
+	// group's only connected session(s) are masters, excluded because
+	// allow_master was not set.
+	groupMasterExclusionHint = "the only connected session(s) in this group are master sessions; set allow_master to route through one"
+	// groupOutsideConnectedHint fires when the gateway overall is healthy —
+	// something else, outside this group_code, is connected — so the
+	// operator should not go looking for a gateway outage.
+	groupOutsideConnectedHint = "the gateway is not down — other sessions are connected outside this group_code"
+	// groupRouteEscapeHatch is appended to EVERY group-scoped 409, always
+	// last, so an on-call reader who has never heard of group_code can
+	// still get a message out without learning the feature first.
+	groupRouteEscapeHatch = "omit group_code to route through any connected session"
+)
+
+// groupRouteBaseMessage is noGroupRouteMessage's base sentence — deliberately
+// NOT built from noRouteMessage (see that constant's own doc comment): a
+// group-scoped 409 must never equal or be prefixed by the plain "no
+// connected session available" text, because with a group code the gateway
+// may be perfectly healthy and busy on other groups, and TestNoSendRouteMessageNamesTheGroupAndNotAGatewayOutage
+// pins exactly that distinction.
+func groupRouteBaseMessage(rt wa.Route) string {
+	if rt.MasterOnly {
+		// "master_only was set" belongs in the SENTENCE, not a parenthetical
+		// of its own: groupRouteMessage appends one more, and three stacked
+		// parentheses is the point an on-call reader stops reading.
+		return fmt.Sprintf("master_only was set, but no connected master session exists for group_code %q", rt.GroupCode)
+	}
+	return fmt.Sprintf("no connected session for group_code %q", rt.GroupCode)
+}
+
+// noGroupRouteMessage is noSendRouteMessage's group-scoped half — one of the
+// two axes that changed, group_code, meets the other, master_only/
+// allow_master. It picks by the FIRST matching rule below, evidence-only
+// (over the caller's own snapshot list, no Manager call), exactly like
+// noAutoRouteMessage's own discipline:
+//
+//  1. no snapshot carries rt.GroupCode at all — nothing is assigned to the
+//     named group, most likely a typo or a session moved out of it;
+//  2. rt.MasterOnly and the group HAS a connected non-master — the group is
+//     up, just not flagged master;
+//  3. not MasterOnly, not AllowMaster, and the group has a connected
+//     master — the scoped twin of noAutoRouteMessage's masterExclusionHint;
+//  4. some snapshot OUTSIDE the group is connected — the gateway itself is
+//     not down;
+//  5. otherwise — the base message alone, because a genuinely dark gateway
+//     must still read as an outage. This is the direct analogue of
+//     noAutoRouteMessage's own refusal to append a hint to an empty
+//     gateway, and the rule most easily got wrong.
+func noGroupRouteMessage(snaps []wa.Snapshot, rt wa.Route) string {
+	base := groupRouteBaseMessage(rt)
+
+	var groupHasSnapshot, groupHasConnectedNonMaster, groupHasConnectedMaster, outsideGroupConnected bool
+	for _, snap := range snaps {
+		if snap.GroupCode == rt.GroupCode {
+			groupHasSnapshot = true
+			if snap.Connected {
+				if snap.IsMaster {
+					groupHasConnectedMaster = true
+				} else {
+					groupHasConnectedNonMaster = true
+				}
+			}
+		} else if snap.Connected {
+			outsideGroupConnected = true
+		}
+	}
+
+	switch {
+	case !groupHasSnapshot:
+		return groupRouteMessage(base, groupNoAssignmentHint)
+	case rt.MasterOnly && groupHasConnectedNonMaster:
+		return groupRouteMessage(base, groupMasterOnlyExclusionHint)
+	case !rt.MasterOnly && !rt.AllowMaster && groupHasConnectedMaster:
+		return groupRouteMessage(base, groupMasterExclusionHint)
+	case outsideGroupConnected:
+		return groupRouteMessage(base, groupOutsideConnectedHint)
+	default:
+		return groupRouteMessage(base, "")
+	}
+}
+
+// groupRouteMessage assembles one group-scoped 409 body. The hints above and
+// the escape hatch share a SINGLE parenthetical rather than sitting in two
+// adjacent ones: an on-call reader parses "…(cause; way out)" at a glance and
+// stumbles over "…(cause) (way out)", and stumbling is the whole thing these
+// messages exist to prevent. The escape hatch is always last, so it reads as
+// the closing instruction whether or not a cause was identifiable.
+func groupRouteMessage(base, hint string) string {
+	if hint == "" {
+		return base + " (" + groupRouteEscapeHatch + ")"
+	}
+	return base + " (" + hint + "; " + groupRouteEscapeHatch + ")"
+}
+
+// routingMode names which routing decision produced the session behind a
+// send response's "routing" field (postAPISendThrough, sendMedia). A DEFINED
+// type, not a plain string: postAPISendThrough already takes several
+// adjacent string parameters (toDisplay, text) and one more untyped string
+// would be transposable with no compiler error to catch it.
+type routingMode string
+
+const (
+	routingAuto            routingMode = "auto"
+	routingMasterOnly      routingMode = "master_only"
+	routingGroup           routingMode = "group"
+	routingGroupMasterOnly routingMode = "group_master_only"
+	// routingExplicit is reported by every route that names its own session
+	// id (PostAPISendMessage, PostAPISessionSendMedia) — there is no
+	// Route/EligibleForRoute pick to describe, but the response's "routing"
+	// key stays present regardless, so a caller never has to special-case
+	// "field absent" as one more meaning.
+	routingExplicit routingMode = "explicit"
+)
+
+// routingModeFor derives the reported mode from the Route an automatic pick
+// was made against.
+func routingModeFor(rt wa.Route) routingMode {
+	switch {
+	case rt.GroupCode != "" && rt.MasterOnly:
+		return routingGroupMasterOnly
+	case rt.GroupCode != "":
+		return routingGroup
+	case rt.MasterOnly:
+		return routingMasterOnly
+	default:
+		return routingAuto
+	}
+}
+
+// sendResponseFields builds the three routing-decision keys every send/media
+// success response carries: session_group_code (always present, "" when
+// ungrouped — an ABSENT key would be indistinguishable from an older
+// gateway that never had group_code at all), session_is_master, and
+// routing. Factored out as its own pure function, the same way
+// noSendRouteMessage sits beside selectForSend, so it is directly
+// unit-testable — dispatchSend's own doc comment (send.go) explains why
+// package handler cannot otherwise reach the success branch of a real send
+// to exercise this inline. Both postAPISendThrough (api_messages.go) and
+// sendMedia (api_media.go) merge this into their own response map.
+func sendResponseFields(snap wa.Snapshot, mode routingMode) map[string]any {
+	return map[string]any{
+		"session_group_code": snap.GroupCode,
+		"session_is_master":  snap.IsMaster,
+		"routing":            string(mode),
+	}
 }
 
 // noMasterRouteMessage is the 409 body for a master_only send when no

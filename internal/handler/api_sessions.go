@@ -22,6 +22,10 @@ type apiSession struct {
 	// connection intent. Carried here so PUT .../master can report back
 	// the value it just set, and GET .../sessions can show it.
 	IsMaster bool `json:"is_master"`
+	// GroupCode mirrors wa.Snapshot.GroupCode — the routing scope, "" when
+	// ungrouped. Carried here so PUT .../group-code can report back the
+	// value it just set, and GET .../sessions can show it.
+	GroupCode string `json:"group_code"`
 }
 
 type apiEvent struct {
@@ -32,7 +36,7 @@ type apiEvent struct {
 func apiFromSnapshot(s wa.Snapshot) apiSession {
 	return apiSession{ID: s.ID, Name: s.Name, Phone: s.Phone, JID: s.JID,
 		State: string(s.State), Connected: s.Connected, QueueLen: s.QueueLen,
-		IsMaster: s.IsMaster}
+		IsMaster: s.IsMaster, GroupCode: s.GroupCode}
 }
 
 // GetAPISessions lists all sessions as live snapshots.
@@ -47,16 +51,17 @@ func (h *handlers) GetAPISessions(w http.ResponseWriter, r *http.Request) {
 
 // PostAPISessions creates a session (state=new); pairing is a separate call.
 //
-// The request struct carries explicit json tags on ALL THREE fields
+// The request struct carries explicit json tags on ALL FOUR fields
 // deliberately, not just IsMaster: Go's encoding/json matches an untagged
 // field name case-INSENSITIVELY, so an untagged IsMaster would silently
 // bind "ismaster" but NOT the documented "is_master" — the same trap this
 // struct used to be one field away from walking into.
 func (h *handlers) PostAPISessions(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Name     string `json:"name"`
-		Phone    string `json:"phone"`
-		IsMaster bool   `json:"is_master"`
+		Name      string `json:"name"`
+		Phone     string `json:"phone"`
+		IsMaster  bool   `json:"is_master"`
+		GroupCode string `json:"group_code"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -79,6 +84,17 @@ func (h *handlers) PostAPISessions(w http.ResponseWriter, r *http.Request) {
 	// needs nothing further.
 	if req.IsMaster {
 		if err := s.SetMaster(r.Context(), true); err != nil {
+			writeWAError(w, err)
+			return
+		}
+	}
+	// UNLIKE is_master above, a bad group_code must not be logged-and-
+	// ignored: writeWAError answers 400 via its *wa.ValidationError case,
+	// so the caller learns immediately their session was created but the
+	// group_code they asked for was rejected, rather than discovering it
+	// silently ungrouped later.
+	if req.GroupCode != "" {
+		if err := s.SetGroupCode(r.Context(), req.GroupCode); err != nil {
 			writeWAError(w, err)
 			return
 		}
@@ -157,6 +173,29 @@ func (h *handlers) PutAPISessionMaster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.SetMaster(r.Context(), req.IsMaster); err != nil {
+		writeWAError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, apiFromSnapshot(s.Snapshot()))
+}
+
+// PutAPISessionGroupCode is PUT /api/v1/sessions/{id}/group-code —
+// {group_code}. Modelled line-for-line on PutAPISessionMaster above: like
+// is_master, group_code is WSM-native routing state, not a backend
+// capability, so it must work identically on whatsmeow and waxum.
+func (h *handlers) PutAPISessionGroupCode(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	var req struct {
+		GroupCode string `json:"group_code"`
+	}
+	if !decodeOpsBody(w, r, &req) {
+		return
+	}
+	if err := s.SetGroupCode(r.Context(), req.GroupCode); err != nil {
 		writeWAError(w, err)
 		return
 	}

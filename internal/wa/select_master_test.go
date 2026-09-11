@@ -1,6 +1,9 @@
 package wa
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 // alwaysLiveBackend makes every registered session report Connected without a
 // real statusPump — Snapshot gates Connected on backend.Live (session.go:157),
@@ -110,5 +113,30 @@ func TestSelectMasterIsNotAllowMaster(t *testing.T) {
 	m = masterTestManager(t, specs...)
 	if _, snap, ok := m.SelectMaster(t.Context()); !ok || snap.ID != "m" {
 		t.Fatalf("SelectMaster = %q/%v, want %q", snap.ID, ok, "m")
+	}
+}
+
+// TestSelectMasterRotatesBetweenSeveralConnectedMasters pins the one
+// deliberate behaviour change in this layer: SelectMaster used to rank on
+// (QueueLen, ID) only, ignoring LastSelectedAt/CreatedAt entirely, even
+// though its own doc comment already claimed "ranking is the same as
+// SelectConnected's" (false until this change unified both onto
+// SelectSnapshotForRoute's four-key ranking). Two connected masters with
+// equal QueueLen: the LOWER-ID one was selected recently, the HIGHER-ID one
+// was never selected — "never selected" must win the tie, so m2 (not the
+// old (QueueLen, ID) winner m1) is picked.
+func TestSelectMasterRotatesBetweenSeveralConnectedMasters(t *testing.T) {
+	m := masterTestManager(t, masterSpec{"m1", true, true}, masterSpec{"m2", true, true})
+	recently := time.Now().UTC().Add(-time.Minute)
+	m.sessions["m1"].LastSelectedAt = &recently
+	// m2.LastSelectedAt stays nil: never selected.
+
+	_, snap, ok := m.SelectMaster(t.Context())
+	if !ok {
+		t.Fatal("SelectMaster: ok = false, want a route")
+	}
+	if snap.ID != "m2" {
+		t.Fatalf("SelectMaster = %q, want m2 (never-selected must win the tie under the unified four-key ranking; "+
+			"m1 would win under the old (QueueLen, ID)-only ranking)", snap.ID)
 	}
 }

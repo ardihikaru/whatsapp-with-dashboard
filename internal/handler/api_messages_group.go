@@ -28,9 +28,9 @@ func (h *handlers) PostAPISendGroupMessage(w http.ResponseWriter, r *http.Reques
 	if !ok {
 		return
 	}
-	s, _, ok := selectForSend(r, h.Manager, req.MasterOnly, req.AllowMaster)
+	s, _, ok := selectForSend(r, h.Manager, req.Route)
 	if !ok {
-		writeError(w, http.StatusConflict, noSendRouteMessage(h.Manager.Snapshots(), req.MasterOnly, req.AllowMaster))
+		writeError(w, http.StatusConflict, noSendRouteMessage(h.Manager.Snapshots(), req.Route))
 		return
 	}
 	// Group sends are alerts by default (the alerter's WA_ALERT_GROUP_JID path).
@@ -39,7 +39,7 @@ func (h *handlers) PostAPISendGroupMessage(w http.ResponseWriter, r *http.Reques
 		TenantRef: strings.TrimSpace(req.TenantRef),
 		Category:  message.NormalizeCategory(req.Category, message.CategoryAlert),
 	}
-	h.postAPISendThrough(w, r, s, jid, jid.String(), req.Text, attr)
+	h.postAPISendThrough(w, r, s, jid, jid.String(), req.Text, attr, routingModeFor(req.Route))
 }
 
 // groupSendRequest is decodeGroupSendRequest's parsed body. Kept as its OWN
@@ -47,19 +47,31 @@ func (h *handlers) PostAPISendGroupMessage(w http.ResponseWriter, r *http.Reques
 // send has a group_jid, not a phone number, and no Digits field at all —
 // forcing it into the phone-send shape would leave a field that is never
 // meaningful for this endpoint.
+//
+// GroupJID and GroupCode are unrelated despite the shared word: GroupJID is
+// a WhatsApp CHAT identifier (an @g.us conversation this session belongs
+// to); GroupCode is a WSM ROUTING CLUSTER (wa.Route.GroupCode, an operator
+// label with no WhatsApp meaning at all). This is the one endpoint where
+// both words appear in a single body — read each field's own comment before
+// touching either.
 type groupSendRequest struct {
-	GroupJID    string `json:"group_jid"`
-	Text        string `json:"text"`
-	ClientRef   string `json:"client_ref"`
-	TenantRef   string `json:"tenant_ref"`
-	Category    string `json:"category"`
-	AllowMaster bool   `json:"allow_master"`
-	// MasterOnly pins this send to the master session and fails with 409 if
-	// it is offline — see selectForSend. It OVERRIDES AllowMaster rather than
-	// combining with it: "only the master" already answers the question
-	// "may the master be used", so honouring both would make an
-	// allow_master:false + master_only:true body mean two opposite things.
-	MasterOnly bool `json:"master_only"`
+	// GroupJID names a WhatsApp GROUP CHAT — see the struct doc comment.
+	GroupJID  string `json:"group_jid"`
+	Text      string `json:"text"`
+	ClientRef string `json:"client_ref"`
+	TenantRef string `json:"tenant_ref"`
+	Category  string `json:"category"`
+	// AllowMaster/MasterOnly/GroupCode are the raw wire fields; Route below
+	// is what every call site actually uses (see wa.Route's precedence
+	// rules — master_only OVERRIDES allow_master rather than combining with
+	// it).
+	AllowMaster bool `json:"allow_master"`
+	MasterOnly  bool `json:"master_only"`
+	// GroupCode is a WSM ROUTING CLUSTER — see the struct doc comment.
+	GroupCode string `json:"group_code"`
+	// Route is Group/AllowMaster/MasterOnly folded into one wa.Route, built
+	// after normalization in decodeGroupSendRequest.
+	Route wa.Route `json:"-"`
 }
 
 // decodeGroupSendRequest reads and validates the group-send body, returning
@@ -86,6 +98,12 @@ func decodeGroupSendRequest(w http.ResponseWriter, r *http.Request) (groupSendRe
 		writeError(w, http.StatusBadRequest, err.Error())
 		return groupSendRequest{}, wa.JID{}, false
 	}
+	groupCode, err := wa.NormalizeGroupCode(req.GroupCode)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return groupSendRequest{}, wa.JID{}, false
+	}
+	req.Route = wa.Route{GroupCode: groupCode, AllowMaster: req.AllowMaster, MasterOnly: req.MasterOnly}
 	return req, jid, true
 }
 

@@ -129,23 +129,26 @@ func run() error {
 // IsMaster: without a seeded master row, the master badge (session_rows.html)
 // and the "— master" picker suffix (send.html/calls.html/verify.html) render
 // nowhere in the browser suite or any evidence screenshot — see CLAUDE.md's
-// "an e2e run against empty tables proves very little".
+// "an e2e run against empty tables proves very little". Same reasoning
+// applies to GroupCode: e2e-sess-0002 carries "kemang" so the group badge
+// (session_rows.html), the ops-page editor's pre-filled value, and the
+// /send group picker's option all render somewhere in the browser suite too.
 var seedSessionDefs = []struct {
-	ID, Name, Phone, JID, Status string
-	Active, IsMaster             bool
+	ID, Name, Phone, JID, Status, GroupCode string
+	Active, IsMaster                        bool
 }{
 	{"e2e-sess-0001", "Nomor Utama Kasir Kemang Selatan", "6285190679041",
-		"6285190679041:12@s.whatsapp.net", "connected", true, true},
+		"6285190679041:12@s.whatsapp.net", "connected", "", true, true},
 	{"e2e-sess-0002", "Cadangan Outlet Pondok Indah", "6281234567890",
-		"6281234567890:3@s.whatsapp.net", "disconnected", true, false},
-	{"e2e-sess-0003", "Sesi Uji Coba", "6289900112233", "", "new", false, false},
+		"6281234567890:3@s.whatsapp.net", "disconnected", "kemang", true, false},
+	{"e2e-sess-0003", "Sesi Uji Coba", "6289900112233", "", "new", "", false, false},
 }
 
 func seedSessions(ctx context.Context, repo *wasession.SQLRepository, base time.Time) error {
 	for i, d := range seedSessionDefs {
 		s := &wasession.Session{
 			ID: d.ID, Name: d.Name, Phone: d.Phone, JID: d.JID,
-			Active: d.Active, IsMaster: d.IsMaster, LastStatus: d.Status,
+			Active: d.Active, IsMaster: d.IsMaster, GroupCode: d.GroupCode, LastStatus: d.Status,
 			CreatedAt: base.Add(-time.Duration(i+1) * 24 * time.Hour),
 			UpdatedAt: base,
 		}

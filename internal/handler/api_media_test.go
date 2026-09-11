@@ -540,6 +540,9 @@ func TestEveryNewEndpointRejectsACookieAndAcceptsABearer(t *testing.T) {
 		{"webhook dlq replay", http.MethodPost, "/api/v1/sessions/" + s.ID + "/webhooks/dlq/entry-1/replay", "", func() io.Reader { return nil }},
 		{"reenable all webhooks", http.MethodPost, "/api/v1/webhooks/reenable-all", "", func() io.Reader { return nil }},
 		{"gateway health", http.MethodGet, "/api/v1/gateway/health", "", func() io.Reader { return nil }},
+
+		// group_code routing (layer 2).
+		{"put group-code", http.MethodPut, "/api/v1/sessions/" + s.ID + "/group-code", "application/json", func() io.Reader { return strings.NewReader(`{"group_code":"alpha"}`) }},
 	}
 
 	for _, tc := range cases {

@@ -94,6 +94,10 @@ func (h *handlers) mountAPI(mux *http.ServeMux) {
 	// backends, unlike the Phase 6b §1 block below which all 501 on
 	// whatsmeow. See PutAPISessionMaster's doc comment.
 	mux.Handle("PUT /api/v1/sessions/{id}/master", api(http.HandlerFunc(h.PutAPISessionMaster)))
+	// Same reasoning as /master immediately above: group_code is WSM-native
+	// routing state, not a backend capability. See PutAPISessionGroupCode's
+	// doc comment.
+	mux.Handle("PUT /api/v1/sessions/{id}/group-code", api(http.HandlerFunc(h.PutAPISessionGroupCode)))
 	mux.Handle("GET /api/v1/sessions/{id}/pairing", api(http.HandlerFunc(h.GetAPISessionPairing)))
 	mux.Handle("POST /api/v1/messages", api(http.HandlerFunc(h.PostAPISendMessageAuto)))
 	mux.Handle("POST /api/v1/messages/group", api(http.HandlerFunc(h.PostAPISendGroupMessage)))

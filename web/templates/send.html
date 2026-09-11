@@ -33,6 +33,21 @@
             {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}}){{if .IsMaster}} — master{{end}}</option>{{end}}
           </select>
         </label>
+        <!-- A <select>, deliberately NOT the <input list>+<datalist> the
+             sessions pages use: /sessions can INTRODUCE a new code (an open
+             set), but /send can only usefully target one that already
+             exists (a closed set) — a typo here would 409 with "no
+             connected sessions available" instead of failing to parse, so
+             letting the browser enforce a real option is strictly better.
+             The empty option first, selected, is what keeps ungrouped auto
+             routing the default for anyone who ignores this field. -->
+        <label class="textfield">
+          <span class="textfield-label">Routing group</span>
+          <select name="group_code" class="select">
+            <option value="" selected>Ungrouped (default)</option>
+            {{range .GroupCodes}}<option value="{{.}}">{{.}}</option>{{end}}
+          </select>
+        </label>
         <label class="textfield">
           <span class="textfield-label">To (international format)</span>
           <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
@@ -95,6 +110,19 @@
           <select name="session_id" class="select">
             <option value="">Automatic</option>
             {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}}){{if .IsMaster}} — master{{end}}</option>{{end}}
+          </select>
+        </label>
+        <!-- Same picker as the text form above — a <select> over a closed
+             set, not the datalist sessions/ops.html uses; see that form's
+             comment for the reasoning. Both panels must carry this field:
+             adding it to one and forgetting the other is the single most
+             likely bug in this file (see the hx-encoding/enctype comment
+             above about exactly that class of mistake). -->
+        <label class="textfield">
+          <span class="textfield-label">Routing group</span>
+          <select name="group_code" class="select">
+            <option value="" selected>Ungrouped (default)</option>
+            {{range .GroupCodes}}<option value="{{.}}">{{.}}</option>{{end}}
           </select>
         </label>
         <label class="textfield">

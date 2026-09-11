@@ -25,7 +25,7 @@ func (h *handlers) PostAPISendMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	h.postAPISendThrough(w, r, s, wa.ToJID(req.Digits), req.Digits, req.Text, req.Attr)
+	h.postAPISendThrough(w, r, s, wa.ToJID(req.Digits), req.Digits, req.Text, req.Attr, routingExplicit)
 }
 
 func (h *handlers) PostAPISendMessageAuto(w http.ResponseWriter, r *http.Request) {
@@ -33,36 +33,37 @@ func (h *handlers) PostAPISendMessageAuto(w http.ResponseWriter, r *http.Request
 	if !valid {
 		return
 	}
-	s, _, ok := selectForSend(r, h.Manager, req.MasterOnly, req.AllowMaster)
+	s, _, ok := selectForSend(r, h.Manager, req.Route)
 	if !ok {
-		writeError(w, http.StatusConflict, noSendRouteMessage(h.Manager.Snapshots(), req.MasterOnly, req.AllowMaster))
+		writeError(w, http.StatusConflict, noSendRouteMessage(h.Manager.Snapshots(), req.Route))
 		return
 	}
-	h.postAPISendThrough(w, r, s, wa.ToJID(req.Digits), req.Digits, req.Text, req.Attr)
+	h.postAPISendThrough(w, r, s, wa.ToJID(req.Digits), req.Digits, req.Text, req.Attr, routingModeFor(req.Route))
 }
 
 // textSendRequest is decodeSendRequest's parsed, validated result. A named
 // struct rather than a growing positional-return tuple — a fifth return
-// value would put two adjacent bools (AllowMaster and the ok success flag)
-// in the signature, which go vet cannot protect against a swap.
+// value would put two adjacent bools in the signature, which go vet cannot
+// protect against a swap.
 type textSendRequest struct {
-	Digits      string
-	Text        string
-	Attr        message.Attribution
-	AllowMaster bool
-	// MasterOnly pins the send to the master session — see
-	// groupSendRequest.MasterOnly and wa.Manager.SelectMaster. Like
-	// AllowMaster it governs AUTOMATIC routing only; PostAPISendMessage
-	// already names its session.
-	MasterOnly bool
+	Digits string
+	Text   string
+	Attr   message.Attribution
+	// Route carries every automatic-routing input (group_code, master_only,
+	// allow_master) as one unit — see wa.Route's own doc comment for the
+	// scope/mode precedence. Governs AUTOMATIC routing only
+	// (PostAPISendMessageAuto); the explicit-session route
+	// (PostAPISendMessage) ignores it — naming a session id already
+	// bypasses every exclusion.
+	Route wa.Route
 }
 
 // decodeSendRequest parses the send body, including the optional attribution the
 // log page breaks down by. category defaults to "notification"; api_client_id is
 // NOT read here — it comes from the bearer principal in sendThroughJID.
-// allow_master governs AUTOMATIC routing only (PostAPISendMessageAuto); the
-// explicit-session route (PostAPISendMessage) ignores it — naming a session
-// id already bypasses the exclusion.
+// group_code/allow_master/master_only govern AUTOMATIC routing only
+// (PostAPISendMessageAuto); the explicit-session route (PostAPISendMessage)
+// ignores them — naming a session id already bypasses the exclusion.
 func decodeSendRequest(w http.ResponseWriter, r *http.Request) (textSendRequest, bool) {
 	var req struct {
 		To          string `json:"to"`
@@ -72,6 +73,7 @@ func decodeSendRequest(w http.ResponseWriter, r *http.Request) (textSendRequest,
 		Category    string `json:"category"`
 		AllowMaster bool   `json:"allow_master"`
 		MasterOnly  bool   `json:"master_only"`
+		GroupCode   string `json:"group_code"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -87,19 +89,29 @@ func decodeSendRequest(w http.ResponseWriter, r *http.Request) (textSendRequest,
 		writeError(w, http.StatusBadRequest, err.Error())
 		return textSendRequest{}, false
 	}
+	groupCode, err := wa.NormalizeGroupCode(req.GroupCode)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return textSendRequest{}, false
+	}
 	attr := message.Attribution{
 		ClientRef: strings.TrimSpace(req.ClientRef),
 		TenantRef: strings.TrimSpace(req.TenantRef),
 		Category:  message.NormalizeCategory(req.Category, message.CategoryNotification),
 	}
-	return textSendRequest{Digits: digits, Text: req.Text, Attr: attr, AllowMaster: req.AllowMaster, MasterOnly: req.MasterOnly}, true
+	route := wa.Route{GroupCode: groupCode, AllowMaster: req.AllowMaster, MasterOnly: req.MasterOnly}
+	return textSendRequest{Digits: digits, Text: req.Text, Attr: attr, Route: route}, true
 }
 
 // postAPISendThrough is the shared JSON tail of every machine send path — phone
 // or group. It takes a resolved wa.JID rather than digits so the group handler
-// reuses it verbatim (see sendThroughJID).
+// reuses it verbatim (see sendThroughJID). mode reports the routing decision
+// that chose s: routingExplicit for a named-session route, or
+// routingModeFor(route) for an automatic one — see routingMode's doc comment
+// on why this is a defined type rather than one more adjacent string
+// parameter.
 func (h *handlers) postAPISendThrough(
-	w http.ResponseWriter, r *http.Request, s *wa.ManagedSession, to wa.JID, toDisplay, text string, attr message.Attribution,
+	w http.ResponseWriter, r *http.Request, s *wa.ManagedSession, to wa.JID, toDisplay, text string, attr message.Attribution, mode routingMode,
 ) {
 	outcome, status := h.sendThroughJID(r, s, to, toDisplay, text, attr)
 	if status >= 400 {
@@ -112,6 +124,9 @@ func (h *handlers) postAPISendThrough(
 		"status":       outcome.Status,
 		"session_id":   snap.ID,
 		"session_name": snap.Name,
+	}
+	for k, v := range sendResponseFields(snap, mode) {
+		resp[k] = v
 	}
 	if outcome.WAMessageID != "" {
 		resp["wa_message_id"] = outcome.WAMessageID

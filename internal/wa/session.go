@@ -82,6 +82,16 @@ type ManagedSession struct {
 	// socket, or active.
 	isMaster bool
 
+	// groupCode mirrors wa_sessions.group_code: a ROUTING SCOPE parallel to
+	// isMaster above, not a second exclusion flag. "" is the ungrouped
+	// default pool; a non-empty code removes this session from default
+	// automatic selection (load_balance.go's EligibleForRoute) entirely —
+	// including a global master_only pick — and it becomes reachable only
+	// by a Route naming this same code. Set by SetGroupCode below, which
+	// touches only this field and its persisted column — never state, the
+	// socket, or active — exactly like SetMaster.
+	groupCode string
+
 	// stalled/stalledReason mark "needs operator attention" — the
 	// reconnect supervisor (reconnect.go) has called Backend.Connect
 	// ReconnectStallThreshold times in a row without the session ever
@@ -131,6 +141,11 @@ type Snapshot struct {
 	// IsMaster mirrors ManagedSession.isMaster — see that field's doc
 	// comment. Read by load_balance.go's exclusion predicate.
 	IsMaster bool
+
+	// GroupCode mirrors ManagedSession.groupCode — see that field's doc
+	// comment. Read by load_balance.go's EligibleForRoute as the scope
+	// match.
+	GroupCode string
 }
 
 // Snapshot copies the live status. Connected asks the backend's Live (a
@@ -148,6 +163,7 @@ func (s *ManagedSession) Snapshot() Snapshot {
 		Stalled:        s.stalled,
 		StalledReason:  s.stalledReason,
 		IsMaster:       s.isMaster,
+		GroupCode:      s.groupCode,
 	}
 	if !s.jid.IsEmpty() {
 		snap.JID = s.jid.String()
@@ -301,6 +317,31 @@ func (s *ManagedSession) SetMaster(ctx context.Context, master bool) error {
 		s.ring("flagged as a master session — excluded from automatic send routing")
 	} else {
 		s.ring("unflagged as a master session — eligible for automatic send routing again")
+	}
+	return nil
+}
+
+// SetGroupCode assigns or clears this session's routing scope (see
+// groupCode's doc comment). Normalization happens FIRST, before any state or
+// DB write — an invalid code returns a *ValidationError and leaves the
+// session exactly as it was, the same contract manager_crud.go's session
+// creation already relies on for phone/name validation. Like SetMaster this
+// never touches state, the socket, or active.
+func (s *ManagedSession) SetGroupCode(ctx context.Context, code string) error {
+	normalized, err := NormalizeGroupCode(code)
+	if err != nil {
+		return &ValidationError{Field: "group_code", Msg: err.Error()}
+	}
+	s.mu.Lock()
+	s.groupCode = normalized
+	s.mu.Unlock()
+	if err := s.mgr.repo.SetGroupCode(s.mgr.persistCtx, s.ID, normalized); err != nil {
+		return err
+	}
+	if normalized != "" {
+		s.ring(fmt.Sprintf("assigned to routing group %q — excluded from ungrouped automatic routing", normalized))
+	} else {
+		s.ring("routing group cleared — back in the ungrouped automatic routing pool")
 	}
 	return nil
 }

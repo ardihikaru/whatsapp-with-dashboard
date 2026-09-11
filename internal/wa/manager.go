@@ -242,6 +242,35 @@ func (m *Manager) Snapshots() []Snapshot {
 	return out
 }
 
+// GroupCodes returns every distinct non-empty routing group currently in
+// use, lexically sorted — for populating a "route to group X" picker.
+//
+// This is derived from Snapshots(), i.e. from the in-memory
+// Manager.sessions map, rather than a `SELECT DISTINCT group_code FROM
+// wa_sessions` — deliberately: routing itself (EligibleForRoute) matches a
+// Route's GroupCode against Snapshot.GroupCode in RAM, so a SQL query would
+// be a second opinion about the same fact, one that could drift from it (a
+// stale or since-cleared row) and offer an operator a code that currently
+// routes nowhere. The app is also a hard singleton (CLAUDE.md) with no
+// second process to disagree with this one's memory. The honest consequence
+// worth keeping in mind: a code exists in this list only while at least one
+// live session still carries it — clearing the last session's group_code
+// makes that code vanish here even though nothing "deleted" it anywhere.
+func (m *Manager) GroupCodes() []string {
+	seen := map[string]bool{}
+	for _, snap := range m.Snapshots() {
+		if snap.GroupCode != "" {
+			seen[snap.GroupCode] = true
+		}
+	}
+	out := make([]string, 0, len(seen))
+	for code := range seen {
+		out = append(out, code)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // Counts returns (total, connected) for the health endpoint and the real
 // dashboard KPI tile.
 func (m *Manager) Counts() (total, connected int) {

@@ -95,3 +95,69 @@ func TestSetMasterRoundTripsThroughTheSessionsTable(t *testing.T) {
 		t.Error("IsMaster = true after SetMaster(false), want false")
 	}
 }
+
+// TestAFreshlyInsertedSessionIsUngrouped is TestAFreshlyInsertedSessionIsNotAMaster's
+// twin for group_code: a plain Insert (no SetGroupCode call) leaves
+// group_code "" — the DEFAULT "" semantics migrations/0009_session_group_code.sql
+// relies on so every existing row keeps routing exactly as before.
+func TestAFreshlyInsertedSessionIsUngrouped(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	s := &Session{ID: "sess-1", Name: "sess-1", Phone: "628000", LastStatus: "new"}
+	if err := r.Insert(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := findByID(all, "sess-1")
+	if !ok {
+		t.Fatal("session sess-1 not found after Insert")
+	}
+	if got.GroupCode != "" {
+		t.Errorf("GroupCode = %q, want \"\" for a freshly inserted session", got.GroupCode)
+	}
+}
+
+// TestSetGroupCodeRoundTripsThroughTheSessionsTable is
+// TestSetMasterRoundTripsThroughTheSessionsTable's twin for group_code:
+// Insert → SetGroupCode → All carries the code correctly, and clearing it
+// back to "" (not merely setting it once) round-trips too.
+func TestSetGroupCodeRoundTripsThroughTheSessionsTable(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	s := &Session{ID: "sess-1", Name: "sess-1", Phone: "628000", LastStatus: "new"}
+	if err := r.Insert(ctx, s); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := r.SetGroupCode(ctx, "sess-1", "alpha"); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := findByID(all, "sess-1")
+	if !ok {
+		t.Fatal("session sess-1 not found after SetGroupCode(alpha)")
+	}
+	if got.GroupCode != "alpha" {
+		t.Errorf("GroupCode = %q after SetGroupCode(alpha), want %q", got.GroupCode, "alpha")
+	}
+
+	if err := r.SetGroupCode(ctx, "sess-1", ""); err != nil {
+		t.Fatal(err)
+	}
+	all, err = r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok = findByID(all, "sess-1")
+	if !ok {
+		t.Fatal("session sess-1 not found after SetGroupCode(\"\")")
+	}
+	if got.GroupCode != "" {
+		t.Errorf("GroupCode = %q after SetGroupCode(\"\"), want \"\"", got.GroupCode)
+	}
+}

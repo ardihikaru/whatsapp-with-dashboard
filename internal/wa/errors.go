@@ -5,7 +5,9 @@ import "errors"
 // Sentinel errors HTTP handlers map to statuses (docs/08):
 // ErrNotFound→404, ErrWrongState/ErrNotPaired/ErrDeviceGone→409,
 // ErrNotConnected→409, ErrQueueFull→429, ErrBackendBusy→503,
-// ErrNotAGroupJID→400, ErrRejectedByBackend→422, ErrAlreadyExists→409.
+// ErrNotAGroupJID→400, ErrRejectedByBackend→422, ErrAlreadyExists→409,
+// *ValidationError→400 (matched via errors.As, not errors.Is — it is a
+// struct type carrying a per-field message, not a sentinel).
 var (
 	ErrNotFound     = errors.New("session not found")
 	ErrNotPaired    = errors.New("session not paired yet")
