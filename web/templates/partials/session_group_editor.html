@@ -1,0 +1,32 @@
+{{define "session_group_editor"}}
+<div class="card form-card">
+  <h5>Routing group — {{.Session.Name}}</h5>
+  <p class="muted">Assigning a group takes this session OUT of default automatic
+     routing — it becomes reachable only by a request naming this same
+     <span class="mono">group_code</span>. Leave blank to keep it in the
+     ungrouped automatic pool.</p>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>
+  {{else if .Saved}}
+    {{if .Value}}<p class="muted">Saved — routing group set to <span class="badge badge-group">{{.Value}}</span>. Excluded from ungrouped automatic routing.</p>
+    {{else}}<p class="muted">Saved — ungrouped, back in the default automatic routing pool.</p>
+    {{end}}
+  {{end}}
+  <form hx-post="{{u "/sessions"}}/{{.Session.ID}}/group-code" hx-target="#session-group-editor" hx-swap="innerHTML"
+        action="{{u "/sessions"}}/{{.Session.ID}}/group-code" method="post" novalidate>
+    <input type="hidden" name="view" value="list">
+    <label class="textfield">
+      <span class="textfield-label">Group code</span>
+      <input list="wa-group-codes" name="group_code" value="{{.Value}}"
+             maxlength="32" placeholder="none — ungrouped" autocomplete="off">
+      <datalist id="wa-group-codes">
+        {{range .GroupCodes}}<option value="{{.}}">{{end}}
+      </datalist>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <button class="btn btn-outline" type="button"
+              hx-on:click="document.getElementById('session-group-editor').replaceChildren()">Cancel</button>
+    </div>
+  </form>
+</div>
+{{end}}

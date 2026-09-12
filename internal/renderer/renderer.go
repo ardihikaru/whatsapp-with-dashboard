@@ -155,6 +155,7 @@ var partialFiles = []string{
 	"templates/partials/verify_rows.html",
 	"templates/partials/session_ops_panel.html",
 	"templates/partials/session_group_code_result.html",
+	"templates/partials/session_group_editor.html",
 	"templates/partials/webhook_rows.html",
 	"templates/partials/webhook_dlq_rows.html",
 	"templates/partials/convo_run_rows.html",

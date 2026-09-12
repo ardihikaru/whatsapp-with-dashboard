@@ -11,8 +11,10 @@ import (
 type sessionsPageData struct {
 	PageBase
 	// GroupCodes feeds session-new's <datalist> — see GetSessionNew. Not
-	// needed on sessionRowsData: the rows table's own group-code cell is
-	// read-only (session_rows.html).
+	// needed on sessionRowsData: the rows table's own group-code cell stays
+	// read-only (session_rows.html) — editing happens in the
+	// session_group_editor partial, fetched on demand per row via
+	// GetSessionGroupCodeEditor, which pulls its own GroupCodes list.
 	GroupCodes []string
 }
 
@@ -121,6 +123,41 @@ func (h *handlers) PostSessionSetMaster(w http.ResponseWriter, r *http.Request) 
 	h.GetSessionRows(w, r)
 }
 
+// sessionGroupEditorData feeds the session_group_editor partial — the
+// /sessions list's on-demand editor loaded into #session-group-editor
+// (list.html), OUTSIDE the polled #session-rows tbody for the same reason
+// the ops page's own card sits outside #ops-panel: a live text input would
+// get wiped by the next poll's hx-swap="innerHTML" mid-edit.
+//
+// Value carries the operator's just-submitted text on a validation error
+// (so a typo stays visible to fix) and the stored code otherwise — see
+// GetSessionGroupCodeEditor and the "view=list" branch of
+// PostSessionSetGroupCode below.
+type sessionGroupEditorData struct {
+	Session    wa.Snapshot
+	GroupCodes []string
+	Value      string
+	Error      string
+	Saved      bool
+}
+
+// GetSessionGroupCodeEditor renders the list page's on-demand routing-group
+// editor for one session (see sessionGroupEditorData's doc comment). 404s
+// like every other single-session handler on a stale/unknown id.
+func (h *handlers) GetSessionGroupCodeEditor(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	snap := s.Snapshot()
+	h.Renderer.RenderPartial(w, "session_group_editor", sessionGroupEditorData{
+		Session:    snap,
+		GroupCodes: h.Manager.GroupCodes(),
+		Value:      snap.GroupCode,
+	})
+}
+
 // sessionGroupCodeResultData feeds the session_group_code_result partial —
 // the ops page's OWN small result div, not #session-rows: this route lives
 // on /sessions/{id}/ops, which has no such element, and unlike the master
@@ -131,14 +168,16 @@ type sessionGroupCodeResultData struct {
 	Error     string
 }
 
-// PostSessionSetGroupCode is the ops page's routing-group editor's submit
-// target. Unlike PostSessionSetMaster this does not re-render #session-rows
-// (this page has none); it renders the small result partial the form's own
-// hx-target points at. A *wa.ValidationError from SetGroupCode is shown
-// inline, not swallowed into slog — the same reasoning PostSessionCreate's
-// doc comment gives for normalising group_code before Create: this is free
-// text, not a checkbox, and an operator needs to see why their save did
-// nothing.
+// PostSessionSetGroupCode is the submit target for BOTH routing-group
+// editors: the ops page's own static card (ops.html) and the /sessions
+// list's on-demand editor (session_group_editor.html), distinguished by a
+// hidden "view=list" field the list editor's form carries and the ops
+// card's does not. The save logic is identical either way (SetGroupCode,
+// *wa.ValidationError → message shown inline rather than swallowed into
+// slog — the same reasoning PostSessionCreate's doc comment gives: this is
+// free text, not a checkbox, and an operator needs to see why their save
+// did nothing); only the partial rendered back — and, on the list view,
+// whether the polled tbody is told to refresh — differs.
 func (h *handlers) PostSessionSetGroupCode(w http.ResponseWriter, r *http.Request) {
 	s, ok := h.Manager.Get(r.PathValue("id"))
 	if !ok {
@@ -146,6 +185,7 @@ func (h *handlers) PostSessionSetGroupCode(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	code := r.FormValue("group_code")
+	fromList := r.FormValue("view") == "list"
 	if err := s.SetGroupCode(r.Context(), code); err != nil {
 		var verr *wa.ValidationError
 		msg := "could not save routing group"
@@ -154,10 +194,27 @@ func (h *handlers) PostSessionSetGroupCode(w http.ResponseWriter, r *http.Reques
 		} else {
 			slog.Warn("set group code", "session", s.ID, "err", err)
 		}
+		if fromList {
+			h.Renderer.RenderPartial(w, "session_group_editor", sessionGroupEditorData{
+				Session: s.Snapshot(), GroupCodes: h.Manager.GroupCodes(), Value: code, Error: msg,
+			})
+			return
+		}
 		h.Renderer.RenderPartial(w, "session_group_code_result", sessionGroupCodeResultData{Error: msg})
 		return
 	}
-	h.Renderer.RenderPartial(w, "session_group_code_result", sessionGroupCodeResultData{GroupCode: s.Snapshot().GroupCode})
+	snap := s.Snapshot()
+	if fromList {
+		// The polled #session-rows tbody (list.html) listens for this via
+		// hx-trigger="…, sessions-changed from:body" so the badge in the
+		// row updates without waiting out the 5s poll.
+		w.Header().Set("HX-Trigger", "sessions-changed")
+		h.Renderer.RenderPartial(w, "session_group_editor", sessionGroupEditorData{
+			Session: snap, GroupCodes: h.Manager.GroupCodes(), Value: snap.GroupCode, Saved: true,
+		})
+		return
+	}
+	h.Renderer.RenderPartial(w, "session_group_code_result", sessionGroupCodeResultData{GroupCode: snap.GroupCode})
 }
 
 // PostSessionDeactivate drops the socket, keeps credentials.

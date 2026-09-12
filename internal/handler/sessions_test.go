@@ -333,3 +333,81 @@ func TestCreatingASessionWithAMalformedGroupCodeCreatesNothingAndShowsTheError(t
 		t.Errorf("a session was created despite the malformed group_code — normalise-first ordering was lost; rows:\n%s", rows.Body.String())
 	}
 }
+
+// TestTheSessionsPageCarriesAGroupEditorSlotOutsideThePolledTbody pins the
+// inline-edit design's load-bearing layout fact: #session-group-editor must
+// sit OUTSIDE #session-rows (which re-polls itself every 5s with
+// hx-swap="innerHTML" and would wipe a half-typed value mid-edit — see
+// session_rows.html's own comment), and the tbody's own hx-trigger must
+// listen for the "sessions-changed" event a save fires, or the row never
+// picks up the new badge without waiting out the next poll.
+func TestTheSessionsPageCarriesAGroupEditorSlotOutsideThePolledTbody(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	rend.RenderPage(rec, "sessions", sessionsPageData{})
+	body := rec.Body.String()
+
+	tbodyEnd := strings.Index(body, "</tbody>")
+	editorIdx := strings.Index(body, `id="session-group-editor"`)
+	if tbodyEnd == -1 {
+		t.Fatalf("sessions page has no </tbody> at all; body:\n%s", body)
+	}
+	if editorIdx == -1 {
+		t.Fatalf(`sessions page does not carry id="session-group-editor"; body:`+"\n%s", body)
+	}
+	if editorIdx < tbodyEnd {
+		t.Errorf("#session-group-editor appears INSIDE the polled tbody (index %d < </tbody> index %d) — it would be wiped by the next 5s poll; body:\n%s",
+			editorIdx, tbodyEnd, body)
+	}
+
+	tbodyStart := strings.Index(body, `id="session-rows"`)
+	if tbodyStart == -1 {
+		t.Fatalf(`sessions page does not carry id="session-rows"; body:`+"\n%s", body)
+	}
+	tbodyTag := body[tbodyStart:tbodyEnd]
+	if !strings.Contains(tbodyTag, "sessions-changed from:body") {
+		t.Errorf(`#session-rows hx-trigger does not listen for "sessions-changed from:body" — a save from the list editor would not refresh the row; tag:`+"\n%s", tbodyTag)
+	}
+}
+
+// TestEverySessionRowOffersEditGroupRegardlessOfMaster is the test that
+// stops a stray {{if .IsMaster}} guard from creeping onto the Edit group
+// button: group_code is deliberately uncoupled from is_master
+// (list.html's own explainer paragraph), so the button must render on both
+// a master and a non-master row alike.
+func TestEverySessionRowOffersEditGroupRegardlessOfMaster(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := sessionRowsData{Sessions: []wa.Snapshot{
+		{ID: "master-1", Name: "Master Gateway", State: wa.StateConnected, IsMaster: true},
+		{ID: "plain-1", Name: "Plain Gateway", State: wa.StateConnected, IsMaster: false},
+	}}
+	rec := httptest.NewRecorder()
+	rend.RenderPartial(rec, "session_rows", data)
+	body := rec.Body.String()
+
+	for _, id := range []string{"master-1", "plain-1"} {
+		wantGet := `hx-get="/sessions/` + id + `/group-code/edit"`
+		if !strings.Contains(body, wantGet) {
+			t.Errorf("row %q does not carry %s; body:\n%s", id, wantGet, body)
+		}
+	}
+	if got := strings.Count(body, `hx-target="#session-group-editor"`); got != 2 {
+		t.Errorf(`hx-target="#session-group-editor" appears %d times, want 2 (one per row); body:`+"\n%s", got, body)
+	}
+}

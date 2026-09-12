@@ -3,6 +3,18 @@
 ## [Unreleased]
 
 ### Added
+- **Inline "Edit group" on `/sessions`.** A row's routing `group_code` can now
+  be changed without leaving the list: an "Edit group" button (every row,
+  master or not — `group_code` stays deliberately uncoupled from `is_master`)
+  loads an editor into a slot below the table, `#session-group-editor`,
+  OUTSIDE the tbody that re-polls itself every 5s — the same reason the Ops
+  page's own routing-group card lives outside its own polled panel. Saving
+  posts to the existing `/sessions/{id}/group-code` route with a hidden
+  `view=list` field; on success the response carries `HX-Trigger:
+  sessions-changed`, which the rows tbody now also listens for
+  (`hx-trigger="load, every 5s, sessions-changed from:body"`) so the badge
+  updates immediately instead of waiting out the next poll. The Ops page's
+  own save path is unchanged byte-for-byte.
 - **`group_code` routing scopes.** A session can now carry an optional
   `group_code`, and the four auto-routing endpoints (`POST /api/v1/messages`,
   `/messages/group`, `/messages/media` — a multipart form field there — and

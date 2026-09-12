@@ -2051,3 +2051,70 @@ removed. **No secret was written into this file or into the repository**: the
 throwaway admin password, the disposable MinIO credentials and the minted API
 client secret were all generated outside the tree and used only in the processes
 that needed them.
+
+## 2026-09-13 — inline "Edit group" on `/sessions`, browser verification
+
+Change under test: an "Edit group" button on every `/sessions` row loads a
+routing-group editor into `#session-group-editor`, a slot OUTSIDE the 5s-polled
+tbody; saving posts to the existing `/sessions/{id}/group-code` with a hidden
+`view=list` and answers `HX-Trigger: sessions-changed`, which the tbody now
+listens for. `group_code` stays uncoupled from `is_master` (decided with the
+operator; see `internal/wa/load_balance.go:44-52` for why a master-only group
+would break plain `group_code` routing).
+
+### Unit layer
+
+`go vet ./...` clean. `go test ./... -count=1`: every package `ok`, no `FAIL`
+lines. Seven new tests in `internal/handler/sessions_test.go` and
+`session_admin_pages_test.go`; two were shown red by reverting their hunk
+(`HX-Trigger = "", want "sessions-changed"` with the header line removed;
+`row "master-1" does not carry hx-get=".../group-code/edit"` with the button
+removed) and green with it restored.
+
+### Browser, app on 127.0.0.1:8801, SQLite, 3 seeded sessions, 0 connected
+
+Bootstrapped the same way as the 2026-09-11 entry (throwaway password file in
+the scratch dir, throwaway `wsm-e2e-minio` on 127.0.0.1:19000,
+`scripts/e2e-env.sh`). Chrome via the Claude-in-Chrome extension, desktop
+viewport.
+
+- `/sessions` renders **Edit group** on all three rows — the master row
+  (`e2e-sess-0001`), the non-master grouped row (`kemang`) and the new one.
+- Clicking it on `Sesi Uji Coba` loaded the "Routing group — Sesi Uji Coba"
+  card below the table (`GET /sessions/e2e-sess-0003/group-code/edit -> 200`
+  in the server log).
+- Typed `jakarta-selatan`, waited 7s: the tbody swapped **10 times**
+  (`htmx:afterSwap` on `session-rows` counted from the page) and the input
+  still read `jakarta-selatan`. The poll does not reach the editor.
+- Save: the row's Group cell showed the new badge without a reload (the
+  `sessions-changed` trigger fired an immediate `GET /sessions/rows`), and the
+  editor showed "Saved — routing group set to …" with the code kept in the
+  input. Screenshot: `/tmp/claude-chrome-screenshots-anNXbn/screenshot-1789249029759-0.jpg`.
+- `Bad Code!` + Enter: inline `alert-error` "group_code may contain only
+  lowercase letters, digits, "-" and "_"", the typed text retained, row badge
+  unchanged. Screenshot: `…/screenshot-1789249045812-1.jpg`.
+- Cancel: `#session-group-editor` emptied (`childElementCount` 0); the saved
+  code stayed on the row.
+- Simulated the poll racing a click from the page (`button.click()` followed
+  synchronously by `tbody.innerHTML = tbody.innerHTML`): the editor still
+  swapped in. HTMX does not drop a response because its trigger left the DOM.
+
+### Not verified, and why
+
+**One physical click on Edit group produced no editor** on the very first
+attempt after login; a second click, every later click, and the programmatic
+race above all worked, so it did not reproduce. The likeliest cause is the
+mousedown and mouseup landing on different DOM nodes across a tbody swap
+(no `click` event is dispatched then) — a property of every button inside the
+polled tbody (Set master, Activate…), not of this change. Not root-caused.
+
+Phone-width layout of the editor card was not measured (the card reuses
+`.card.form-card` from the Ops page, which `e2e/overflow.spec.ts` already
+covers there). `make e2e` (Playwright) was not run for this change.
+
+### Teardown
+
+App killed by PID (`ss` shows no `:8801` listener), `docker rm -f
+wsm-e2e-minio` (0 containers left), throwaway password and MinIO secret files
+deleted from the scratch dir. No secret was written into this file or the
+repository.

@@ -512,3 +512,146 @@ func TestEveryNewTableIsWrappedInTableScroll(t *testing.T) {
 		})
 	}
 }
+
+// TestTheGroupEditorPrefillsTheCurrentCodeAndOffersExistingOnes drives
+// GetSessionGroupCodeEditor end to end: the seeded session already carries
+// a code (set directly through wa.ManagedSession.SetGroupCode, the same
+// call PostSessionSetGroupCode itself makes), a second session is created
+// with a DIFFERENT code through the ordinary create form, and the editor
+// GET must prefill the FIRST session's own code while offering BOTH codes
+// in the datalist — plus the hidden view=list field the save handler
+// branches on.
+func TestTheGroupEditorPrefillsTheCurrentCodeAndOffersExistingOnes(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+
+	if err := s.SetGroupCode(context.Background(), "kemang"); err != nil {
+		t.Fatal(err)
+	}
+	createRes := authedPostForm(t, srv, sessions, "/sessions", url.Values{
+		"name": {"Second Gateway"}, "phone": {"+62 812-3333-4444"}, "group_code": {"ops"},
+	})
+	// PostSessionCreate redirects (303) a non-HX-Request POST — see its own
+	// doc comment — so a plain form post like this one is expected to
+	// redirect, not render a partial.
+	if createRes.Code != http.StatusSeeOther {
+		t.Fatalf("POST /sessions (second session) = %d, want 303: %s", createRes.Code, createRes.Body.String())
+	}
+
+	res := authedGet(t, srv, sessions, "/sessions/"+s.ID+"/group-code/edit")
+	if res.Code != http.StatusOK {
+		t.Fatalf("GET /sessions/%s/group-code/edit = %d: %s", s.ID, res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, `value="kemang"`) {
+		t.Errorf("editor does not prefill the session's own group code (kemang); body:\n%s", body)
+	}
+	for _, code := range []string{"kemang", "ops"} {
+		if !strings.Contains(body, `<option value="`+code+`">`) {
+			t.Errorf("editor's datalist is missing an <option> for %q; body:\n%s", code, body)
+		}
+	}
+	if !strings.Contains(body, `name="view" value="list"`) {
+		t.Errorf(`editor form does not carry hidden name="view" value="list"; body:`+"\n%s", body)
+	}
+}
+
+// TestTheGroupEditorIs404ForAnUnknownSession matches every other
+// single-session GET handler's behaviour on a stale/unknown id.
+func TestTheGroupEditorIs404ForAnUnknownSession(t *testing.T) {
+	srv, sessions, _, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+
+	res := authedGet(t, srv, sessions, "/sessions/does-not-exist/group-code/edit")
+	if res.Code != http.StatusNotFound {
+		t.Fatalf("GET /sessions/does-not-exist/group-code/edit = %d, want 404: %s", res.Code, res.Body.String())
+	}
+}
+
+// TestSavingFromTheListEditorRefreshesTheRowsViaHXTrigger drives the
+// list-editor save path end to end: view=list must render the editor
+// partial back (not the ops page's session_group_code_result), report the
+// save with "Saved" copy, and fire HX-Trigger: sessions-changed so
+// #session-rows' hx-trigger (list.html) picks up the new badge — proven
+// here by re-fetching /sessions/rows and finding the badge for real,
+// rather than trusting the header alone.
+func TestSavingFromTheListEditorRefreshesTheRowsViaHXTrigger(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+
+	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/group-code",
+		url.Values{"view": {"list"}, "group_code": {"kemang"}})
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST /sessions/%s/group-code (view=list) = %d: %s", s.ID, res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("HX-Trigger"); got != "sessions-changed" {
+		t.Errorf(`HX-Trigger = %q, want "sessions-changed"`, got)
+	}
+	if !strings.Contains(res.Body.String(), "Saved") {
+		t.Errorf("list-editor save response does not say \"Saved\"; body:\n%s", res.Body.String())
+	}
+	if !strings.Contains(res.Body.String(), "<form") {
+		t.Errorf("list-editor save response does not still carry the editor form; body:\n%s", res.Body.String())
+	}
+
+	rows := authedGet(t, srv, sessions, "/sessions/rows")
+	rowsBody := rows.Body.String()
+	if !strings.Contains(rowsBody, "badge-group") || !strings.Contains(rowsBody, "kemang") {
+		t.Errorf("rows do not show the saved group code after the list-editor save; body:\n%s", rowsBody)
+	}
+}
+
+// TestAMalformedCodeFromTheListEditorStaysInTheEditorWithTheError is the
+// failure-path twin of the test above: an invalid code must re-render the
+// editor (not the rows) with the operator's own typed value still in the
+// field, an inline error, and NO HX-Trigger — a bad save must not tell the
+// tbody anything changed.
+func TestAMalformedCodeFromTheListEditorStaysInTheEditorWithTheError(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+
+	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/group-code",
+		url.Values{"view": {"list"}, "group_code": {"Bad Code!"}})
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST /sessions/%s/group-code (malformed, view=list) = %d: %s", s.ID, res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("HX-Trigger"); got != "" {
+		t.Errorf("HX-Trigger = %q on a failed save, want empty", got)
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, "alert-error") {
+		t.Errorf("malformed list-editor save does not render alert-error; body:\n%s", body)
+	}
+	if !strings.Contains(body, `value="Bad Code!"`) {
+		t.Errorf("malformed list-editor save does not keep the operator's typed value in the field; body:\n%s", body)
+	}
+	if !strings.Contains(body, "<form") {
+		t.Errorf("malformed list-editor save does not still carry the editor form; body:\n%s", body)
+	}
+
+	rows := authedGet(t, srv, sessions, "/sessions/rows")
+	if strings.Contains(rows.Body.String(), "badge-group") {
+		t.Errorf("rows show a group badge after a malformed save that should not have persisted anything; body:\n%s", rows.Body.String())
+	}
+}
+
+// TestTheOpsPageGroupSaveStillRendersItsOwnResultPartial guards the branch
+// split in PostSessionSetGroupCode: a POST with no "view" field (the ops
+// page's own form, ops.html) must keep rendering
+// session_group_code_result, unchanged, with no HX-Trigger header — proving
+// the list-editor addition did not alter the ops page's existing behaviour.
+func TestTheOpsPageGroupSaveStillRendersItsOwnResultPartial(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+
+	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/group-code",
+		url.Values{"group_code": {"kemang"}})
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST /sessions/%s/group-code (ops page, no view) = %d: %s", s.ID, res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("HX-Trigger"); got != "" {
+		t.Errorf("HX-Trigger = %q on the ops page's own save, want empty", got)
+	}
+	body := res.Body.String()
+	if strings.Contains(body, `id="session-group-editor"`) || strings.Contains(body, "<form") {
+		t.Errorf("ops page's save rendered the list editor instead of session_group_code_result; body:\n%s", body)
+	}
+	if !strings.Contains(body, "Saved") {
+		t.Errorf("ops page's save response does not say \"Saved\"; body:\n%s", body)
+	}
+}
