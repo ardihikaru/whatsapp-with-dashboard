@@ -40,6 +40,15 @@ type waxumBackend struct {
 	pollInterval   time.Duration // how often the steady-state status poller polls GET /status
 	pairTimeout    time.Duration // hard deadline for the pairing pump (hazard: see pairPump)
 
+	// pairingSetupTimeout bounds StartPairing's own setup calls
+	// (CreateSession, and the Connect on the "already exists" path) —
+	// zero (the value every struct literal in this package's tests uses
+	// except where a test overrides it) falls back to
+	// defaultPairingSetupTimeout via setupTimeout(), mirroring
+	// pokeMinInterval's <= 0 fallback pattern elsewhere in this file. See
+	// defaultPairingSetupTimeout's doc comment for why this exists.
+	pairingSetupTimeout time.Duration
+
 	sessions sync.Map // id (string) -> *waxumSessionState
 
 	// eventsEnabled/eventPumpOnce/gatewayReachable/healthKnown belong to
@@ -167,6 +176,39 @@ type waxumSessionState struct {
 // small, fixed, known value rather than one more knob to plumb through
 // WaxumConfig/Config/env parsing for a case that has not yet needed it.
 const loggedOutHysteresisPolls = 3
+
+// defaultPairingSetupTimeout bounds StartPairing's own two waxum calls
+// (CreateSession, and the Connect on the ErrConflict "already exists"
+// path) before it ever hands off to pairPump — so a wedged backend cannot
+// hang the pairing HTTP handler indefinitely. Root-caused live 2026-09-13:
+// after the laptop resumed from suspend, waxum answered every request with
+// a multi-hour Retry-After (see internal/waxum's maxRetryAfter doc
+// comment, which now caps what a single retried call will sleep). Even
+// with that cap, StartPairing itself had NO deadline of its own — the ctx
+// it receives is s.mgr.rootCtx, which is never cancelled in normal
+// operation (see ManagedSession.StartPairing's doc comment) — so a
+// handful of capped-but-still-real retries could still add up to minutes
+// inside a request handler, with the session already flipped to
+// StatePairing and every further pair/start answering 409 in the
+// meantime. 45s is chosen comfortably above internal/waxum's 30s
+// maxRetryAfter cap times a couple of retries, and well below b.pairTimeout
+// (pairPump's own, much longer deadline — DefaultWaxumPairTimeout is 180s
+// in production, and pairPump only starts once THIS setup has already
+// succeeded) — this timeout covers only getting the session registered and
+// connected on waxum's side, never the human-scale wait for a QR scan or
+// phone code that pairPump governs separately.
+const defaultPairingSetupTimeout = 45 * time.Second
+
+// setupTimeout is the effective deadline StartPairing bounds its setup
+// calls with — b.pairingSetupTimeout when a caller (production wiring, or
+// a test) set one, defaultPairingSetupTimeout otherwise. See
+// pairingSetupTimeout's field doc comment.
+func (b *waxumBackend) setupTimeout() time.Duration {
+	if b.pairingSetupTimeout > 0 {
+		return b.pairingSetupTimeout
+	}
+	return defaultPairingSetupTimeout
+}
 
 // WaxumConfig groups the timing knobs NewWaxumBackend needs. Kept as this
 // package's own type (mirroring internal/config's WSM_WAXUM_* group)
@@ -840,7 +882,16 @@ func (b *waxumBackend) StartPairing(ctx context.Context, s *ManagedSession, mode
 	sctx := s.ensureCtxLocked()
 	s.mu.Unlock()
 
-	createErr := b.client.CreateSession(ctx, s.ID, s.Name, true)
+	// setupCtx bounds ONLY these two calls, not the pairPump handoff below
+	// — ctx itself (s.mgr.rootCtx) is never cancelled in normal operation
+	// (ManagedSession.StartPairing's doc comment), so without this the
+	// setup phase had no deadline of its own at all. See
+	// defaultPairingSetupTimeout's doc comment for the incident this
+	// closes.
+	setupCtx, cancel := context.WithTimeout(ctx, b.setupTimeout())
+	defer cancel()
+
+	createErr := b.client.CreateSession(setupCtx, s.ID, s.Name, true)
 	if createErr != nil && !errors.Is(createErr, waxum.ErrConflict) {
 		b.rollbackPairing(s)
 		return mapErr(createErr)
@@ -849,7 +900,7 @@ func (b *waxumBackend) StartPairing(ctx context.Context, s *ManagedSession, mode
 		// The session already existed on waxum's side, so this was not a
 		// fresh CreateSession — no auto-connect raced a migration, and an
 		// explicit Connect is still required to (re)start it.
-		if err := b.client.Connect(ctx, s.ID); err != nil && !errors.Is(err, waxum.ErrConflict) {
+		if err := b.client.Connect(setupCtx, s.ID); err != nil && !errors.Is(err, waxum.ErrConflict) {
 			b.rollbackPairing(s)
 			return mapErr(err)
 		}

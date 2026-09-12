@@ -805,6 +805,77 @@ func TestStartPairingStillConnectsAnExistingWaxumSession(t *testing.T) {
 	})
 }
 
+// TestStartPairingSetupTimesOutInsteadOfHangingForeverAndLeavesTheSessionInStateNew
+// is the regression test for the 2026-09-13 incident: waxum answered every
+// request with a multi-hour Retry-After after the laptop resumed from
+// suspend, and StartPairing's setup calls (CreateSession here) had no
+// deadline of their own — s.mgr.rootCtx is never cancelled in normal
+// operation — so the session sat wedged in StatePairing for hours with
+// every further pair/start answering 409. This fake server never responds
+// to POST /api/v1/sessions within any time this test cares about (it
+// sleeps well past b.pairingSetupTimeout before ever answering), standing
+// in for a wedged backend of any shape; only b.pairingSetupTimeout
+// (injected short here, the way qrPollInterval/pairTimeout already are in
+// these tests) can end the call. mapErr has no case for a context
+// deadline — CreateSession's error here is a plain wrapped
+// context.DeadlineExceeded, not one of waxum's typed sentinels or an
+// *APIError — so it falls through mapErr's default case unchanged; the
+// handler (pairing.go's PostPairStart) then answers a generic 500, not the
+// dedicated 503 ErrBackendBusy gets. Fails against the pre-fix
+// StartPairing, which passes ctx straight through with no timeout and
+// hangs until the test's own 2s watchdog fires.
+func TestStartPairingSetupTimesOutInsteadOfHangingForeverAndLeavesTheSessionInStateNew(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
+		// Deliberately longer than pairingSetupTimeout below but short
+		// enough not to hold up the test/httptest.Server.Close() itself —
+		// a plain <-r.Context().Done() was tried here first and left the
+		// handler goroutine (and httptest.Server.Close, which waits for
+		// every connection to go idle) blocked well past this test's own
+		// deadline: cancelling the CLIENT's context does not reliably
+		// close the underlying connection fast enough for the SERVER side
+		// to observe it in this harness, so a fixed sleep is the
+		// deterministic way to simulate "never responds in time".
+		time.Sleep(2 * time.Second)
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+	// A large retryDelay would never actually be slept for: CreateSession
+	// here never gets a response at all (no status code to retry on), so
+	// this is exercising the request's own ctx deadline, not do()'s 429
+	// retry loop — WithClientRateLimit is still raised so the limiter
+	// itself never delays this single call.
+	client := waxum.New(srv.URL, "test-token", 5*time.Second, waxum.WithClientRateLimit(1e6, 1e6))
+
+	b := &waxumBackend{client: client, pairingSetupTimeout: 30 * time.Millisecond}
+	mgr := newWaxumTestManager(t, b)
+	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-5555")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- s.StartPairing(PairModeQR) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("StartPairing against a waxum that never responds: err = nil, want the setup timeout to fail it")
+		}
+		if errors.Is(err, ErrWrongState) || errors.Is(err, ErrBackendBusy) || errors.Is(err, ErrNotConnected) {
+			t.Errorf("StartPairing err = %v, want a generic (context deadline) error — mapErr has no case for "+
+				"context.DeadlineExceeded, so this must NOT be one of the typed sentinels", err)
+		}
+		t.Logf("StartPairing returned (as expected, mapErr has no dedicated case for this): %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("StartPairing did not return within its setup timeout — a wedged backend must not hang the pairing handler forever")
+	}
+	if s.state != StateNew {
+		t.Fatalf("s.state = %v, want StateNew — a timed-out setup call must roll back exactly like a hard CreateSession failure", s.state)
+	}
+}
+
 // TestPairingFailsFastWhenWaxumReportsAPairError is pairPump's point 8
 // regression test: waxum's own pair.last_error, sustained across
 // pairErrorHysteresisPolls consecutive polls with no live client for this

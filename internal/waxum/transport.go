@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -67,8 +68,16 @@ func (c *Client) send(ctx context.Context, method, path, contentType string,
 
 		if resp.StatusCode == http.StatusTooManyRequests && attempt < c.maxRateLimitRetries {
 			lastErr = errorFromStatus(resp.StatusCode, respBody)
+			delay := c.retryDelay(attempt, retryAfterHeader)
+			// This used to be completely silent — a 429 that retried for
+			// hours (see client.go's maxRetryAfter doc comment for the
+			// live incident) left no trace anywhere that anything was
+			// waiting at all. slog.Warn here is the only place that wait
+			// is now visible.
+			slog.Warn("waxum: rate limited; retrying", "method", method, "path", path,
+				"attempt", attempt+1, "delay", delay, "retry_after_header", retryAfterHeader)
 			select {
-			case <-time.After(c.retryDelay(attempt, retryAfterHeader)):
+			case <-time.After(delay):
 				continue
 			case <-ctx.Done():
 				return lastErr

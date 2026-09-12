@@ -3,6 +3,26 @@
 ## [Unreleased]
 
 ### Fixed
+- **A suspended/resumed host could see waxum rate-limit every request for
+  hours, and WSM used to honour that verbatim.** Observed live 2026-09-13:
+  after the laptop resumed from suspend, waxum's tower_governor answered
+  every request with `429` and `Retry-After: 7981` (~2.2 hours — a
+  monotonic-clock discontinuity in the governor, not a genuinely drained
+  token bucket). `internal/waxum/client.go`'s `defaultRetryDelay` honoured
+  that header with no upper bound, so a single retried request could sleep
+  for hours, and `StartPairing` flips a session to `pairing` BEFORE making
+  its setup calls, so the session sat wedged with `wa_sessions.last_status`
+  frozen at `new` for as long as the retry slept, with every further
+  `POST /sessions/{id}/pair/start` answering a silently-ignored 409 and
+  nothing logged anywhere. `defaultRetryDelay` now clamps any honoured
+  `Retry-After` to 30s (matching `internal/backoff`'s own ceiling; a value at
+  or below the cap is still honoured verbatim), a 429 retry now logs a
+  `slog.Warn` (method, path, attempt, delay) so the wait is visible, and
+  `StartPairing`'s own setup calls (`CreateSession`, and the `Connect` on the
+  "already exists" path) are now bounded by a 45s deadline independent of
+  waxum's response — a wedged backend now surfaces as a 503/500 on
+  `pair/start` within about a minute instead of hanging the session in
+  `pairing` for hours.
 - **A brand-new waxum session could fail pairing with "Internal error: migration
   error" and no client left at all.** waxum's `POST /sessions` auto-connects a
   freshly created session in the background; `StartPairing` used to also call

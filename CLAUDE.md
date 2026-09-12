@@ -138,6 +138,35 @@ instantly, so there is nothing to race). Recovery needs no waxum restart: the
 store is fully migrated after the first failed attempt, so a second Start
 Pairing takes the `ErrConflict`/`connect` path and works normally.
 
+**A suspend/resume on the waxum host can make its rate limiter answer 429 for
+hours, with no signal anywhere that says so.** Observed live 2026-09-13: the
+laptop resumed from suspend (2026-09-12 06:38 WIB) and waxum's
+tower_governor then answered EVERY request from the WSM container with
+`429 Too Many Requests`, `Retry-After: 7981` — the wait shrank 1:1 with
+wall-clock over roughly the next 24h, and two different peer IPs reported
+the identical value to the second, the signature of a monotonic-clock
+discontinuity inside the governor after suspend, not a genuinely drained
+200-token bucket (whose worst case is on the order of 200s). 429s never
+appear in waxum's own logs (tower_http's trace layer only classifies 5xx as
+a failure — see the rate-limit hazard entry below), the waxum container
+showed `unhealthy` for the entire window but nothing acted on that, and
+WSM's own `/api/v1/health` kept reporting `reachable:true` throughout. Only
+restarting the waxum PROCESS cleared it (`docker compose restart waxum`,
+never `down -v`). WSM's side made this far worse before this phase:
+`internal/waxum/client.go`'s `do()` honoured `Retry-After` verbatim with no
+upper bound, so a single retried 429 could sleep ~2.2 hours, and
+`StartPairing` (`internal/wa/backend_waxum.go`) flips the session to
+`StatePairing` BEFORE making that call, so the session sat wedged for hours
+— `wa_sessions.last_status` frozen at `new`, every further
+`POST /sessions/{id}/pair/start` answering a 409 that HTMX silently
+ignores, and nothing logged anywhere. `defaultRetryDelay` now clamps any
+honoured `Retry-After` to 30s (a value at or below the cap is still honoured
+verbatim) and logs a `slog.Warn` on every 429 retry, and `StartPairing`'s own
+setup calls are bounded by a 45s deadline of their own — so the same
+condition now surfaces as a 503 (`ErrBackendBusy`) or a generic 500 on
+`pair/start` within about a minute, not a session wedged in `pairing` for
+hours.
+
 **"Connected" means three different things here, and they can disagree.**
 `s.state` (statusPump's verdict), `Live()` (an atomic fed by the same poll),
 and `s.sendQ != nil` (whether a sender loop exists) are independent. Two of

@@ -47,6 +47,25 @@ const maxResponseBytes = 4 << 20 // 4 MiB
 // IP-keyed bucket.
 const defaultMaxRateLimitRetries = 5
 
+// maxRetryAfter caps how long defaultRetryDelay will EVER honour a
+// waxum-supplied Retry-After for, matching internal/backoff's own 30s
+// ceiling (backoff.Delay) so this schedule's worst case is the same as the
+// fallback one below it. Root-caused live 2026-09-13: after the laptop
+// resumed from suspend, waxum's tower_governor answered every request with
+// Retry-After: 7981 (~2.2 hours) — a monotonic-clock discontinuity in the
+// governor after suspend/resume, not a genuinely drained token bucket
+// (whose max wait would be on the order of 200s; see CLAUDE.md's hazard
+// entry for the measurement). Honouring that verbatim, with no cap, meant
+// do()'s 429 retry loop slept ~2.2 hours per attempt — up to
+// defaultMaxRateLimitRetries=5, so up to ~11 hours — INSIDE the request
+// goroutine that StartPairing (backend_waxum.go) had already flipped a
+// session's state to StatePairing before calling. The session sat wedged
+// for hours, wa_sessions.last_status frozen at "new", with nothing logged
+// anywhere. A Retry-After at or below this cap is still honoured verbatim
+// (see defaultRetryDelay) — only a value no real backend would ever need
+// this app to wait out is clamped.
+const maxRetryAfter = 30 * time.Second
+
 // Client is a waxum API client bound to one base URL and one bearer token.
 // It is safe for concurrent use (http.Client is).
 type Client struct {
@@ -132,13 +151,18 @@ func New(baseURL, token string, timeout time.Duration, opts ...Option) *Client {
 
 // defaultRetryDelay honours waxum's Retry-After header when it sends one
 // (delta-seconds per RFC 9110 §10.2.3 — the only form waxum is expected to
-// send, but an HTTP-date is accepted too since the RFC allows both);
+// send, but an HTTP-date is accepted too since the RFC allows both),
+// CLAMPED to maxRetryAfter (see that constant's doc comment for why an
+// unbounded honour turned a transient 429 into an hours-long silent wedge);
 // otherwise it falls back to the shared backoff+jitter schedule (see
 // internal/backoff's doc comment for why this and
 // internal/wa/sender_limits.go's send-retry loop share one schedule
 // instead of two).
 func defaultRetryDelay(attempt int, retryAfterHeader string) time.Duration {
 	if d, ok := parseRetryAfter(retryAfterHeader); ok {
+		if d > maxRetryAfter {
+			return maxRetryAfter
+		}
 		return d
 	}
 	return backoff.Delay(attempt) + backoff.Jitter()

@@ -535,3 +535,67 @@ func TestClientRateLimiterReturnsPromptlyWhenTheContextIsCancelled(t *testing.T)
 			"the rate limiter must not be able to hang a caller past its own ctx")
 	}
 }
+
+// TestDefaultRetryDelayClampsAnExcessiveRetryAfterToTheCap is the direct
+// regression test for the 2026-09-13 incident: waxum's tower_governor sent
+// Retry-After: 7981 (~2.2 hours) for every request after the laptop resumed
+// from suspend, and defaultRetryDelay used to honour that verbatim — a
+// single 429 retry inside StartPairing then slept for hours with nothing
+// logged anywhere (see client.go's maxRetryAfter doc comment). Fails
+// against the pre-fix defaultRetryDelay, which returns the parsed 7981s
+// unclamped.
+func TestDefaultRetryDelayClampsAnExcessiveRetryAfterToTheCap(t *testing.T) {
+	got := defaultRetryDelay(0, "7981")
+	if got != maxRetryAfter {
+		t.Fatalf("defaultRetryDelay(0, %q) = %v, want the %v cap, not the raw header value", "7981", got, maxRetryAfter)
+	}
+}
+
+// TestDefaultRetryDelayHonoursASmallRetryAfterVerbatim guards the other
+// half of the clamp: a Retry-After a real, healthy waxum instance would
+// plausibly send (a couple of seconds under normal tower_governor
+// replenishment) must still be honoured exactly, not silently rounded up
+// to the cap.
+func TestDefaultRetryDelayHonoursASmallRetryAfterVerbatim(t *testing.T) {
+	got := defaultRetryDelay(0, "2")
+	if want := 2 * time.Second; got != want {
+		t.Fatalf("defaultRetryDelay(0, %q) = %v, want %v honoured verbatim (below the cap)", "2", got, want)
+	}
+}
+
+// TestDoReturnsPromptlyOnContextCancellationWhileSleepingBetween429Retries
+// covers the OTHER ctx.Done() case in send()'s retry loop — the one that
+// fires while a 429 retry is asleep, not the rate limiter's own wait()
+// (already covered by TestClientRateLimiterReturnsPromptlyWhenTheContextIsCancelled).
+// A custom, deliberately huge retryDelay stands in for the unclamped
+// production bug this phase fixes: even if a caller's own retry policy (or
+// a not-yet-updated default) computes an hours-long wait, a cancelled ctx
+// must still make do() return immediately rather than sleeping it out.
+func TestDoReturnsPromptlyOnContextCancellationWhileSleepingBetween429Retries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Retry-After", "7981")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := New(srv.URL, testToken, 5*time.Second,
+		WithClientRateLimit(1e6, 1e6),
+		WithRetryPolicy(5, func(int, string) time.Duration { return time.Hour }),
+	)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	done := make(chan error, 1)
+	go func() { done <- client.Health(ctx) }()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("Health against a permanently-429 server returned nil error, want the last 429 propagated")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("do() did not return promptly after ctx cancellation while sleeping between 429 retries — " +
+			"an hours-long retry delay must not be able to hang past a cancelled context")
+	}
+}
