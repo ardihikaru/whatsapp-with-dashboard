@@ -12,8 +12,10 @@
        hx-swap="innerHTML" (list.html), which would wipe a half-typed value
        out of a text input mid-edit. The "Set master" button above survives
        that poll only because a button holds no state — a live input does
-       not. Editing the group code happens on the Ops page instead
-       (sessions/ops.html), whose card sits OUTSIDE the polled panel. -->
+       not. Editing happens in #session-group-editor below the table
+       (list.html), loaded on demand by the "Edit group" button in
+       .row-actions below, and on the Ops page (sessions/ops.html) — both
+       sit OUTSIDE this polled tbody. -->
   <td>{{if .GroupCode}}<span class="badge badge-group">{{.GroupCode}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
   <td class="row-actions">
     {{if eq .State "connected"}}
@@ -34,6 +36,10 @@
       <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.ID}}/master" hx-vals='{"master": "true"}'
               hx-target="#session-rows" hx-swap="innerHTML">Set master</button>
     {{end}}
+    <!-- Offered on EVERY row, master or not — group_code is deliberately
+         uncoupled from is_master (list.html's own explainer paragraph). -->
+    <button class="btn btn-outline" hx-get="{{u "/sessions"}}/{{.ID}}/group-code/edit"
+            hx-target="#session-group-editor" hx-swap="innerHTML show:#session-group-editor:top">Edit group</button>
     <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/ops">Ops</a>
     <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/webhooks">Webhooks</a>
     <button class="btn btn-outline btn-danger" hx-post="{{u "/sessions"}}/{{.ID}}/delete"

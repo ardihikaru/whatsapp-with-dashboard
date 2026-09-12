@@ -20,10 +20,19 @@
       <thead>
         <tr><th>Name</th><th>Phone</th><th>JID</th><th>Status</th><th>Group</th><th>Actions</th></tr>
       </thead>
-      <tbody id="session-rows" hx-get="{{u "/sessions/rows"}}" hx-trigger="load, every 5s" hx-swap="innerHTML">
+      <tbody id="session-rows" hx-get="{{u "/sessions/rows"}}" hx-trigger="load, every 5s, sessions-changed from:body" hx-swap="innerHTML">
         <tr><td colspan="6">Loading…</td></tr>
       </tbody>
     </table>
   </div>
 </div>
+
+<!-- OUTSIDE the .card/tbody above, deliberately: the tbody re-polls itself
+     every 5s with hx-swap="innerHTML" (see session_rows.html's own comment),
+     which would wipe a half-typed group code out of an <input> mid-edit. The
+     "Edit group" button on each row loads session_group_editor into this
+     slot instead; on save the handler sets HX-Trigger: sessions-changed,
+     which the tbody's hx-trigger above listens for to pick up the new badge
+     without a full page reload. -->
+<div id="session-group-editor"></div>
 {{end}}
