@@ -807,6 +807,28 @@ func (b *waxumBackend) applyWedgeDetection(s *ManagedSession, st *waxum.Status, 
 // and retries it if waxum still 500s, exactly like whatsmeow's PairPhone
 // call (backend_meow.go's pairPump) waiting for the first QR channel item
 // before dialing.
+//
+// StartPairing must NOT call Connect after a CreateSession that actually
+// created a row — root-caused live 2026-09-13 against
+// ardihikaru/waxum:0.12.2-client-slot-ownership: POST /sessions
+// auto-connects the new session in the background, and on a BRAND-NEW
+// session that background bot is still running the store's diesel
+// migrations (a fresh per-session whatsapp.db) when an immediate explicit
+// POST …/connect arrived — waxum had not yet registered a client for the
+// id, so the explicit connect answered 200 instead of 409 and started a
+// SECOND bot racing the first on the same sqlite file. One of the two then
+// failed with "Internal error: migration error", leaving the session with
+// no client at all and waxum's own reconnect watchdog unable to help (see
+// CLAUDE.md's waxum-wedge hazards for that shape generally). The fix is to
+// trust CreateSession's own return value to say which case this is: a nil
+// error means the row was newly created and waxum is already connecting it
+// — do nothing more. waxum.ErrConflict means the row already existed (a
+// re-pair after logout, or a caller retrying StartPairing) — waxum does NOT
+// auto-connect an existing session, so the explicit Connect below is still
+// required, exactly as before this fix. A session whose whatsapp.db already
+// exists on disk (the re-pair case) is unaffected by the race in the first
+// place: its client registers instantly, so even the OLD code's immediate
+// Connect there only ever raced into a harmless 409.
 func (b *waxumBackend) StartPairing(ctx context.Context, s *ManagedSession, mode PairMode) error {
 	s.mu.Lock()
 	if s.state != StateNew && s.state != StateLoggedOut {
@@ -818,13 +840,19 @@ func (b *waxumBackend) StartPairing(ctx context.Context, s *ManagedSession, mode
 	sctx := s.ensureCtxLocked()
 	s.mu.Unlock()
 
-	if err := b.client.CreateSession(ctx, s.ID, s.Name, true); err != nil && !errors.Is(err, waxum.ErrConflict) {
+	createErr := b.client.CreateSession(ctx, s.ID, s.Name, true)
+	if createErr != nil && !errors.Is(createErr, waxum.ErrConflict) {
 		b.rollbackPairing(s)
-		return mapErr(err)
+		return mapErr(createErr)
 	}
-	if err := b.client.Connect(ctx, s.ID); err != nil && !errors.Is(err, waxum.ErrConflict) {
-		b.rollbackPairing(s)
-		return mapErr(err)
+	if errors.Is(createErr, waxum.ErrConflict) {
+		// The session already existed on waxum's side, so this was not a
+		// fresh CreateSession — no auto-connect raced a migration, and an
+		// explicit Connect is still required to (re)start it.
+		if err := b.client.Connect(ctx, s.ID); err != nil && !errors.Is(err, waxum.ErrConflict) {
+			b.rollbackPairing(s)
+			return mapErr(err)
+		}
 	}
 	_ = s.mgr.repo.UpdateStatus(s.mgr.persistCtx, s.ID, string(StatePairing))
 	deadline := time.Now().Add(b.pairTimeout)
@@ -1003,6 +1031,22 @@ func (b *waxumBackend) disconnectAbandonedPairing(s *ManagedSession, reason stri
 //     the 429 storm this whole change addresses — see CLAUDE.md's waxum
 //     rate-limit hazard note. See
 //     TestTheQREndpointIsNotPolledWhenTheSessionIsNotPairing.
+//  8. A poll whose Status.Pair.LastError is non-empty, with no live client
+//     anywhere for this attempt (SocketAlive false, Reachability nil — the
+//     same fingerprint isOrphanedClientWedge uses) and no QR ever served
+//     yet (qrSeen false — see StartPairing's doc comment for the
+//     "auto-connect races a fresh store's migrations" incident that
+//     produces exactly this: waxum's own pair.last_error becomes
+//     "Internal error: migration error" and neither of the two racing bots
+//     ever registers a client, so the session is stuck with nothing left
+//     to recover on its own), ends the pairing immediately instead of
+//     waiting out the deadline showing "Waiting for WhatsApp…". Requires
+//     pairErrorHysteresisPolls CONSECUTIVE such polls, for the same reason
+//     Status.Pair's doc comment gives: waxum does not clear last_error when
+//     a new attempt starts, so a single poll cannot tell a genuinely fatal
+//     attempt apart from stale text left over from an earlier one — see
+//     TestPairingFailsFastWhenWaxumReportsAPairError and
+//     TestAStaleWaxumPairErrorDoesNotAbortALivePairing.
 func (b *waxumBackend) pairPump(ctx context.Context, s *ManagedSession, ps *PairingState,
 	pollInterval time.Duration, deadline time.Time) {
 
@@ -1015,6 +1059,7 @@ func (b *waxumBackend) pairPump(ctx context.Context, s *ManagedSession, ps *Pair
 	var phoneCodeSet bool     // true once PairCode has succeeded — stop retrying (point 4)
 	var connectNudged bool    // true once a post-scan reconnect nudge has been sent (point 5)
 	var pendingLoginTicks int // consecutive polls seen with is_logged_in true but phone_number still empty (point 6)
+	var pairErrStreak int     // consecutive qualifying pair-error polls (point 8)
 
 	// maxPendingLoginTicks bounds how many extra polls this pump waits for
 	// waxum's phone_number to catch up to is_logged_in before giving up and
@@ -1024,6 +1069,17 @@ func (b *waxumBackend) pairPump(ctx context.Context, s *ManagedSession, ps *Pair
 	// duration that would be wrong at either extreme; the outer pctx
 	// deadline is still the hard upper bound regardless.
 	const maxPendingLoginTicks = 5
+
+	// pairErrorHysteresisPolls is point 8's evidence requirement — deliberately
+	// smaller than applyStatus's loggedOutHysteresisPolls (3): that constant
+	// is calibrated against the STEADY-STATE poller's cadence
+	// (b.pollInterval, tens of seconds in production) to give a flap ~45s to
+	// resolve on its own; pairPump instead polls at b.qrPollInterval (a few
+	// seconds in production), and this is a hard-fail path with no retry
+	// benefit to buy by waiting longer — 2 consecutive polls is enough to
+	// rule out a single transient/stale read without meaningfully slowing
+	// down the "surface the real error" goal this point exists for.
+	const pairErrorHysteresisPolls = 2
 
 	for {
 		if st, err := b.client.Status(pctx, s.ID); err == nil {
@@ -1039,6 +1095,15 @@ func (b *waxumBackend) pairPump(ctx context.Context, s *ManagedSession, ps *Pair
 				default:
 					pendingLoginTicks++ // point 6: keep polling; do not fabricate a jid from an empty user yet
 				}
+			}
+			if !qrSeen && !st.IsLoggedIn && !st.SocketAlive && st.Reachability == nil && st.Pair.LastError != "" {
+				pairErrStreak++
+				if pairErrStreak >= pairErrorHysteresisPolls {
+					b.finishPairingFailure(s, ps, fmt.Errorf("waxum: %s", st.Pair.LastError))
+					return
+				}
+			} else {
+				pairErrStreak = 0 // any non-qualifying poll resets the evidence — point 8
 			}
 			if qrSeen && !connectNudged && st.Status == "disconnected" {
 				_ = b.client.Connect(pctx, s.ID) // best-effort nudge; point 5

@@ -41,6 +41,37 @@ type Status struct {
 	PhoneNumber  string  `json:"phone_number"`
 	PushName     string  `json:"push_name"`
 	Reachability *string `json:"reachability"`
+	Pair         Pair    `json:"pair"`
+}
+
+// Pair is Status.Pair, waxum's pairing-attempt sub-object:
+// {"last_qr_at":...,"last_pair_code_at":...,"pair_code_expires_at":...,
+// "last_error":...,"attempts":...}. Only the two fields
+// internal/wa/backend_waxum.go's pairPump actually reads are modeled here;
+// the timestamp fields are left undecoded (this package's house style of
+// modeling only what a caller needs — see groupsResponse's doc comment for
+// the same posture elsewhere in this file).
+//
+// LastError is a plain string, not a *string like Status.Reachability
+// above: unlike that field, a caller here only ever asks "is this
+// non-empty", never "was this field present at all", so there is no
+// "absent" case worth distinguishing from "" — encoding/json leaves
+// LastError at its zero value "" for either a JSON null or a missing key,
+// and Status is freshly unmarshaled on every poll, so a stale value from an
+// earlier decode can never leak through.
+//
+// waxum does NOT clear last_error when a later attempt succeeds or when a
+// fresh attempt starts — it is documented (and observed live, 2026-09-13)
+// to persist the PREVIOUS attempt's failure text until the next one
+// overwrites it. pairPump therefore treats a poll reporting LastError as
+// fatal only alongside independent evidence there is no live client for
+// this attempt at all (SocketAlive false, Reachability nil — the same
+// fingerprint internal/wa/backend_waxum.go's isOrphanedClientWedge already
+// uses for a different incident) and only once that has been observed on
+// consecutive polls, not a single one — see pairErrorHysteresisPolls.
+type Pair struct {
+	LastError string `json:"last_error"`
+	Attempts  int    `json:"attempts"`
 }
 
 // QRResult is GET /sessions/{id}/qr. QRCodes holds RAW payload strings

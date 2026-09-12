@@ -118,6 +118,26 @@ state. Two operational consequences worth keeping:
   `docker compose -f docker-compose.yml -f docker-compose.remote-db.yml
   restart waxum` recovered it in under a minute, no re-pairing.
 
+**waxum auto-connects on `POST /sessions`; a second `connect` during a fresh
+store's migrations produces `migration error` and a client-less session.**
+Root-caused live 2026-09-13 against
+`ardihikaru/waxum:0.12.2-client-slot-ownership`: waxum starts connecting a
+brand-new session itself, in the background, the moment `POST /sessions`
+returns — `StartPairing` used to also call an explicit `connect` right after,
+and on a session with no `whatsapp.db` yet that explicit call arrived while
+the auto-connect bot was still running the store's diesel migrations, so
+waxum had no client registered yet, answered 200 instead of 409, and started
+a SECOND bot on the same file. Fingerprint: `pair.last_error: "Internal
+error: migration error"`, `attempts: 0`, `reachability: null` — no client at
+all, same shape as the Deactivate-then-Activate wedge above but a different
+cause (a fresh store racing its own first migration run, not two live bots
+evicting each other). `StartPairing` now skips the explicit `connect`
+whenever `CreateSession` actually created the row, calling it only on
+`waxum.ErrConflict` (a re-pair, whose store already exists and migrates
+instantly, so there is nothing to race). Recovery needs no waxum restart: the
+store is fully migrated after the first failed attempt, so a second Start
+Pairing takes the `ErrConflict`/`connect` path and works normally.
+
 **"Connected" means three different things here, and they can disagree.**
 `s.state` (statusPump's verdict), `Live()` (an atomic fed by the same poll),
 and `s.sendQ != nil` (whether a sender loop exists) are independent. Two of

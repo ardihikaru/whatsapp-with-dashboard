@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Fixed
+- **A brand-new waxum session could fail pairing with "Internal error: migration
+  error" and no client left at all.** waxum's `POST /sessions` auto-connects a
+  freshly created session in the background; `StartPairing` used to also call
+  an explicit `Connect` immediately afterward, and on a NEW session that raced
+  the auto-connect bot's own store migrations, spawning a second bot on the
+  same fresh `whatsapp.db`. `StartPairing` now skips that explicit `Connect`
+  whenever `CreateSession` actually created the row, and only still issues it
+  on `waxum.ErrConflict` (a re-pair, where the store already exists and there
+  is nothing to race). Separately, `pairPump` now reads waxum's own
+  `pair.last_error` and, once it is sustained for two consecutive polls with
+  no live client for the attempt at all (`socket_alive: false`,
+  `reachability: null`) and no QR ever served, fails the pairing immediately
+  with waxum's own message instead of showing "Waiting for WhatsApp…" for the
+  full pairing deadline.
+
 ### Added
 - **Inline "Edit group" on `/sessions`.** A row's routing `group_code` can now
   be changed without leaving the list: an "Edit group" button (every row,

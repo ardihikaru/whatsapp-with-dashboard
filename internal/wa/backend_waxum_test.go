@@ -687,20 +687,29 @@ func TestAPairingPumpReachingItsHardDeadlineTellsWaxumToDisconnectSoAnAbandonedQ
 // TestAConnectFailureDuringStartPairingStillDisconnectsTheSessionCreateSessionJustCreated
 // is rollbackPairing's regression test: CreateSession and Connect are two
 // separate remote calls, not one atomic operation, so a Connect failure
-// leaves a registry row on waxum's side (created by the CreateSession call
-// immediately above it) with nothing in WSM pointing at it any more unless
-// rollbackPairing also disconnects it.
+// leaves a registry row on waxum's side with nothing in WSM pointing at it
+// any more unless rollbackPairing also disconnects it.
+//
+// CreateSession answers 409 (ErrConflict) here, not 200: since StartPairing
+// stopped calling Connect after a CreateSession that actually created a row
+// (see that method's doc comment — waxum auto-connects a fresh session
+// itself, and an immediate explicit connect used to race its migrations),
+// Connect is only reachable at all on the "session already existed" path.
+// This still exercises the exact scenario the test name describes — a
+// registry row exists on waxum's side (created earlier, hence the 409) and
+// Connect fails — just via the code path where StartPairing still issues
+// that call.
 func TestAConnectFailureDuringStartPairingStillDisconnectsTheSessionCreateSessionJustCreated(t *testing.T) {
 	// waxumFakeOpts has no connectFn hook to make POST …/connect fail on
 	// demand, so this test builds a minimal purpose-built server instead of
 	// newWaxumFakeServer — just enough of the same shape for the one call
-	// sequence under test (CreateSession succeeds, Connect fails).
+	// sequence under test (CreateSession conflicts, Connect fails).
 	var disconnects atomic.Int32
 	var creates atomic.Int32
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/sessions", func(w http.ResponseWriter, r *http.Request) {
 		creates.Add(1)
-		w.WriteHeader(http.StatusOK)
+		w.WriteHeader(http.StatusConflict)
 	})
 	mux.HandleFunc("/api/v1/sessions/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -737,6 +746,157 @@ func TestAConnectFailureDuringStartPairingStillDisconnectsTheSessionCreateSessio
 	})
 	if s.state != StateNew {
 		t.Fatalf("s.state = %v, want StateNew after a failed StartPairing", s.state)
+	}
+}
+
+// TestStartPairingDoesNotConnectAFreshlyCreatedWaxumSession is the direct
+// regression test for the race root-caused live 2026-09-13: waxum's
+// POST /sessions auto-connects a brand-new session itself, and an explicit
+// POST …/connect issued immediately after used to arrive while that
+// auto-connect bot was still running the fresh store's migrations, racing a
+// second bot onto the same sqlite file and producing
+// "Internal error: migration error" with no client left afterward. Fails
+// against the pre-fix StartPairing, which called Connect unconditionally
+// after a successful CreateSession.
+func TestStartPairingDoesNotConnectAFreshlyCreatedWaxumSession(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{createStatus: http.StatusCreated})
+	b := &waxumBackend{client: client, qrPollInterval: time.Hour, pollInterval: time.Hour, pairTimeout: time.Hour}
+	mgr := newWaxumTestManager(t, b)
+	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-3333")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.StartPairing(PairModeQR); err != nil {
+		t.Fatalf("StartPairing: %v", err)
+	}
+	time.Sleep(20 * time.Millisecond) // let the pairing pump run a tick or two
+
+	if got := calls.create.Load(); got != 1 {
+		t.Fatalf("POST /api/v1/sessions calls = %d, want 1", got)
+	}
+	if got := calls.connect.Load(); got != 0 {
+		t.Fatalf("POST …/connect calls = %d, want 0 — waxum auto-connects a freshly created "+
+			"session itself; an explicit connect this soon races the fresh store's migrations "+
+			"(see StartPairing's doc comment for the live incident)", got)
+	}
+}
+
+// TestStartPairingStillConnectsAnExistingWaxumSession guards the re-pair
+// path: when CreateSession reports the session already exists
+// (waxum.ErrConflict — a re-pair after logout, or a retried StartPairing),
+// waxum does NOT auto-connect it, so StartPairing must still issue an
+// explicit Connect exactly as before this phase.
+func TestStartPairingStillConnectsAnExistingWaxumSession(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{createStatus: http.StatusConflict})
+	b := &waxumBackend{client: client, qrPollInterval: time.Hour, pollInterval: time.Hour, pairTimeout: time.Hour}
+	mgr := newWaxumTestManager(t, b)
+	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-4444")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.StartPairing(PairModeQR); err != nil {
+		t.Fatalf("StartPairing: %v", err)
+	}
+
+	waitForCondition(t, "StartPairing to issue an explicit Connect for a session waxum already knew about", func() bool {
+		return calls.connect.Load() >= 1
+	})
+}
+
+// TestPairingFailsFastWhenWaxumReportsAPairError is pairPump's point 8
+// regression test: waxum's own pair.last_error, sustained across
+// pairErrorHysteresisPolls consecutive polls with no live client for this
+// attempt anywhere (socket_alive false, reachability nil) and no QR ever
+// served, must end the pairing promptly with a message naming waxum's own
+// text — not run out the (here, deliberately long) deadline showing
+// "Waiting for WhatsApp…". Fails against the pre-fix pairPump, which never
+// reads Status.Pair at all.
+func TestPairingFailsFastWhenWaxumReportsAPairError(t *testing.T) {
+	client, _ := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(int) waxum.Status {
+			return waxum.Status{
+				Status:      "disconnected",
+				IsLoggedIn:  false,
+				SocketAlive: false,
+				Pair:        waxum.Pair{LastError: "Internal error: migration error"},
+			}
+		},
+	})
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StatePairing)
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	const deadlineBudget = 30 * time.Second
+	start := time.Now()
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(context.Background(), s, ps, 2*time.Millisecond, time.Now().Add(deadlineBudget))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("pairPump did not fail fast on waxum's pair error — it is waiting out the deadline instead")
+	}
+	if elapsed := time.Since(start); elapsed >= deadlineBudget {
+		t.Fatalf("pairPump took %v, want well under its %v deadline", elapsed, deadlineBudget)
+	}
+	snap := ps.Snapshot()
+	if !snap.Done || snap.Err == "" {
+		t.Fatalf("PairingState after a waxum pair error = %+v, want Done with a non-empty Err", snap)
+	}
+	if !strings.Contains(snap.Err, "migration error") {
+		t.Fatalf("PairingState.Err = %q, want it to contain waxum's own message (%q)", snap.Err, "migration error")
+	}
+}
+
+// TestAStaleWaxumPairErrorDoesNotAbortALivePairing is point 8's guard
+// against the false positive Status.Pair's doc comment warns about: waxum
+// does not clear pair.last_error when a later attempt succeeds, so a poll
+// carrying it alongside evidence the socket IS actually alive (and a QR has
+// already been served) must not abort a pairing that is otherwise
+// proceeding normally.
+func TestAStaleWaxumPairErrorDoesNotAbortALivePairing(t *testing.T) {
+	client, calls := newWaxumFakeServer(t, waxumFakeOpts{
+		statusFn: func(int) waxum.Status {
+			return waxum.Status{
+				Status:      "waiting_for_qr",
+				IsLoggedIn:  false,
+				SocketAlive: true, // a live client for THIS attempt — the error is stale, from an earlier one
+				Pair:        waxum.Pair{LastError: "Internal error: migration error"},
+			}
+		},
+		qrFn: func(int) []string { return []string{"code-A"} },
+	})
+	b := &waxumBackend{client: client}
+	mgr := newWaxumTestManager(t, b)
+	s := testSession(mgr, StatePairing)
+	ps := &PairingState{mode: PairModeQR}
+	s.pairing = ps
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		b.pairPump(ctx, s, ps, 2*time.Millisecond, time.Now().Add(time.Minute))
+		close(done)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	waitForCondition(t, "a QR code to be served", func() bool { return calls.qr.Load() >= 1 })
+	waitForCondition(t, "several more status polls with the stale pair error still present", func() bool {
+		return calls.status.Load() >= 10
+	})
+	if snap := ps.Snapshot(); snap.Done {
+		t.Fatalf("PairingState = %+v, want NOT done — a stale pair.last_error with a live socket "+
+			"and a served QR must not abort pairing", snap)
 	}
 }
 
