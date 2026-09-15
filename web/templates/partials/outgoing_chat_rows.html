@@ -1,0 +1,33 @@
+{{define "outgoing_chat_rows"}}
+{{range .Rows}}
+<tr>
+  <td class="mono">{{.CreatedAt}}</td>
+  <td><span class="badge badge-{{.Status}}">{{.Status}}</span></td>
+  <td class="mono">{{.ToPhone}}</td>
+  <td>{{.SessionName}}</td>
+  <td>{{.Attempts}}</td>
+  <td>{{if .Error}}<small class="text-danger">{{.Error}}</small>{{else}}<span class="muted">—</span>{{end}}</td>
+</tr>
+{{else}}
+{{/* not on an append: an exhausted next page must not paint an empty state
+     over rows that are already on screen */}}
+{{if not .OOB}}
+<tr><td colspan="6" class="muted">Belum ada pesanan keluar untuk filter ini.</td></tr>
+{{end}}
+{{end}}
+{{end}}
+
+{{/* The "load more" control lives in the table footer, not as a fake <tr> inside
+     <tbody>. An append response re-renders it out-of-band so it carries the next
+     cursor (or disappears on the last page). */}}
+{{define "outgoing_chat_more"}}
+<div id="outgoing-chat-more"{{if .OOB}} hx-swap-oob="true"{{end}}>
+  {{if .MoreURL}}
+  <button class="btn btn-outline" hx-get="{{.MoreURL}}"
+          hx-target="#outgoing-chat-tbody" hx-swap="beforeend">Muat 50 lagi</button>
+  {{end}}
+</div>
+{{end}}
+
+{{/* HTMX append response: new rows for #outgoing-chat-tbody + the OOB footer button. */}}
+{{define "outgoing_chat_rows_page"}}{{template "outgoing_chat_rows" .}}{{template "outgoing_chat_more" .}}{{end}}

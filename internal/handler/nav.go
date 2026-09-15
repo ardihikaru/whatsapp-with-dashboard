@@ -28,6 +28,12 @@ const (
 	iconClients   template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12 2a5 5 0 0 1 5 5 5 5 0 0 1-2.1 4.07A8 8 0 0 1 20 18.5V21h-2v-2.5a6 6 0 0 0-12 0V21H4v-2.5a8 8 0 0 1 5.1-7.43A5 5 0 0 1 12 2zm0 2a3 3 0 1 0 0 6 3 3 0 0 0 0-6zm7.5 6H22v2h-2.5v2.5h-2V12H15v-2h2.5V7.5h2V10z"/></svg>`
 	iconDocs      template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M6 2a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-6-6H6zm7 1.5L18.5 9H13V3.5zM8 12h8v2H8v-2zm0 4h8v2H8v-2z"/></svg>`
 	iconLogs      template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M4 5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5zm4 3h8V6H8v2zm0 4h8v-2H8v2zm0 4h5v-2H8v2z"/></svg>`
+	// paper-plane with a small clock badge — "sends, paced over time",
+	// distinct from iconSend's plain paper-plane (fire one message right
+	// now) and iconLogs' document glyph (the durable audit log): this page
+	// is about the CADENCE between sends on one session, not a single send
+	// or the log's per-message record.
+	iconOutgoingChat template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M2 21l14-6-14-6v5l9 1-9 1v5z"/><path d="M18 12a4 4 0 1 1 0 8 4 4 0 0 1 0-8zm0 1.5a.75.75 0 0 0-.75.75v1.94l1.35 1.35a.75.75 0 1 0 1.06-1.06l-.91-.91V14.25A.75.75 0 0 0 18 13.5z"/></svg>`
 	// heartbeat/pulse line — "is this thing alive right now", distinct from
 	// iconLogs' document glyph (the durable message log) so the sidebar
 	// itself hints these are two different kinds of "log" before an
@@ -89,6 +95,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 			{Title: "Self Convo", Path: "/self-convo", Icon: iconSelfConvo},
 			{Title: "Convo Schedules", Path: "/self-convo/schedules", Icon: iconSchedules},
 			{Title: "Message Log", Path: "/logs", Icon: iconLogs},
+			{Title: "Outgoing Chat", Path: "/outgoing-chat", Icon: iconOutgoingChat},
 		}},
 		{Subheader: "Admin", Items: []NavItem{
 			{Title: "API Clients", Path: "/admin/api-clients", Icon: iconClients},

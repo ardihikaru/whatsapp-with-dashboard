@@ -120,6 +120,14 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/logs/list.html", "templates/partials/log_rows.html"),
 		root:  "base",
 	},
+	// outgoing_chat embeds its first page of detail rows inline (like "logs"
+	// above), so its rows partial is dual-included here AND in partialFiles
+	// below — RenderPartial needs it independently for the keyset "load
+	// more" response.
+	"outgoing_chat": {
+		files: append(chrome(), "templates/outgoing_chat/list.html", "templates/partials/outgoing_chat_rows.html"),
+		root:  "base",
+	},
 	"system_log": {
 		// No rows partial in this fileset — like "sessions" above (and
 		// unlike "logs", which embeds its first page of rows inline), the
@@ -150,6 +158,7 @@ var partialFiles = []string{
 	"templates/partials/pairing_status.html",
 	"templates/partials/send_result.html",
 	"templates/partials/log_rows.html",
+	"templates/partials/outgoing_chat_rows.html",
 	"templates/partials/system_log_rows.html",
 	"templates/partials/call_rows.html",
 	"templates/partials/verify_rows.html",

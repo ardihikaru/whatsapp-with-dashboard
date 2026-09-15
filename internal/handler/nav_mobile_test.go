@@ -22,6 +22,7 @@ var pagesWithChrome = []string{
 	"/self-convo/schedules",
 	"/self-convo/schedules/new",
 	"/logs",
+	"/outgoing-chat",
 	"/admin/api-clients",
 	"/system-log",
 }

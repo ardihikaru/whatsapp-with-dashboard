@@ -66,6 +66,20 @@ type Deps struct {
 	// callsDisabledMessage.
 	CallsEnabled bool
 
+	// SendRate/SendBurst are the configured per-session token-bucket floor
+	// (internal/wa/sender_limits.go, WSM_SEND_RATE/WSM_SEND_BURST) — copied
+	// onto Deps like every other resolved config value here so
+	// /outgoing-chat (outgoing_chat.go) can render the expected sustained
+	// gap (1/SendRate) and flag a session whose observed average gap is
+	// running below it. Zero (any handler test built before this field
+	// existed) falls back to the same 1.0/3 defaults config.Load itself uses
+	// — see effectiveSendRate/effectiveSendBurst in outgoing_chat.go. This
+	// package deliberately does not import internal/config (see the
+	// MediaMaxBytes comment above), so the fallback values are a plain
+	// local copy, not a shared constant.
+	SendRate  float64
+	SendBurst int
+
 	// Convo is the Self Convo persistence seam (internal/domain/convo) —
 	// template CRUD and run listing/cancel go through it directly from the
 	// handlers, same as Calls above. nil is legal (older test servers);

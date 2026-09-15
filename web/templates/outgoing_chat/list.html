@@ -1,0 +1,97 @@
+{{define "content"}}
+<div class="page-heading">
+  <div>
+    <h4>Outgoing Chat</h4>
+    <p class="page-subtitle">Jarak antar pesan terkirim per sesi, dari cap waktu <code>sent_at</code> yang sesungguhnya — bukan simulasi, dan bukan jejak langsung keputusan internal pembatas laju (rate limiter); lihat kolom Rata-rata vs batas bawah {{.FloorLabel}} (1/SendRate) di bawah.</p>
+  </div>
+</div>
+
+<div class="section-title">Ringkasan per Sesi</div>
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr>
+          <th>Nama</th><th>Nomor / JID</th><th>Status</th>
+          <th>Terkirim</th><th>Gagal</th>
+          <th>Sampel</th><th>Min</th><th>Maks</th><th>Rata-rata</th>
+        </tr>
+      </thead>
+      <tbody>
+      {{range .Summary}}
+        <tr>
+          <td>{{.Name}}</td>
+          <td class="mono">{{.JID}}</td>
+          <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
+          <td>{{.Sent}}</td>
+          <td>{{.Failed}}</td>
+          <td>{{.GapCount}}</td>
+          <td class="mono">{{.GapMin}}</td>
+          <td class="mono">{{.GapMax}}</td>
+          <td class="mono">{{.GapAvg}}
+            {{if .Violation}}<br><small class="text-danger">di bawah batas {{$.FloorLabel}} — kemungkinan melampaui laju kirim yang dikonfigurasi</small>{{end}}
+          </td>
+        </tr>
+      {{else}}
+        <tr><td colspan="9" class="muted">Belum ada sesi.</td></tr>
+      {{end}}
+      </tbody>
+    </table>
+  </div>
+  <div class="table-footer">
+    <span>Batas kirim terkonfigurasi: {{printf "%.2f" .SendRate}} pesan/detik (burst {{.SendBurst}}) — jarak minimum yang diharapkan saat stabil: {{.FloorLabel}}.</span>
+  </div>
+</div>
+
+<div class="section-title">Jarak rata-rata vs batas bawah</div>
+<div class="chart-card">
+  <script type="application/json" data-chart="outgoinggap">{{.Chart}}</script>
+  <div id="chart-outgoinggap" class="chart-canvas"></div>
+</div>
+
+<div class="section-title">Filter</div>
+<div class="card">
+  <form method="get" action="{{u "/outgoing-chat"}}" class="filter-form">
+    <label class="filter-field">
+      <span class="textfield-label">Sesi</span>
+      <select name="session_id">
+        <option value="">Semua</option>
+        {{range .Filter.SessionOpts}}
+        <option value="{{.Key}}"{{if eq $.Filter.SessionID .Key}} selected{{end}}>{{.Label}}</option>
+        {{end}}
+      </select>
+    </label>
+    <label class="filter-field">
+      <span class="textfield-label">Status</span>
+      <select name="status">
+        <option value="">Semua</option>
+        {{range .Filter.StatusOpts}}
+        <option value="{{.}}"{{if eq $.Filter.Status .}} selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+    <div class="filter-actions">
+      <button type="submit" class="btn btn-primary">Terapkan</button>
+      <a class="btn btn-outline" href="{{u "/outgoing-chat"}}">Reset</a>
+    </div>
+  </form>
+</div>
+
+<div class="section-title">Pesan (rincian)</div>
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Waktu</th><th>Status</th><th>Tujuan</th><th>Sesi</th><th>Percobaan</th><th>Error</th></tr>
+      </thead>
+      <tbody id="outgoing-chat-tbody">
+        {{template "outgoing_chat_rows" .Rows}}
+      </tbody>
+    </table>
+  </div>
+  <div class="table-footer">
+    <span>{{if .Rows.MoreURL}}Dimuat {{len .Rows.Rows}} pesan{{end}}</span>
+    {{template "outgoing_chat_more" .Rows}}
+  </div>
+</div>
+{{end}}

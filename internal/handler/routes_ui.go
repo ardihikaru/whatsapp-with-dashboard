@@ -44,6 +44,11 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("GET "+bp+"/logs", page(http.HandlerFunc(h.GetLogs)))
 	mux.Handle("GET "+bp+"/logs/rows", page(http.HandlerFunc(h.GetLogRows)))
 
+	// Outgoing Chat: per-session send-pacing visibility (real gap stats
+	// from wa_messages.sent_at vs. the configured WSM_SEND_RATE/BURST).
+	mux.Handle("GET "+bp+"/outgoing-chat", page(http.HandlerFunc(h.GetOutgoingChat)))
+	mux.Handle("GET "+bp+"/outgoing-chat/rows", page(http.HandlerFunc(h.GetOutgoingChatRows)))
+
 	// System log: in-memory diagnostic events (internal/wa's Manager.RecentEvents),
 	// NOT the same thing as the outbound message log above — see system_log.go's
 	// doc comment.
