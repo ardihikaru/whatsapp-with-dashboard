@@ -160,6 +160,15 @@
    rather than the UA default (a 3px groove border, opaque white background
    regardless of theme). */
 dialog.modal {
+  /* The universal `* { margin: 0 }` reset in base.css cancels the UA
+     stylesheet's `margin: auto` centering for <dialog>, which otherwise
+     relies on it together with `position: fixed` + default `inset`. Center
+     explicitly instead of depending on that cascade. */
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  margin: 0;
   width: min(920px, calc(100vw - 32px));
   max-height: calc(100vh - 64px);
   padding: 24px;

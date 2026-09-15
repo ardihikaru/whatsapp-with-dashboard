@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	outgoingChatPageSize = 50
+	outgoingChatPageSize = 10
 	// outgoingChatSample bounds GapStats' scan per session — mirrors the
 	// plan's chosen sample size (internal/domain/message.GapStats' own doc
 	// comment: a low-volume session still gets a meaningful sample, a

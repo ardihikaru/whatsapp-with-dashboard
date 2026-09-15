@@ -202,7 +202,7 @@ func seedManyOutgoingMessages(t *testing.T, pool *sql.DB, sessionID string, n in
 // TestOutgoingChatDetailTablePagesForwardAndBackOverTheKeysetCursor is the
 // red-without-the-change test for item 3's detail table: before this change
 // the only control was an append-only "Muat 50 lagi" button (MoreURL) and
-// there was no way back. Seeds 60 messages (> outgoingChatPageSize=50) so
+// there was no way back. Seeds 12 messages (> outgoingChatPageSize=10) so
 // there IS a second page, walks Next then Back, and checks the page counter
 // and which rows are visible at each step.
 func TestOutgoingChatDetailTablePagesForwardAndBackOverTheKeysetCursor(t *testing.T) {
@@ -213,8 +213,8 @@ func TestOutgoingChatDetailTablePagesForwardAndBackOverTheKeysetCursor(t *testin
 		t.Fatal(err)
 	}
 	base := time.Now().UTC().Add(-time.Hour)
-	seedManyOutgoingMessages(t, pool, sess.ID, 60, base)
-	newestPhone := "628000059" // i=59, the most recently created row
+	seedManyOutgoingMessages(t, pool, sess.ID, 12, base)
+	newestPhone := "628000011" // i=11, the most recently created row
 	oldestPhone := "628000000" // i=0, only reachable on page 2
 
 	page1 := authedGet(t, srv, sessions, "/outgoing-chat")
