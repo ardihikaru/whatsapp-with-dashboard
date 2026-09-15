@@ -247,6 +247,8 @@ func run() error {
 			MediaMaxBytesAudio:     cfg.MediaMaxBytesAudio,
 			MediaMaxBytesDocument:  cfg.MediaMaxBytesDocument,
 			CallsEnabled:           cfg.CallsEnabled,
+			SendRate:               cfg.SendRate,
+			SendBurst:              cfg.SendBurst,
 			SessionTTL:             cfg.SessionTTL,
 			DarkMode:               cfg.DarkMode,
 			PlatformURL:            cfg.PlatformURL,
