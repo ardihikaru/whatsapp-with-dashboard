@@ -135,3 +135,50 @@
 
 .alert-error { color: var(--alert-error-ink); background: rgba(255, 86, 48, 0.12); }
 
+/* Collapsible filter section (/outgoing-chat) — native <details>, default
+   closed, styled to read like the ordinary .section-title + .card pairing
+   every other page uses so opening it doesn't look like a different
+   component. */
+.filter-details summary {
+  cursor: pointer;
+  list-style: none;
+}
+.filter-details summary::-webkit-details-marker { display: none; }
+.filter-details summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 12px;
+  margin-right: 6px;
+  color: var(--text-secondary);
+  transition: transform 120ms ease;
+}
+.filter-details[open] summary::before { transform: rotate(90deg); }
+.filter-details .card { margin-top: 16px; }
+
+/* Native <dialog> popups (/outgoing-chat's "Ringkasan per Sesi" and "Jarak
+   rata-rata" sections — see web/static/js/modal.js). Themed to match .card
+   rather than the UA default (a 3px groove border, opaque white background
+   regardless of theme). */
+dialog.modal {
+  width: min(920px, calc(100vw - 32px));
+  max-height: calc(100vh - 64px);
+  padding: 24px;
+  border: 0;
+  border-radius: var(--radius-card);
+  background: var(--bg-paper);
+  box-shadow: var(--shadow-card);
+  color: var(--text-primary);
+}
+dialog.modal::backdrop { background: rgba(17, 25, 39, 0.64); }
+[data-theme="dark"] dialog.modal::backdrop { background: rgba(0, 0, 0, 0.72); }
+
+.modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.modal-head h4 { margin: 0; }
+.modal-body { overflow: auto; max-height: calc(100vh - 160px); }
+

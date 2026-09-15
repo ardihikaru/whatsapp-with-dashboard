@@ -6,81 +6,106 @@
   </div>
 </div>
 
+{{/* Collapsible, default-closed: on a phone this used to sit between the
+     chart and the detail table and permanently cost a full screen of
+     scroll. Native <details>/<summary> — no JS needed to open/close it. */}}
+<details class="filter-details">
+  <summary class="section-title">Filter</summary>
+  <div class="card">
+    <form method="get" action="{{u "/outgoing-chat"}}" class="filter-form">
+      <label class="filter-field">
+        <span class="textfield-label">Sesi</span>
+        <select name="session_id">
+          <option value="">Semua</option>
+          {{range .Filter.SessionOpts}}
+          <option value="{{.Key}}"{{if eq $.Filter.SessionID .Key}} selected{{end}}>{{.Label}}</option>
+          {{end}}
+        </select>
+      </label>
+      <label class="filter-field">
+        <span class="textfield-label">Status</span>
+        <select name="status">
+          <option value="">Semua</option>
+          {{range .Filter.StatusOpts}}
+          <option value="{{.}}"{{if eq $.Filter.Status .}} selected{{end}}>{{.}}</option>
+          {{end}}
+        </select>
+      </label>
+      <div class="filter-actions">
+        <button type="submit" class="btn btn-primary">Terapkan</button>
+        <a class="btn btn-outline" href="{{u "/outgoing-chat"}}">Reset</a>
+      </div>
+    </form>
+  </div>
+</details>
+
 <div class="section-title">Ringkasan per Sesi</div>
 <div class="card">
-  <div class="table-scroll">
-    <table class="table table-wide">
-      <thead>
-        <tr>
-          <th>Nama</th><th>Nomor / JID</th><th>Status</th>
-          <th>Terkirim</th><th>Gagal</th>
-          <th>Sampel</th><th>Min</th><th>Maks</th><th>Rata-rata</th>
-        </tr>
-      </thead>
-      <tbody>
-      {{range .Summary}}
-        <tr>
-          <td>{{.Name}}</td>
-          <td class="mono">{{.JID}}</td>
-          <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
-          <td>{{.Sent}}</td>
-          <td>{{.Failed}}</td>
-          <td>{{.GapCount}}</td>
-          <td class="mono">{{.GapMin}}</td>
-          <td class="mono">{{.GapMax}}</td>
-          <td class="mono">{{.GapAvg}}
-            {{if .Violation}}<br><small class="text-danger">di bawah batas {{$.FloorLabel}} — kemungkinan melampaui laju kirim yang dikonfigurasi</small>{{end}}
-          </td>
-        </tr>
-      {{else}}
-        <tr><td colspan="9" class="muted">Belum ada sesi.</td></tr>
-      {{end}}
-      </tbody>
-    </table>
-  </div>
-  <div class="table-footer">
-    <span>Batas kirim terkonfigurasi: {{printf "%.2f" .SendRate}} pesan/detik (burst {{.SendBurst}}) — jarak minimum yang diharapkan saat stabil: {{.FloorLabel}}.</span>
-  </div>
+  <p class="muted">Batas kirim terkonfigurasi: {{printf "%.2f" .SendRate}} pesan/detik (burst {{.SendBurst}}) — jarak minimum yang diharapkan saat stabil: {{.FloorLabel}}.</p>
+  <button type="button" class="btn btn-primary" data-modal-open="modal-outgoing-summary">Lihat ringkasan per sesi ({{.SummaryTotal}})</button>
 </div>
+
+<dialog id="modal-outgoing-summary" class="modal" aria-labelledby="modal-outgoing-summary-title">
+  <div class="modal-head">
+    <h4 id="modal-outgoing-summary-title">Ringkasan per Sesi</h4>
+    <button type="button" class="btn btn-outline" data-modal-close>Tutup</button>
+  </div>
+  <div class="modal-body">
+    <div class="table-scroll">
+      <table class="table table-wide table-compact">
+        <thead>
+          <tr>
+            <th>Nama</th><th>Nomor / JID</th><th>Status</th>
+            <th>Terkirim</th><th>Gagal</th>
+            <th>Sampel</th><th>Min</th><th>Maks</th><th>Rata-rata</th>
+          </tr>
+        </thead>
+        <tbody>
+        {{range .Summary}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td class="mono">{{.JID}}</td>
+            <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
+            <td>{{.Sent}}</td>
+            <td>{{.Failed}}</td>
+            <td>{{.GapCount}}</td>
+            <td class="mono">{{.GapMin}}</td>
+            <td class="mono">{{.GapMax}}</td>
+            <td class="mono">{{.GapAvg}}
+              {{if .Violation}}<br><small class="text-danger">di bawah batas {{$.FloorLabel}} — kemungkinan melampaui laju kirim yang dikonfigurasi</small>{{end}}
+            </td>
+          </tr>
+        {{else}}
+          <tr><td colspan="9" class="muted">Belum ada sesi.</td></tr>
+        {{end}}
+        </tbody>
+      </table>
+    </div>
+    {{template "pager" .Pager}}
+  </div>
+</dialog>
 
 <div class="section-title">Jarak rata-rata vs batas bawah</div>
-<div class="chart-card">
-  <script type="application/json" data-chart="outgoinggap">{{.Chart}}</script>
-  <div id="chart-outgoinggap" class="chart-canvas"></div>
+<div class="card">
+  <p class="muted">Rata-rata jarak antar kiriman sukses per sesi, dibandingkan batas bawah terkonfigurasi ({{.FloorLabel}}).</p>
+  <button type="button" class="btn btn-primary" data-modal-open="modal-outgoing-gap">Lihat grafik jarak rata-rata</button>
 </div>
 
-<div class="section-title">Filter</div>
-<div class="card">
-  <form method="get" action="{{u "/outgoing-chat"}}" class="filter-form">
-    <label class="filter-field">
-      <span class="textfield-label">Sesi</span>
-      <select name="session_id">
-        <option value="">Semua</option>
-        {{range .Filter.SessionOpts}}
-        <option value="{{.Key}}"{{if eq $.Filter.SessionID .Key}} selected{{end}}>{{.Label}}</option>
-        {{end}}
-      </select>
-    </label>
-    <label class="filter-field">
-      <span class="textfield-label">Status</span>
-      <select name="status">
-        <option value="">Semua</option>
-        {{range .Filter.StatusOpts}}
-        <option value="{{.}}"{{if eq $.Filter.Status .}} selected{{end}}>{{.}}</option>
-        {{end}}
-      </select>
-    </label>
-    <div class="filter-actions">
-      <button type="submit" class="btn btn-primary">Terapkan</button>
-      <a class="btn btn-outline" href="{{u "/outgoing-chat"}}">Reset</a>
-    </div>
-  </form>
-</div>
+<dialog id="modal-outgoing-gap" class="modal" aria-labelledby="modal-outgoing-gap-title">
+  <div class="modal-head">
+    <h4 id="modal-outgoing-gap-title">Jarak rata-rata vs batas bawah</h4>
+    <button type="button" class="btn btn-outline" data-modal-close>Tutup</button>
+  </div>
+  <div class="modal-body chart-card">
+    <script type="application/json" data-chart="outgoinggap">{{.Chart}}</script>
+    <div id="chart-outgoinggap" class="chart-canvas"></div>
+  </div>
+</dialog>
 
 <div class="section-title">Pesan (rincian)</div>
 <div class="card">
   <div class="table-scroll">
-    <table class="table table-wide">
+    <table class="table table-wide table-compact">
       <thead>
         <tr><th>Waktu</th><th>Status</th><th>Tujuan</th><th>Sesi</th><th>Percobaan</th><th>Error</th></tr>
       </thead>
@@ -89,9 +114,6 @@
       </tbody>
     </table>
   </div>
-  <div class="table-footer">
-    <span>{{if .Rows.MoreURL}}Dimuat {{len .Rows.Rows}} pesan{{end}}</span>
-    {{template "outgoing_chat_more" .Rows}}
-  </div>
+  {{template "outgoing_chat_pager" .Rows}}
 </div>
 {{end}}

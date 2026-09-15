@@ -14,6 +14,13 @@
 .table-wide th,
 .table-wide .mono { white-space: nowrap; }
 
+/* Scoped row-density modifier — .table td's global 12px/16px (forms.css) is
+   shared by every table in the app, so it is NOT edited here; add this class
+   to opt one table into tighter rows instead (/outgoing-chat's summary and
+   detail tables, which stacked two dialogs' worth of content on a phone). */
+.table-compact th { padding: 8px 12px; }
+.table-compact td { padding: 6px 12px; }
+
 .table-footer {
   display: flex;
   align-items: center;
@@ -46,6 +53,11 @@
 .pager a:hover { background: rgba(145, 158, 171, 0.08); color: var(--text-primary); }
 .pager .pager-current { color: #FFFFFF; background: var(--primary); }
 .pager .pager-gap { color: var(--text-disabled); font-weight: 400; }
+
+/* /outgoing-chat's detail-table Prev/Next stepper (outgoing_chat_pager,
+   partials/outgoing_chat_rows.html) — a keyset cursor has no numbered pager
+   component (see outgoingRowsData's doc comment), just the two buttons. */
+.pager-buttons { display: flex; gap: 8px; }
 
 /* Row actions pinned right and kept on one line so a 4-button cell cannot
    triple the row height on a narrow viewport. */

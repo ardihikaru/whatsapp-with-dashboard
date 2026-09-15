@@ -122,11 +122,14 @@ var pageDefs = map[string]pageDef{
 	},
 	// outgoing_chat embeds its first page of detail rows inline (like "logs"
 	// above), so its rows partial is dual-included here AND in partialFiles
-	// below — RenderPartial needs it independently for the keyset "load
-	// more" response.
+	// below — RenderPartial needs it independently for the keyset
+	// Prev/Next-paged response. pager.html is the same numbered footer
+	// api_clients/list uses, reused here for the (in-memory, non-keyset)
+	// "Ringkasan per Sesi" table — see outgoingSummaryPageSize's doc comment.
 	"outgoing_chat": {
-		files: append(chrome(), "templates/outgoing_chat/list.html", "templates/partials/outgoing_chat_rows.html"),
-		root:  "base",
+		files: append(chrome(), "templates/outgoing_chat/list.html", "templates/partials/outgoing_chat_rows.html",
+			"templates/partials/pager.html"),
+		root: "base",
 	},
 	"system_log": {
 		// No rows partial in this fileset — like "sessions" above (and
