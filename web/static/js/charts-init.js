@@ -55,4 +55,11 @@
   document.addEventListener('DOMContentLoaded', initCharts);
   document.addEventListener('htmx:afterSwap', initCharts);
   window.addEventListener('resize', resizeCharts);
+
+  // Re-hydrates every chart on demand — used when a chart's container was
+  // hidden (e.g. inside a <dialog> that starts closed) when DOMContentLoaded
+  // first ran, so echarts.init saw a 0x0 canvas. modal.js dispatches this
+  // once a <dialog> containing a chart actually opens. Calling initCharts
+  // again is safe: it disposes any existing instance per element first.
+  document.addEventListener('wsm:charts-refresh', initCharts);
 })();
