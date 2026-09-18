@@ -2,18 +2,19 @@
 {{if .Error}}
 <div class="alert alert-error">{{.Error}}</div>
 {{else if .SessionID}}
-<div class="convo-participants">
-  {{range .Groups}}
-  <label class="convo-participant">
-    <input type="radio" name="_group_jid_pick" value="{{.JID}}"
-           onclick="this.closest('form').querySelector('[name=group_jid]').value=this.value;
-                    this.closest('form').querySelector('[name=name]').value ||
-                      (this.closest('form').querySelector('[name=name]').value='{{.Name}}');">
-    <span>{{.Name}} <span class="convo-participant-phone">({{.ParticipantCount}} members)</span></span>
-  </label>
-  {{else}}
-  <p class="muted">This session has no joined groups yet.</p>
-  {{end}}
+{{if .Groups}}
+<div class="textfield" data-known-group-picker>
+  <span class="textfield-label">Search joined groups ({{len .Groups}})</span>
+  <input type="text" list="known-group-options" autocomplete="off" data-known-group-search
+         placeholder="Type a group name to search…">
+  <datalist id="known-group-options">
+    {{range .Groups}}<option value="{{.Name}} ({{.Participants}} members)"></option>{{end}}
+  </datalist>
+  <small class="muted">Picking a result fills in Group JID and Name below.</small>
+  <script type="application/json" data-known-group-options>{{.OptionsJSON}}</script>
 </div>
+{{else}}
+<p class="muted">This session has no joined groups yet.</p>
+{{end}}
 {{end}}
 {{end}}
