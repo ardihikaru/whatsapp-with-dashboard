@@ -1,0 +1,48 @@
+{{define "content"}}
+<div class="page-heading">
+  <div>
+    <h4>{{.Schedule.Name}}</h4>
+    <p class="page-subtitle">{{.Schedule.GroupName}} · <span class="badge badge-{{.Schedule.State}}">{{.Schedule.State}}</span></p>
+  </div>
+  <a class="btn btn-outline" href="{{u "/group-broadcast/schedules"}}/{{.Schedule.ID}}/edit">Edit</a>
+</div>
+
+{{if not .Enabled}}
+<div class="alert">Group Broadcast Schedule is disabled on this deployment (<span class="mono">WSM_GROUP_BROADCAST_ENABLED=true</span>
+  turns it on) — this schedule will not materialise any new occurrence while the flag is off.</div>
+{{end}}
+
+{{if .Schedule.PausedReason}}
+<div class="alert alert-error">Stalled: {{.Schedule.PausedReason}}</div>
+{{end}}
+
+<div class="card">
+  <p><strong>Sender:</strong> {{.Schedule.SenderName}} (+{{.Schedule.SenderPhone}})</p>
+  <p><strong>Group:</strong> {{.Schedule.GroupName}} (<span class="mono">{{.Schedule.GroupJID}}</span>)</p>
+  <p><strong>Receivers:</strong></p>
+  <ul>
+    {{range .Receivers}}<li>{{.SessionName}} (+{{.Phone}})</li>{{end}}
+  </ul>
+  <p><strong>Recurrence:</strong> {{.Schedule.RecurrenceLabel}}</p>
+  <p><strong>Sender window:</strong> <span class="mono">{{.Schedule.SenderWindowLabel}}</span></p>
+  <p><strong>Receiver window:</strong> <span class="mono">{{.Schedule.ReceiverWindowLabel}}</span></p>
+  <p><strong>Late cutoff:</strong> <span class="mono">{{.Schedule.LateCutoff}}</span></p>
+  <p><strong>Indonesian weight:</strong> {{.Schedule.LangIDWeight}}% (Javanese {{.Schedule.LangIDWeight}}% is the rest)</p>
+  <p><strong>Range:</strong> <span class="mono">{{.Schedule.StartDate}}</span> –
+    {{if .Schedule.NoEndDate}}<span class="badge badge-nonstop">no end date</span>{{else}}<span class="mono">{{.Schedule.EndDate}}</span>{{end}}</p>
+</div>
+
+<div class="card">
+  <div class="page-heading"><h5>Recent occurrences</h5></div>
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Date</th><th>State</th><th>Turns</th></tr>
+      </thead>
+      <tbody id="gb-occurrence-rows" hx-get="{{u "/group-broadcast/schedules"}}/{{.Schedule.ID}}/occurrences/rows" hx-trigger="load, every 5s" hx-swap="innerHTML">
+        <tr><td colspan="3">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

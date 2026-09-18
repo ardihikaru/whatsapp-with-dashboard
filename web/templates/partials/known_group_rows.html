@@ -1,0 +1,17 @@
+{{define "known_group_rows"}}
+{{if .Error}}<tr><td colspan="4"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{range .Groups}}
+<tr>
+  <td>{{.Name}}</td>
+  <td class="mono">{{.SessionID}}</td>
+  <td class="mono">{{.GroupJID}}</td>
+  <td class="row-actions">
+    <button class="btn btn-outline btn-danger" hx-post="{{u "/groups"}}/{{.ID}}/delete"
+            hx-target="#known-group-rows" hx-swap="innerHTML"
+            hx-confirm="Delete this saved group? Any schedule already using it keeps sending — the group's JID is snapshotted onto each schedule at save time.">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="4">No known groups yet — save one above.</td></tr>
+{{end}}
+{{end}}

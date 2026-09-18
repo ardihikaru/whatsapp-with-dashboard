@@ -10,8 +10,11 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
+	gb "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/groupbroadcast"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/knowngroup"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/groupbroadcast"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/storage"
@@ -101,6 +104,32 @@ type Deps struct {
 	// so those refusals live in one place; plain schedule CRUD and listing
 	// go through Convo directly and need no Planner at all.
 	Planner *selfconvo.Planner
+
+	// KnownGroups is the per-session known-WhatsApp-groups CRUD seam
+	// (internal/domain/knowngroup) backing the /groups page. nil is legal
+	// (older test servers); guarded the same way h.Calls is.
+	KnownGroups *knowngroup.Repository
+	// GroupBroadcast is the Group Broadcast Schedule persistence seam
+	// (internal/domain/groupbroadcast) — schedule CRUD/listing and
+	// occurrence/turn history go through it directly from the handlers,
+	// same as Convo above. nil is legal.
+	GroupBroadcast *gb.Repository
+	// GroupBroadcastRunner is the running turn dispatcher
+	// (internal/groupbroadcast), wired by cmd/app/main.go via
+	// startGroupBroadcast only when GroupBroadcastEnabled is true; nil
+	// otherwise. Nothing in this package calls it directly today (there is
+	// no manual "trigger now" for this feature, unlike self-convo) — it is
+	// carried on Deps for symmetry and for a future admin action.
+	GroupBroadcastRunner *groupbroadcast.Runner
+	// GroupBroadcastEnabled gates every mutating /group-broadcast/* and
+	// /groups/* endpoint — see group_broadcast_schedule_ui.go's
+	// groupBroadcastDisabledMessage.
+	GroupBroadcastEnabled bool
+	// GroupBroadcastPlanner is the Group Broadcast Schedule background
+	// loop, wired alongside GroupBroadcastRunner — nil under the exact same
+	// condition. Every schedule pause/resume/stop action goes through it,
+	// mirroring Planner above.
+	GroupBroadcastPlanner *groupbroadcast.Planner
 
 	SessionTTL time.Duration
 	DarkMode   bool

@@ -98,6 +98,25 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/self_convo/schedule_view.html"),
 		root:  "base",
 	},
+	"known_groups": {
+		files: append(chrome(), "templates/known_groups.html"),
+		root:  "base",
+	},
+	// group_broadcast_schedule_form is shared by GET .../schedules/new AND
+	// GET .../schedules/{id}/edit, same IsEdit-picks-the-difference
+	// convention as self_convo_schedule_form above.
+	"group_broadcast_schedules": {
+		files: append(chrome(), "templates/group_broadcast/schedules.html"),
+		root:  "base",
+	},
+	"group_broadcast_schedule_form": {
+		files: append(chrome(), "templates/group_broadcast/schedule_form.html"),
+		root:  "base",
+	},
+	"group_broadcast_schedule_view": {
+		files: append(chrome(), "templates/group_broadcast/schedule_view.html"),
+		root:  "base",
+	},
 	"session-ops": {
 		files: append(chrome(), "templates/sessions/ops.html"),
 		root:  "base",
@@ -173,6 +192,10 @@ var partialFiles = []string{
 	"templates/partials/convo_run_rows.html",
 	"templates/partials/convo_template_rows.html",
 	"templates/partials/convo_schedule_rows.html",
+	"templates/partials/known_group_rows.html",
+	"templates/partials/known_group_picker.html",
+	"templates/partials/group_broadcast_schedule_rows.html",
+	"templates/partials/group_broadcast_occurrence_rows.html",
 }
 
 // Renderer holds the parsed template sets.

@@ -37,7 +37,9 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
+	gb "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/groupbroadcast"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/knowngroup"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/handler"
@@ -173,6 +175,8 @@ func run() error {
 	msgRepo := message.NewRepository(appDB)
 	callRepo := call.NewRepository(appDB)
 	convoRepo := convo.NewRepository(appDB)
+	knownGroupRepo := knowngroup.NewRepository(appDB)
+	groupBroadcastRepo := gb.NewRepository(appDB)
 	// inboundRepo is nil-able on Manager (see Manager.inbound's doc
 	// comment) but always real in production — WSM_INBOUND_ENABLED only
 	// gates whether internal/wa's pump actually polls waxum for it, not
@@ -194,6 +198,11 @@ func run() error {
 	// off (the default) — see startSelfConvo's doc comment
 	// (cmd/app/selfconvo.go).
 	runner, planner := startSelfConvo(ctx, cfg, convoRepo, manager, msgRepo)
+
+	// Group Broadcast Schedule runner + planner: both nil when
+	// WSM_GROUP_BROADCAST_ENABLED is off (the default) — see
+	// startGroupBroadcast's doc comment (cmd/app/groupbroadcast.go).
+	gbRunner, gbPlanner := startGroupBroadcast(ctx, cfg, groupBroadcastRepo, manager)
 
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
@@ -236,6 +245,11 @@ func run() error {
 			SelfConvo:              runner,
 			SelfConvoEnabled:       cfg.SelfConvoEnabled,
 			Planner:                planner,
+			KnownGroups:            knownGroupRepo,
+			GroupBroadcast:         groupBroadcastRepo,
+			GroupBroadcastRunner:   gbRunner,
+			GroupBroadcastEnabled:  cfg.GroupBroadcastEnabled,
+			GroupBroadcastPlanner:  gbPlanner,
 			Inbound:                inboundRepo,
 			Objects:                objectStore,
 			MediaMaxBytes:          cfg.MediaMaxBytes,
@@ -274,6 +288,12 @@ func run() error {
 
 	select {
 	case err := <-errCh:
+		if gbPlanner != nil {
+			gbPlanner.Stop()
+		}
+		if gbRunner != nil {
+			gbRunner.Stop()
+		}
 		if planner != nil {
 			planner.Stop()
 		}
@@ -288,6 +308,12 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	err = server.Shutdown(shutdownCtx) // 1) stop accepting / drain HTTP
+	if gbPlanner != nil {
+		gbPlanner.Stop() // 2) join the group-broadcast planner loop, same ordering as the self-convo planner below
+	}
+	if gbRunner != nil {
+		gbRunner.Stop() // 3) join the group-broadcast runner loop
+	}
 	if planner != nil {
 		planner.Stop() // 2) join the planner loop FIRST — see this file's own boot-order comment
 	}

@@ -1,0 +1,19 @@
+{{define "known_group_picker"}}
+{{if .Error}}
+<div class="alert alert-error">{{.Error}}</div>
+{{else if .SessionID}}
+<div class="convo-participants">
+  {{range .Groups}}
+  <label class="convo-participant">
+    <input type="radio" name="_group_jid_pick" value="{{.JID}}"
+           onclick="this.closest('form').querySelector('[name=group_jid]').value=this.value;
+                    this.closest('form').querySelector('[name=name]').value ||
+                      (this.closest('form').querySelector('[name=name]').value='{{.Name}}');">
+    <span>{{.Name}} <span class="convo-participant-phone">({{.ParticipantCount}} members)</span></span>
+  </label>
+  {{else}}
+  <p class="muted">This session has no joined groups yet.</p>
+  {{end}}
+</div>
+{{end}}
+{{end}}

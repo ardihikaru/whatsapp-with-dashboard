@@ -58,6 +58,14 @@ const (
 	// exchange right now): Convo scheduling turns that one-off into a
 	// recurring plan.
 	iconSchedules template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M7 2a1 1 0 0 1 1 1v1h8V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 1-1zM5 10v9h14v-9H5zm8 1.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7zm.5 1.5h-1v2.21l1.65 1.65.7-.7-1.35-1.35V13z"/></svg>`
+	// three overlapping circles — "one message, many recipients at once",
+	// distinct from iconSelfConvo's two speech bubbles (one 1:1 exchange):
+	// Group Broadcast Schedule fans one opener out to a real WhatsApp group
+	// and a whole list of repliers.
+	iconGroupBroadcast template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><circle cx="12" cy="6" r="3"/><circle cx="5" cy="17" r="3"/><circle cx="19" cy="17" r="3"/></svg>`
+	// a small tag/label glyph — "a saved name for a group", the known-groups
+	// CRUD page.
+	iconKnownGroups template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M20.6 12.9 12.7 21a1 1 0 0 1-1.4 0l-8-8a1 1 0 0 1-.3-.7V4a1 1 0 0 1 1-1h8.3c.3 0 .5.1.7.3l8 8a1 1 0 0 1 .3 1.6zM7 8a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>`
 )
 
 // platformLink is the sidebar footer's way back out to the platform backoffice.
@@ -94,6 +102,8 @@ func buildNav(basePath, currentPath string) []NavSection {
 			{Title: "Verify Number", Path: "/verify", Icon: iconVerify},
 			{Title: "Self Convo", Path: "/self-convo", Icon: iconSelfConvo},
 			{Title: "Convo Schedules", Path: "/self-convo/schedules", Icon: iconSchedules},
+			{Title: "Group Broadcast", Path: "/group-broadcast/schedules", Icon: iconGroupBroadcast},
+			{Title: "Known Groups", Path: "/groups", Icon: iconKnownGroups},
 			{Title: "Message Log", Path: "/logs", Icon: iconLogs},
 			{Title: "Outgoing Chat", Path: "/outgoing-chat", Icon: iconOutgoingChat},
 		}},

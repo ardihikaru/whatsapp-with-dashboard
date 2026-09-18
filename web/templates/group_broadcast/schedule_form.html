@@ -1,0 +1,141 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>{{if .IsEdit}}Edit Group Broadcast Schedule{{else}}New Group Broadcast Schedule{{end}}</h4>
+  <a class="btn btn-outline" href="{{u "/group-broadcast/schedules"}}">Back to schedules</a>
+</div>
+
+{{if not .Enabled}}
+<div class="alert">Group Broadcast Schedule is disabled on this deployment (<span class="mono">WSM_GROUP_BROADCAST_ENABLED=true</span>
+  turns it on). The form below still renders so you can see how it works; saving is refused until the flag is on.</div>
+{{end}}
+
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+
+<div class="card form-card">
+  <form action="{{if .IsEdit}}{{u "/group-broadcast/schedules"}}/{{.ScheduleID}}{{else}}{{u "/group-broadcast/schedules"}}{{end}}"
+        method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Name</span>
+      <input type="text" name="name" value="{{.Form.Name}}" maxlength="120" required>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Sender (posts the opening message)</span>
+      <select name="sender_id" class="select" required>
+        <option value="">Choose a session…</option>
+        {{range .Sessions}}
+        <option value="{{.ID}}" {{if eq $.Form.SenderID .ID}}selected{{end}}>{{.Name}} (+{{.Phone}})</option>
+        {{end}}
+      </select>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Known group</span>
+      <select name="known_group_id" class="select"
+              onchange="var o=this.selectedOptions[0]; if(o&&o.value){this.closest('form').querySelector('[name=group_jid]').value=o.dataset.jid; this.closest('form').querySelector('[name=group_name]').value=o.dataset.name;}">
+        <option value="">Choose a saved group, or paste a JID below…</option>
+        {{range .KnownGroups}}
+        <option value="{{.ID}}" data-jid="{{.GroupJID}}" data-name="{{.Name}}"
+                {{if eq $.Form.KnownGroupID .ID}}selected{{end}}>{{.Name}} ({{.GroupJID}})</option>
+        {{end}}
+      </select>
+      <small class="muted">Manage saved groups on the <a href="{{u "/groups"}}">Known Groups</a> page.</small>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Group JID</span>
+      <input type="text" name="group_jid" value="{{.Form.GroupJID}}" placeholder="120363xxxxxxxxxxxx@g.us" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Group name (display only)</span>
+      <input type="text" name="group_name" value="{{.Form.GroupName}}" maxlength="120">
+    </label>
+
+    <span class="textfield-label">Receivers (tick at least one — cannot include the sender)</span>
+    <div class="convo-participants">
+      {{range .Sessions}}
+      <label class="convo-participant">
+        <input type="checkbox" name="receiver_id" value="{{.ID}}" {{if index $.ReceiverSet .ID}}checked{{end}}>
+        <span>{{.Name}} <span class="convo-participant-phone">(+{{.Phone}})</span></span>
+      </label>
+      {{end}}
+    </div>
+    <small class="muted">Editing this list on an existing schedule takes effect on the NEXT occurrence the
+      planner plans — it never changes a day already planned.</small>
+
+    <span class="textfield-label">Recurrence</span>
+    <div class="row-actions">
+      <label><input type="radio" name="recurrence" value="daily" {{if eq .Form.Recurrence "daily"}}checked{{end}}> Daily</label>
+      <label><input type="radio" name="recurrence" value="weekly" {{if eq .Form.Recurrence "weekly"}}checked{{end}}> Weekly</label>
+      <label><input type="radio" name="recurrence" value="interval" {{if eq .Form.Recurrence "interval"}}checked{{end}}> Every N days</label>
+    </div>
+    <div data-recurrence-section="weekly" class="convo-participants">
+      {{range .Weekdays}}
+      <label class="convo-participant">
+        <input type="checkbox" name="weekday" value="{{.Value}}" {{if .Checked}}checked{{end}}>
+        <span>{{.Label}}</span>
+      </label>
+      {{end}}
+    </div>
+    <div data-recurrence-section="interval">
+      <label class="textfield">
+        <span class="textfield-label">Every N days</span>
+        <input type="number" name="interval_days" min="1" value="{{.Form.IntervalDays}}">
+      </label>
+    </div>
+
+    <span class="textfield-label">Sender window (the opener's random send time)</span>
+    <label class="textfield">
+      <span class="textfield-label">Start</span>
+      <input type="time" name="sender_window_start" value="{{.Form.SenderWindowStart}}" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">End</span>
+      <input type="time" name="sender_window_end" value="{{.Form.SenderWindowEnd}}" required>
+    </label>
+
+    <span class="textfield-label">Receiver window (each reply's random send time)</span>
+    <label class="textfield">
+      <span class="textfield-label">Start</span>
+      <input type="time" name="receiver_window_start" value="{{.Form.ReceiverWindowStart}}" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">End</span>
+      <input type="time" name="receiver_window_end" value="{{.Form.ReceiverWindowEnd}}" required>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Late cutoff (a reply after this time frames as asking to be excused)</span>
+      <input type="time" name="late_cutoff" value="{{.Form.LateCutoff}}" required>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Indonesian language weight (%) — the rest is Javanese</span>
+      <input type="number" name="lang_id_weight" min="0" max="100" value="{{.Form.LangIDWeight}}" required>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Timezone</span>
+      <select name="timezone" class="select" required>
+        {{range .Timezones}}
+        <option value="{{.}}" {{if eq $.Form.Timezone .}}selected{{end}}>{{.}}</option>
+        {{end}}
+      </select>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Start date</span>
+      <input type="date" name="start_date" value="{{.Form.StartDate}}" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">End date</span>
+      <input type="date" name="end_date" value="{{.Form.EndDate}}">
+      <small class="muted">Leave blank for no end date — the schedule then runs indefinitely (unlimited,
+        non-stop) until an operator pauses or stops it.</small>
+    </label>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">{{if .IsEdit}}Save{{else}}Create{{end}}</button>
+    </div>
+  </form>
+</div>
+{{end}}
