@@ -131,6 +131,29 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("GET "+bp+"/self-convo/schedules/{id}/runs/rows", page(http.HandlerFunc(h.GetSelfConvoScheduleRunRows)))
 	mux.Handle("GET "+bp+"/self-convo/schedules/{id}", page(http.HandlerFunc(h.GetSelfConvoScheduleView)))
 
+	// Known groups — per-session friendly-name-to-JID CRUD backing Group
+	// Broadcast Schedule's group picker (internal/domain/knowngroup).
+	mux.Handle("GET "+bp+"/groups", page(http.HandlerFunc(h.GetKnownGroups)))
+	mux.Handle("GET "+bp+"/groups/rows", page(http.HandlerFunc(h.GetKnownGroupRows)))
+	mux.Handle("POST "+bp+"/groups", page(http.HandlerFunc(h.PostKnownGroupCreate)))
+	mux.Handle("POST "+bp+"/groups/{id}/delete", page(http.HandlerFunc(h.PostKnownGroupDelete)))
+	mux.Handle("GET "+bp+"/groups/picker", page(http.HandlerFunc(h.GetKnownGroupPicker)))
+
+	// Group Broadcast Schedule — same static-before-wildcard registration
+	// order convention as the self-convo schedules block above.
+	mux.Handle("GET "+bp+"/group-broadcast/schedules", page(http.HandlerFunc(h.GetGroupBroadcastSchedules)))
+	mux.Handle("GET "+bp+"/group-broadcast/schedules/rows", page(http.HandlerFunc(h.GetGroupBroadcastScheduleRows)))
+	mux.Handle("GET "+bp+"/group-broadcast/schedules/new", page(http.HandlerFunc(h.GetGroupBroadcastScheduleNew)))
+	mux.Handle("POST "+bp+"/group-broadcast/schedules", page(http.HandlerFunc(h.PostGroupBroadcastScheduleCreate)))
+	mux.Handle("GET "+bp+"/group-broadcast/schedules/{id}/edit", page(http.HandlerFunc(h.GetGroupBroadcastScheduleEdit)))
+	mux.Handle("POST "+bp+"/group-broadcast/schedules/{id}", page(http.HandlerFunc(h.PostGroupBroadcastScheduleUpdate)))
+	mux.Handle("POST "+bp+"/group-broadcast/schedules/{id}/pause", page(http.HandlerFunc(h.PostGroupBroadcastSchedulePause)))
+	mux.Handle("POST "+bp+"/group-broadcast/schedules/{id}/resume", page(http.HandlerFunc(h.PostGroupBroadcastScheduleResume)))
+	mux.Handle("POST "+bp+"/group-broadcast/schedules/{id}/stop", page(http.HandlerFunc(h.PostGroupBroadcastScheduleStop)))
+	mux.Handle("POST "+bp+"/group-broadcast/schedules/{id}/delete", page(http.HandlerFunc(h.PostGroupBroadcastScheduleDelete)))
+	mux.Handle("GET "+bp+"/group-broadcast/schedules/{id}/occurrences/rows", page(http.HandlerFunc(h.GetGroupBroadcastScheduleOccurrenceRows)))
+	mux.Handle("GET "+bp+"/group-broadcast/schedules/{id}", page(http.HandlerFunc(h.GetGroupBroadcastScheduleView)))
+
 	// Calls page.
 	mux.Handle("GET "+bp+"/calls", page(http.HandlerFunc(h.GetCalls)))
 	mux.Handle("GET "+bp+"/calls/rows", page(http.HandlerFunc(h.GetCallRows)))

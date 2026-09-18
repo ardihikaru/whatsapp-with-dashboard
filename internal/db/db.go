@@ -352,6 +352,97 @@ var schema = []string{
 	  position     INTEGER NOT NULL DEFAULT 0,
 	  PRIMARY KEY (schedule_id, session_id)
 	)`,
+	// 0010: known groups — a small per-session CRUD mapping a friendly name
+	// to a real WhatsApp group JID. See migrations/0010_known_groups.sql's
+	// header.
+	`CREATE TABLE IF NOT EXISTS wa_known_groups (
+	  id         TEXT PRIMARY KEY,
+	  session_id TEXT NOT NULL,
+	  group_jid  TEXT NOT NULL,
+	  name       TEXT NOT NULL,
+	  created_at TEXT NOT NULL,
+	  updated_at TEXT NOT NULL,
+	  UNIQUE (session_id, group_jid)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_known_groups_session
+	  ON wa_known_groups(session_id)`,
+	// 0011: Group Broadcast Schedule. Four tables, parallel to (but
+	// deliberately separate from) 0008's Convo scheduling tables above —
+	// see migrations/0011_group_broadcast.sql's header for why.
+	`CREATE TABLE IF NOT EXISTS wa_group_broadcast_schedules (
+	  id                    TEXT PRIMARY KEY,
+	  name                  TEXT NOT NULL,
+	  sender_session_id     TEXT NOT NULL,
+	  sender_name           TEXT NOT NULL DEFAULT '',
+	  sender_phone          TEXT NOT NULL DEFAULT '',
+	  known_group_id        TEXT,
+	  group_jid             TEXT NOT NULL,
+	  group_name            TEXT NOT NULL DEFAULT '',
+	  recurrence            TEXT NOT NULL,
+	  weekdays              TEXT NOT NULL DEFAULT '',
+	  interval_days         INTEGER NOT NULL DEFAULT 0,
+	  sender_window_start   TEXT NOT NULL DEFAULT '07:55',
+	  sender_window_end     TEXT NOT NULL DEFAULT '08:16',
+	  receiver_window_start TEXT NOT NULL DEFAULT '08:17',
+	  receiver_window_end   TEXT NOT NULL DEFAULT '09:30',
+	  late_cutoff           TEXT NOT NULL DEFAULT '08:30',
+	  lang_id_weight        INTEGER NOT NULL DEFAULT 70,
+	  timezone              TEXT NOT NULL DEFAULT 'Asia/Jakarta',
+	  start_date            TEXT NOT NULL,
+	  end_date              TEXT,
+	  state                 TEXT NOT NULL,
+	  paused_reason         TEXT NOT NULL DEFAULT '',
+	  paused_at             TEXT,
+	  last_planned_date     TEXT,
+	  created_at            TEXT NOT NULL,
+	  updated_at            TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_gb_schedules_state_planned
+	  ON wa_group_broadcast_schedules(state, last_planned_date)`,
+	`CREATE TABLE IF NOT EXISTS wa_group_broadcast_receivers (
+	  schedule_id  TEXT NOT NULL REFERENCES wa_group_broadcast_schedules(id) ON DELETE CASCADE,
+	  session_id   TEXT NOT NULL,
+	  session_name TEXT NOT NULL DEFAULT '',
+	  phone        TEXT NOT NULL DEFAULT '',
+	  position     INTEGER NOT NULL DEFAULT 0,
+	  PRIMARY KEY (schedule_id, session_id)
+	)`,
+	`CREATE TABLE IF NOT EXISTS wa_group_broadcast_occurrences (
+	  id              TEXT PRIMARY KEY,
+	  schedule_id     TEXT NOT NULL,
+	  occurrence_date TEXT NOT NULL,
+	  group_jid       TEXT NOT NULL,
+	  state           TEXT NOT NULL DEFAULT 'scheduled',
+	  created_at      TEXT NOT NULL,
+	  finished_at     TEXT,
+	  UNIQUE (schedule_id, occurrence_date)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_gb_occ_schedule_date
+	  ON wa_group_broadcast_occurrences(schedule_id, occurrence_date)`,
+	`CREATE TABLE IF NOT EXISTS wa_group_broadcast_turns (
+	  id            TEXT PRIMARY KEY,
+	  occurrence_id TEXT NOT NULL REFERENCES wa_group_broadcast_occurrences(id) ON DELETE CASCADE,
+	  role          TEXT NOT NULL,
+	  session_id    TEXT NOT NULL,
+	  session_name  TEXT NOT NULL DEFAULT '',
+	  language      TEXT NOT NULL,
+	  is_late       INTEGER NOT NULL DEFAULT 0,
+	  late_reason   TEXT NOT NULL DEFAULT '',
+	  body          TEXT NOT NULL,
+	  source        TEXT NOT NULL,
+	  due_at        TEXT NOT NULL,
+	  state         TEXT NOT NULL DEFAULT 'pending',
+	  message_id    TEXT NOT NULL DEFAULT '',
+	  error         TEXT NOT NULL DEFAULT '',
+	  sent_at       TEXT,
+	  created_at    TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_gb_turns_due
+	  ON wa_group_broadcast_turns(state, due_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_gb_turns_occurrence
+	  ON wa_group_broadcast_turns(occurrence_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_gb_turns_session_due
+	  ON wa_group_broadcast_turns(session_id, due_at)`,
 }
 
 // EnsureSchema creates the app tables and index if missing, inside one

@@ -1,0 +1,29 @@
+{{define "group_broadcast_occurrence_rows"}}
+{{range .Occurrences}}
+<tr>
+  <td class="mono">{{.OccurrenceDate}}</td>
+  <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
+  <td>
+    <table class="table">
+      <thead>
+        <tr><th>Role</th><th>Session</th><th>Lang</th><th>Late</th><th>Source</th><th>State</th></tr>
+      </thead>
+      <tbody>
+        {{range .Turns}}
+        <tr>
+          <td>{{.Role}}</td>
+          <td>{{.SessionName}}</td>
+          <td class="mono">{{.Language}}</td>
+          <td>{{if .IsLate}}<span title="{{.LateReason}}">yes</span>{{else}}no{{end}}</td>
+          <td class="mono">{{.Source}}</td>
+          <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="3">No occurrences planned yet.</td></tr>
+{{end}}
+{{end}}

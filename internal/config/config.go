@@ -285,6 +285,34 @@ type Config struct {
 	InboundEnabled      bool
 	InboundPollInterval time.Duration
 	InboundStampWindow  time.Duration
+
+	// GroupBroadcastEnabled gates internal/groupbroadcast's planner AND
+	// runner — false (the default) means no group-broadcast occurrence is
+	// ever planned or sent. See groupbroadcast.go's
+	// DefaultGroupBroadcastEnabled doc comment.
+	GroupBroadcastEnabled bool
+	// GroupBroadcastMinSessionGap is the anti-burst floor between any two
+	// sends from the same session, across every group-broadcast schedule —
+	// see groupbroadcast.go's DefaultGroupBroadcastMinSessionGap doc
+	// comment.
+	GroupBroadcastMinSessionGap time.Duration
+	// GroupBroadcastAIDeadline bounds one aiclient.GenerateMessage call
+	// during planning — see groupbroadcast.go's
+	// DefaultGroupBroadcastAIDeadline doc comment.
+	GroupBroadcastAIDeadline time.Duration
+
+	// CodexCLI* configure the internal/aiclient HTTP client against
+	// ai-codex-cli. URL/LoginID/SecretKey are required only when
+	// GroupBroadcastEnabled is true; Timeout/Model always resolve to a
+	// default so they can be read regardless — see aiclient.go's
+	// loadAIClient doc comment.
+	CodexCLIURL       string // validated absolute http(s)://host[:port], no trailing slash
+	CodexCLILoginID   string
+	CodexCLISecretKey string
+	CodexCLITimeout   time.Duration
+	// CodexCLIModel overrides the server-side default model ("" lets the
+	// server choose, currently gpt-5.5).
+	CodexCLIModel string
 }
 
 // Load resolves the configuration and fails fast on an invalid env value.
@@ -379,6 +407,12 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 	if err := loadSelfConvo(cfg); err != nil {
+		return nil, err
+	}
+	if err := loadGroupBroadcast(cfg); err != nil {
+		return nil, err
+	}
+	if err := loadAIClient(cfg); err != nil {
 		return nil, err
 	}
 	if err := loadHostLabel(cfg); err != nil {

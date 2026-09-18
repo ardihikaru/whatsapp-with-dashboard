@@ -58,6 +58,14 @@ const (
 	// cannot claim this category for itself. NormalizeCategory keeps
 	// clamping "self_convo" from an untrusted caller to the fallback.
 	CategorySelfConvo = "self_convo"
+	// CategoryGroupBroadcast marks a send that belongs to a group-broadcast
+	// occurrence (internal/groupbroadcast) — the sender's opener or a
+	// receiver's reply into a real WhatsApp group. Same reasoning as
+	// CategorySelfConvo above: stamped only by that package's gateway
+	// adapter (internal/groupbroadcast/gateway_wa.go), never taken from a
+	// caller-supplied field, and NormalizeCategory clamps it from an
+	// untrusted caller the same way.
+	CategoryGroupBroadcast = "group_broadcast"
 )
 
 // Attribution is the caller-supplied slice of a send's provenance, threaded from the

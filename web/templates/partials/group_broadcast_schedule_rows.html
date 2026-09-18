@@ -1,0 +1,39 @@
+{{define "group_broadcast_schedule_rows"}}
+{{if .Error}}<tr><td colspan="10"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{range .Schedules}}
+<tr>
+  <td><a href="{{u "/group-broadcast/schedules"}}/{{.ID}}">{{.Name}}</a></td>
+  <td>{{.SenderName}}</td>
+  <td>{{.GroupName}}</td>
+  <td class="mono">{{.ReceiverCount}}</td>
+  <td>{{.RecurrenceLabel}}</td>
+  <td class="mono">{{.SenderWindowLabel}}</td>
+  <td class="mono">{{.ReceiverWindowLabel}}</td>
+  <td class="mono">{{.StartDate}} – {{if .NoEndDate}}<span class="badge badge-nonstop">no end date</span>{{else}}{{.EndDate}}{{end}}</td>
+  <td>
+    <span class="badge badge-{{.State}}">{{.State}}</span>
+    {{if .PausedReason}}<br><small class="muted" title="{{.PausedReason}}">{{.PausedReason}}</small>{{end}}
+  </td>
+  <td class="row-actions">
+    <a class="btn btn-outline" href="{{u "/group-broadcast/schedules"}}/{{.ID}}/edit">Edit</a>
+    {{if eq .State "active"}}
+    <button class="btn btn-outline" hx-post="{{u "/group-broadcast/schedules"}}/{{.ID}}/pause"
+            hx-target="#gb-schedule-rows" hx-swap="innerHTML">Pause</button>
+    {{else if or (eq .State "paused") (eq .State "stalled")}}
+    <button class="btn btn-outline" hx-post="{{u "/group-broadcast/schedules"}}/{{.ID}}/resume"
+            hx-target="#gb-schedule-rows" hx-swap="innerHTML">Resume</button>
+    {{end}}
+    {{if and (ne .State "finished") (ne .State "stopped")}}
+    <button class="btn btn-outline btn-danger" hx-post="{{u "/group-broadcast/schedules"}}/{{.ID}}/stop"
+            hx-target="#gb-schedule-rows" hx-swap="innerHTML"
+            hx-confirm="Stop this schedule? This is permanent — a stopped schedule can never be resumed. Stopping only prevents FUTURE occurrences; any occurrence already scheduled for today still goes out.">Stop</button>
+    {{end}}
+    <button class="btn btn-outline btn-danger" hx-post="{{u "/group-broadcast/schedules"}}/{{.ID}}/delete"
+            hx-target="#gb-schedule-rows" hx-swap="innerHTML"
+            hx-confirm="Delete this schedule? This removes it here permanently, but does NOT cancel any occurrence already scheduled for today — it still goes out as planned.">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="10">No schedules yet — <a href="{{u "/group-broadcast/schedules/new"}}">create one</a>.</td></tr>
+{{end}}
+{{end}}

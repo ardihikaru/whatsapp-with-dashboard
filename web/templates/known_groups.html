@@ -1,0 +1,52 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Known Groups</h4>
+</div>
+<p class="page-subtitle">Save a friendly name for a real WhatsApp group JID, per session — the picker source
+  Group Broadcast Schedule's create/edit form uses.</p>
+
+<div class="card form-card">
+  <div id="known-group-form-error"></div>
+  <form hx-post="{{u "/groups"}}" hx-target="#known-group-form-error" hx-swap="innerHTML"
+        action="{{u "/groups"}}" method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Session</span>
+      <select name="session_id" class="select" required
+              hx-get="{{u "/groups/picker"}}" hx-trigger="change" hx-target="#known-group-picker" hx-include="this">
+        <option value="">Choose a session…</option>
+        {{range .Sessions}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+      </select>
+      <small class="muted">Only connected sessions are offered — a session must be paired to list its
+        joined groups.</small>
+    </label>
+
+    <div id="known-group-picker"></div>
+
+    <label class="textfield">
+      <span class="textfield-label">Group JID</span>
+      <input type="text" name="group_jid" placeholder="120363xxxxxxxxxxxx@g.us" required>
+      <small class="muted">Pasted here automatically when you tick a group above, or paste one by hand.</small>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Name</span>
+      <input type="text" name="name" maxlength="120" placeholder="e.g. Clino Team" required>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Name</th><th>Session</th><th>Group JID</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="known-group-rows" hx-get="{{u "/groups/rows"}}" hx-trigger="load, every 10s" hx-swap="innerHTML">
+        <tr><td colspan="4">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
