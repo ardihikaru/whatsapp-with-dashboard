@@ -6,7 +6,10 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"html/template"
 	"net/http"
 	"strings"
 
@@ -121,13 +124,28 @@ func (h *handlers) PostKnownGroupDelete(w http.ResponseWriter, r *http.Request) 
 	h.GetKnownGroupRows(w, r)
 }
 
+// knownGroupPickerOption is one entry of the JSON blob known-groups.js reads
+// to map a chosen datalist Label back to {Name, JID} — a native <datalist>
+// only round-trips the <option> VALUE (here, Label), so the JID and the bare
+// name have to travel separately. Same shape as dashboard_charts.go's
+// optionJSON/<script type="application/json"> convention.
+type knownGroupPickerOption struct {
+	Label string `json:"label"`
+	Name  string `json:"name"`
+	JID   string `json:"jid"`
+}
+
 // knownGroupPickerData feeds the known_group_picker partial — the live
-// joined-groups list for one session, so an operator can tick one instead
-// of pasting a JID by hand.
+// joined-groups list for one session, so an operator can search-select one
+// instead of pasting a JID by hand. A flat radio list does not scale (one
+// production session has 370 joined groups), so the partial renders a
+// searchable <input list="..."> bound to a <datalist> instead — see
+// known_group_picker.html and web/static/js/known-groups.js.
 type knownGroupPickerData struct {
-	SessionID string
-	Groups    []wa.GroupInfo
-	Error     string
+	SessionID   string
+	Groups      []wa.GroupInfo
+	OptionsJSON template.JS
+	Error       string
 }
 
 // GetKnownGroupPicker is GET /groups/picker?session_id=... — an HTMX
@@ -158,5 +176,28 @@ func (h *handlers) GetKnownGroupPicker(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data.Groups = groups
+	data.OptionsJSON = knownGroupPickerOptionsJSON(groups)
 	h.Renderer.RenderPartial(w, "known_group_picker", data)
+}
+
+// knownGroupPickerOptionsJSON builds the JSON blob known-groups.js parses.
+// The label is what the operator actually types/searches against and what
+// the datalist <option> shows, so it carries the member count the old
+// radio list did too — note the field is wa.GroupInfo.Participants, not
+// "ParticipantCount" (the previous template read a field that does not
+// exist on this struct; see internal/wa/group.go).
+func knownGroupPickerOptionsJSON(groups []wa.GroupInfo) template.JS {
+	opts := make([]knownGroupPickerOption, len(groups))
+	for i, g := range groups {
+		opts[i] = knownGroupPickerOption{
+			Label: fmt.Sprintf("%s (%d members)", g.Name, g.Participants),
+			Name:  g.Name,
+			JID:   g.JID,
+		}
+	}
+	b, err := json.Marshal(opts)
+	if err != nil {
+		return template.JS("[]")
+	}
+	return template.JS(b)
 }

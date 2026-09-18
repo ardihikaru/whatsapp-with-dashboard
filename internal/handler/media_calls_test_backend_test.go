@@ -39,6 +39,7 @@ type fakeGatewayBackend struct {
 	playFn          func(to wa.JID, audioURL string) (wa.CallOutcome, error)
 	termFn          func(peer wa.JID, callID, reason string) error
 	checkContactsFn func(ctx context.Context, sessionID string, phones []string) ([]wa.ContactCheck, error)
+	groupsFn        func(ctx context.Context) ([]wa.GroupInfo, error)
 }
 
 func (f *fakeGatewayBackend) Name() string { return f.name }
@@ -53,7 +54,10 @@ func (f *fakeGatewayBackend) Logout(context.Context, *wa.ManagedSession) error  
 func (f *fakeGatewayBackend) SendText(context.Context, *wa.ManagedSession, wa.JID, string) (string, error) {
 	return "", wa.ErrUnsupported
 }
-func (f *fakeGatewayBackend) JoinedGroups(context.Context, *wa.ManagedSession) ([]wa.GroupInfo, error) {
+func (f *fakeGatewayBackend) JoinedGroups(ctx context.Context, _ *wa.ManagedSession) ([]wa.GroupInfo, error) {
+	if f.groupsFn != nil {
+		return f.groupsFn(ctx)
+	}
 	return nil, wa.ErrUnsupported
 }
 func (f *fakeGatewayBackend) SendMedia(context.Context, *wa.ManagedSession, wa.JID, wa.OutboundMedia) (string, error) {
