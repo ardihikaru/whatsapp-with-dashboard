@@ -48,6 +48,10 @@
             {{range .GroupCodes}}<option value="{{.}}">{{.}}</option>{{end}}
           </select>
         </label>
+        <label class="checkfield">
+          <input type="checkbox" name="master_only" value="true">
+          <span>Master sessions only</span>
+        </label>
         <label class="textfield">
           <span class="textfield-label">To (international format)</span>
           <input type="tel" name="to" placeholder="+62 812-0000-0000" required>
@@ -124,6 +128,10 @@
             <option value="" selected>Ungrouped (default)</option>
             {{range .GroupCodes}}<option value="{{.}}">{{.}}</option>{{end}}
           </select>
+        </label>
+        <label class="checkfield">
+          <input type="checkbox" name="master_only" value="true">
+          <span>Master sessions only</span>
         </label>
         <label class="textfield">
           <span class="textfield-label">To (international format)</span>

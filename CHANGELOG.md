@@ -39,6 +39,14 @@
   full pairing deadline.
 
 ### Added
+- **`/send`'s automatic routing now has a "Master sessions only" toggle.**
+  The routing engine (`wa.Route.MasterOnly`) and the JSON API's `master_only`
+  field already supported this end-to-end; the dashboard's own compose page
+  had no way to ask for it. Both the text and media panels now carry a
+  "Master sessions only" checkbox (`master_only`, next to "Routing group"),
+  composable with the existing routing-group picker exactly like the API's
+  `group_code` + `master_only` already compose — leaving it unchecked
+  behaves exactly as before.
 - **Inline "Edit group" on `/sessions`.** A row's routing `group_code` can now
   be changed without leaving the list: an "Edit group" button (every row,
   master or not — `group_code` stays deliberately uncoupled from `is_master`)

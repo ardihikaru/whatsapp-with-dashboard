@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -151,5 +152,127 @@ func TestDispatchEnqueueOutcomeStillMapsTheTwoKnownEnqueueSentinels(t *testing.T
 	outcome, status = dispatchEnqueueOutcome(nil, "msg-4", wa.ErrNotConnected)
 	if status != http.StatusConflict || outcome.Error != "session not connected" {
 		t.Errorf("ErrNotConnected -> (%+v, %d), want (session not connected, 409)", outcome, status)
+	}
+}
+
+// sendFormRequest builds a form-encoded *http.Request the way /send's own
+// browser forms submit it, already ParseForm'd so sendRouteFromForm can read
+// r.FormValue directly — mirroring TestTheSendDecodersReadMasterOnlyFromTheBody's
+// JSON-body coverage (api_master_only_test.go) for the /send form-encoded
+// surface instead.
+func sendFormRequest(t *testing.T, values url.Values) *http.Request {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/send", strings.NewReader(values.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	if err := req.ParseForm(); err != nil {
+		t.Fatalf("ParseForm: %v", err)
+	}
+	return req
+}
+
+// TestSendRouteFromFormReadsMasterOnly is sendRouteFromForm's own coverage of
+// the new field: master_only=true must produce Route.MasterOnly true, and
+// leaving the checkbox unticked (the field absent from the body entirely,
+// exactly what an unchecked HTML checkbox submits) must keep it false — the
+// same "must default to today's behaviour" guarantee
+// TestTheSendDecodersReadMasterOnlyFromTheBody pins for the JSON API.
+func TestSendRouteFromFormReadsMasterOnly(t *testing.T) {
+	t.Run("checked", func(t *testing.T) {
+		req := sendFormRequest(t, url.Values{"master_only": {"true"}})
+		rt, err := sendRouteFromForm(req)
+		if err != nil {
+			t.Fatalf("sendRouteFromForm: %v", err)
+		}
+		if !rt.MasterOnly {
+			t.Error("MasterOnly = false, want true")
+		}
+	})
+	t.Run("unchecked (field absent)", func(t *testing.T) {
+		req := sendFormRequest(t, url.Values{})
+		rt, err := sendRouteFromForm(req)
+		if err != nil {
+			t.Fatalf("sendRouteFromForm: %v", err)
+		}
+		if rt.MasterOnly {
+			t.Error("MasterOnly = true, want false when the field is absent — " +
+				"every existing /send submission must keep auto-routing unchanged")
+		}
+	})
+}
+
+// TestSendRouteFromFormStillReadsGroupCode is a regression guard that adding
+// master_only did not disturb the pre-existing group_code decode.
+func TestSendRouteFromFormStillReadsGroupCode(t *testing.T) {
+	req := sendFormRequest(t, url.Values{"group_code": {"kemang"}})
+	rt, err := sendRouteFromForm(req)
+	if err != nil {
+		t.Fatalf("sendRouteFromForm: %v", err)
+	}
+	if rt.GroupCode != "kemang" {
+		t.Errorf("GroupCode = %q, want %q", rt.GroupCode, "kemang")
+	}
+}
+
+// TestNoUISendRouteMessageCoversAllFourRoutingScopes pins noUISendRouteMessage's
+// exact text for all four wa.Route shapes it can be asked about. The
+// ungrouped/group branches (MasterOnly false) are BYTE-IDENTICAL to
+// selectSendSession's pre-existing wording — verify_ui_test.go already pins
+// the plain "no connected sessions available" string, so this test must
+// never diverge from it — and the two MasterOnly branches are the only new
+// text this change introduces.
+func TestNoUISendRouteMessageCoversAllFourRoutingScopes(t *testing.T) {
+	cases := []struct {
+		name string
+		rt   wa.Route
+		want string
+	}{
+		{
+			name: "ungrouped, any session",
+			rt:   wa.Route{},
+			want: "no connected sessions available",
+		},
+		{
+			name: "grouped, any session",
+			rt:   wa.Route{GroupCode: "kemang"},
+			want: `no connected sessions available in routing group "kemang"`,
+		},
+		{
+			name: "ungrouped, master only",
+			rt:   wa.Route{MasterOnly: true},
+			want: "no connected master session available",
+		},
+		{
+			name: "grouped, master only",
+			rt:   wa.Route{GroupCode: "kemang", MasterOnly: true},
+			want: `no connected master session available in routing group "kemang"`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := noUISendRouteMessage(tc.rt); got != tc.want {
+				t.Errorf("noUISendRouteMessage(%+v) = %q, want %q", tc.rt, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBothSendPanelsCarryTheMasterOnlyToggle mirrors
+// TestBothSendPanelsCarryTheGroupPicker for the new checkbox: exactly 2
+// occurrences of name="master_only" proves both the text and media forms
+// carry the field, not just one of them — adding it to one panel and
+// forgetting the other is send.html's own named trap (see the hx-encoding/
+// enctype comment above the media form).
+func TestBothSendPanelsCarryTheMasterOnlyToggle(t *testing.T) {
+	rend := sendTestRenderer(t)
+	data := sendPageData{
+		Connected: []wa.Snapshot{{ID: "sess-1", Name: "Gateway 1", Phone: "628000"}},
+	}
+	rec := httptest.NewRecorder()
+	rend.RenderPage(rec, "send", data)
+	body := rec.Body.String()
+
+	got := strings.Count(body, `name="master_only"`)
+	if got != 2 {
+		t.Fatalf(`/send has %d occurrence(s) of name="master_only", want exactly 2 (one per panel); body:\n%s`, got, body)
 	}
 }

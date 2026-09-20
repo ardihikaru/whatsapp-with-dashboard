@@ -259,37 +259,63 @@ func dispatchEnqueueOutcome(reqCtxErr error, msgID string, err error) (sendOutco
 	}
 }
 
+// sendRouteFromForm decodes /send's "group_code" and "master_only" fields
+// into a wa.Route — split out of selectSendSession so the mapping is
+// unit-testable without a live Manager.
+func sendRouteFromForm(r *http.Request) (wa.Route, error) {
+	code, err := wa.NormalizeGroupCode(r.FormValue("group_code"))
+	if err != nil {
+		return wa.Route{}, err
+	}
+	return wa.Route{GroupCode: code, MasterOnly: r.FormValue("master_only") == "true"}, nil
+}
+
+// noUISendRouteMessage builds selectSendSession's 409-equivalent error text.
+// Deliberately NOT api.go's noSendRouteMessage: the two pre-existing,
+// ungrouped/group branches must stay BYTE-IDENTICAL to today's wording (see
+// selectSendSession's own doc comment — verify_ui_test.go pins the plain
+// "no connected sessions available" string). Only the two new master_only
+// branches are new text.
+func noUISendRouteMessage(rt wa.Route) string {
+	switch {
+	case rt.MasterOnly && rt.GroupCode != "":
+		return fmt.Sprintf("no connected master session available in routing group %q", rt.GroupCode)
+	case rt.MasterOnly:
+		return "no connected master session available"
+	case rt.GroupCode != "":
+		return fmt.Sprintf("no connected sessions available in routing group %q", rt.GroupCode)
+	default:
+		return "no connected sessions available"
+	}
+}
+
 // selectSendSession resolves the /send page's routing form fields
-// ("routing", "session_id", "group_code") to a connected session — shared by
-// the text form (PostSend) and the media form (PostSendMedia,
-// media_send_ui.go), so the two forms cannot silently drift on what
-// "Automatic routing" means. Returns a human-readable error, never a wa.Err*
-// sentinel: the browser forms render it straight into send_result's Error
-// field.
+// ("routing", "session_id", "group_code", "master_only") to a connected
+// session — shared by the text form (PostSend) and the media form
+// (PostSendMedia, media_send_ui.go), so the two forms cannot silently drift
+// on what "Automatic routing" means. Returns a human-readable error, never a
+// wa.Err* sentinel: the browser forms render it straight into send_result's
+// Error field.
 //
-// group_code narrows automatic routing to that scope via SelectForRoute —
-// "" (the <select>'s default, empty option) is the ordinary ungrouped pool,
-// unchanged from before this field existed; the "no connected sessions
-// available" message for that case is kept BYTE-IDENTICAL (an existing test
-// surface) and only names the group when one was actually requested.
+// group_code and master_only both narrow the same wa.Route and compose
+// exactly as EligibleForRoute already supports (master-only within a named
+// group is a valid, already-supported combination) — sendRouteFromForm
+// builds that Route, and noUISendRouteMessage reports its failure. "" /
+// unchecked (the <select>'s default empty option, the checkbox left
+// unticked) is the ordinary ungrouped, any-session pool, unchanged from
+// before either field existed; the "no connected sessions available"
+// message for that case is kept BYTE-IDENTICAL (an existing test surface)
+// and only names the group/master scope when one was actually requested.
 func (h *handlers) selectSendSession(r *http.Request) (*wa.ManagedSession, string) {
 	s, ok := h.Manager.Get(r.FormValue("session_id"))
 	if r.FormValue("routing") == "auto" || r.FormValue("session_id") == "" {
-		code, err := wa.NormalizeGroupCode(r.FormValue("group_code"))
+		rt, err := sendRouteFromForm(r)
 		if err != nil {
 			return nil, err.Error()
 		}
-		// AllowMaster always false: the UI's "Automatic routing" picker
-		// never opts into a master session (unlike the API's allow_master
-		// flag) — an operator who genuinely wants to send from a master
-		// session selects it explicitly from the session dropdown instead,
-		// which IS the direct-send path (session_id set, routing != "auto").
-		s, _, ok = h.Manager.SelectForRoute(r.Context(), wa.Route{GroupCode: code, AllowMaster: false})
+		s, _, ok = h.Manager.SelectForRoute(r.Context(), rt)
 		if !ok {
-			if code == "" {
-				return nil, "no connected sessions available"
-			}
-			return nil, fmt.Sprintf("no connected sessions available in routing group %q", code)
+			return nil, noUISendRouteMessage(rt)
 		}
 		return s, ""
 	}
