@@ -136,6 +136,12 @@ const (
 	// to statusPump-only polling, e.g. against a waxum build whose
 	// /api/v1/events/tail is unreachable or misbehaving.
 	DefaultWaxumEventsEnabled = true
+	// DefaultReconcileInterval/Grace: the reconciler reads data the status
+	// pollers already fetched (zero waxum requests), so 60s is about
+	// freshness of the report, not load. 5m grace comfortably outlasts the
+	// hysteresis window and a normal reconnect, so a report means "stuck".
+	DefaultReconcileInterval = 60 * time.Second
+	DefaultReconcileGrace    = 5 * time.Minute
 )
 
 // Config is the resolved application configuration.
@@ -240,6 +246,14 @@ type Config struct {
 	// regardless of backend, like the interval/timeout knobs above; only
 	// matters when WABackend == "waxum".
 	WaxumEventsEnabled bool
+
+	// ReconcileInterval/ReconcileGrace tune the WSM-vs-waxum reconciler
+	// (internal/wa/manager_reconcile.go): how often it compares, and how long
+	// a disagreement (or a failing/429ing waxum) must persist before it is
+	// reported. Interval 0 turns the reconciler off. Resolve to defaults
+	// regardless of backend (only the waxum backend feeds it).
+	ReconcileInterval time.Duration
+	ReconcileGrace    time.Duration
 
 	// Media (see media.go's loadMedia). MediaMaxBytes/MediaUploadTimeout/
 	// MediaUploadConcurrency bound one media send's HTTP handler; MediaArchive

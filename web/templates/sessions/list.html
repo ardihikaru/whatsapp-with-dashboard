@@ -10,6 +10,10 @@
    code is reachable only by a request naming that same <code>group_code</code>,
    so setting one takes the session out of default routing. Direct sends
    naming a session by id are unaffected by both.</p>
+<!-- Reconciler verdict (wa.Manager.Reconcile): empty unless WSM and the
+     backend disagree past the grace period. Outside the polled tbody, like
+     the group editor below, and polled on its own slower cadence. -->
+<div id="reconcile-banner" hx-get="{{u "/sessions/reconcile"}}" hx-trigger="load, every 15s" hx-swap="innerHTML"></div>
 <div class="card">
   <!-- .table-scroll is not optional: a JID column plus the action buttons make
        this table ~755px, which on a phone dragged the whole DOCUMENT sideways

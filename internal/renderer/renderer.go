@@ -177,6 +177,7 @@ var partialFiles = []string{
 	"templates/partials/widgets.html",
 	"templates/partials/form_error.html",
 	"templates/partials/session_rows.html",
+	"templates/partials/reconcile_banner.html",
 	"templates/partials/pairing_status.html",
 	"templates/partials/send_result.html",
 	"templates/partials/log_rows.html",

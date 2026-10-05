@@ -186,6 +186,8 @@ func run() error {
 	manager := wa.NewManager(ctx, backend, wasession.NewRepository(appDB),
 		msgRepo, inboundRepo, wa.Config{
 			SendRate: cfg.SendRate, SendBurst: cfg.SendBurst, ReconcilePar: cfg.ReconcilePar,
+			ReconcileInterval:   cfg.ReconcileInterval,
+			ReconcileGrace:      cfg.ReconcileGrace,
 			InboundEnabled:      cfg.InboundEnabled,
 			InboundPollInterval: cfg.InboundPollInterval,
 			InboundStampWindow:  cfg.InboundStampWindow,

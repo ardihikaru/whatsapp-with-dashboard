@@ -71,6 +71,8 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	// Sessions + pairing pages and partials.
 	mux.Handle("GET "+bp+"/sessions", page(http.HandlerFunc(h.GetSessions)))
 	mux.Handle("GET "+bp+"/sessions/rows", page(http.HandlerFunc(h.GetSessionRows)))
+	mux.Handle("GET "+bp+"/sessions/reconcile", page(http.HandlerFunc(h.GetSessionReconcile)))
+	mux.Handle("POST "+bp+"/sessions/reconcile", page(http.HandlerFunc(h.PostSessionReconcile)))
 	mux.Handle("GET "+bp+"/sessions/new", page(http.HandlerFunc(h.GetSessionNew)))
 	mux.Handle("POST "+bp+"/sessions", page(http.HandlerFunc(h.PostSessionCreate)))
 	mux.Handle("POST "+bp+"/sessions/{id}/activate", page(http.HandlerFunc(h.PostSessionActivate)))

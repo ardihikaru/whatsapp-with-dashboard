@@ -48,6 +48,12 @@ type Config struct {
 	// Activated — see ManagedSession.markStalled/Activate.
 	ReconnectStallThreshold int
 
+	// ReconcileInterval/ReconcileGrace tune the WSM-vs-backend reconciler
+	// (manager_reconcile.go). Interval <= 0 disables it (the zero value every
+	// test Config has); Grace <= 0 falls back to defaultReconcileGrace.
+	ReconcileInterval time.Duration
+	ReconcileGrace    time.Duration
+
 	// Inbound* mirror internal/config's WSM_INBOUND_* group verbatim
 	// (config.Config.Inbound*) — cmd/app/main.go copies them straight
 	// across when building this Config, matching WaxumConfig's own
@@ -118,6 +124,9 @@ type Manager struct {
 	// needs a nil check.
 	sysRing *Ring
 
+	// recon is the reconciler's latest verdict — see manager_reconcile.go.
+	recon reconcileState
+
 	// inboundPumpOnce/inboundPoke/inboundLastSeen belong to inbound.go's
 	// fleet-wide reply-ingest pump — see that file's package doc comment.
 	// Allocated unconditionally (like sysRing above), even when the pump
@@ -175,6 +184,10 @@ func NewManager(rootCtx context.Context, backend Backend,
 	// gain a background goroutine with no purpose.
 	if backend != nil {
 		m.go1(func() { m.reconnectSupervisor(supCtx) })
+		if _, ok := backend.(observingBackend); ok && cfg.ReconcileInterval > 0 {
+			m.recon.report = ReconcileReport{Enabled: true, OK: true} // OK until a pass says otherwise; before the goroutine exists: nobody else holds m yet
+			m.go1(func() { m.reconcileLoop(supCtx, cfg.ReconcileInterval) })
+		}
 		// backendStarter is an OPTIONAL lifecycle hook, the same
 		// type-assertion pattern capabilities.go uses for gateway
 		// administration — most Backend implementations (meowBackend)

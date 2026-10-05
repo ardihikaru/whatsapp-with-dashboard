@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
@@ -35,6 +36,32 @@ func (h *handlers) GetSessions(w http.ResponseWriter, r *http.Request) {
 // can never disagree.
 func (h *handlers) GetSessionRows(w http.ResponseWriter, r *http.Request) {
 	h.Renderer.RenderPartial(w, "session_rows", sessionRowsData{Sessions: h.Manager.Snapshots()})
+}
+
+// reconcileBannerData feeds the reconcile_banner partial. Cooldown is true
+// when an operator-triggered check was answered from the stored verdict
+// because another ran moments ago.
+type reconcileBannerData struct {
+	Report   wa.ReconcileReport
+	Cooldown bool
+}
+
+// GetSessionReconcile renders the polled banner above the sessions table: a
+// warning when the reconciler (wa.Manager.Reconcile) has found WSM and the
+// backend disagreeing past the grace period, plus the "Check now" bar. Renders
+// nothing at all when no reconciler runs. Authenticated page route, so it may
+// name sessions; /api/v1/health, which is public, may not.
+func (h *handlers) GetSessionReconcile(w http.ResponseWriter, r *http.Request) {
+	h.Renderer.RenderPartial(w, "reconcile_banner", reconcileBannerData{Report: h.Manager.Reconcile()})
+}
+
+// PostSessionReconcile is the "Check now" button: it runs the reconciler
+// immediately (coalesced by wa.Manager.ReconcileNow's cooldown, so a burst of
+// clicks cannot become a burst of work) and swaps the banner with the result.
+// A page route (cookie session via RequirePage) on purpose — never /api/v1.
+func (h *handlers) PostSessionReconcile(w http.ResponseWriter, r *http.Request) {
+	rep, ran := h.Manager.ReconcileNow(time.Now())
+	h.Renderer.RenderPartial(w, "reconcile_banner", reconcileBannerData{Report: rep, Cooldown: !ran})
 }
 
 // GetSessionNew renders the create form.

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
@@ -436,6 +437,22 @@ func (h *handlers) GetHealth(w http.ResponseWriter, r *http.Request) {
 			backend["reachable"] = reachable
 		}
 		out["backend"] = backend
+	}
+	// reconcile: COUNTS AND BOOLEANS ONLY. This route is unauthenticated and
+	// published to the internet by the edge allowlist, so no session id,
+	// name or state may appear here — the detail lives on the authenticated
+	// /sessions page and the system log. Omitted when no reconciler runs
+	// (an omitted field reads "nobody is checking", not "all clear").
+	if rep := h.Manager.Reconcile(); rep.Enabled {
+		rec := map[string]any{
+			"ok":              rep.OK,
+			"mismatches":      len(rep.Mismatches),
+			"backend_problem": rep.BackendProblem != nil,
+		}
+		if !rep.CheckedAt.IsZero() {
+			rec["last_checked"] = rep.CheckedAt.UTC().Format(time.RFC3339)
+		}
+		out["reconcile"] = rec
 	}
 	writeJSON(w, http.StatusOK, out)
 }

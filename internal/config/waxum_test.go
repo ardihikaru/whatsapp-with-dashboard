@@ -227,3 +227,27 @@ func TestParseWaxumURLRejectsMalformedInput(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadWaxumResolvesTheReconcilerKnobs(t *testing.T) {
+	t.Setenv("WSM_WA_BACKEND", "whatsmeow")
+	cfg := &Config{}
+	if err := loadWaxum(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReconcileInterval != DefaultReconcileInterval || cfg.ReconcileGrace != DefaultReconcileGrace {
+		t.Fatalf("defaults = %v/%v", cfg.ReconcileInterval, cfg.ReconcileGrace)
+	}
+	t.Setenv("WSM_RECONCILE_INTERVAL", "0")
+	t.Setenv("WSM_RECONCILE_GRACE", "90s")
+	cfg = &Config{}
+	if err := loadWaxum(cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ReconcileInterval != 0 || cfg.ReconcileGrace.Seconds() != 90 {
+		t.Fatalf("overrides = %v/%v", cfg.ReconcileInterval, cfg.ReconcileGrace)
+	}
+	t.Setenv("WSM_RECONCILE_GRACE", "0s")
+	if err := loadWaxum(&Config{}); err == nil {
+		t.Fatal("WSM_RECONCILE_GRACE=0s accepted")
+	}
+}

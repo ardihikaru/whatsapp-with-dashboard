@@ -81,6 +81,14 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		if row.Active && !s.jid.IsEmpty() && s.state != StateLoggedOut {
 			toConnect = append(toConnect, s)
 		}
+		// A restored logged_out session is never Connect'ed, so without this
+		// it would have no status poller and the row could never be
+		// contradicted — see waxumBackend.Observe.
+		if s.state == StateLoggedOut && !s.jid.IsEmpty() {
+			if o, ok := m.backend.(sessionObserver); ok {
+				o.Observe(s)
+			}
+		}
 	}
 
 	// Manager-level event, not tied to any one session — the boot

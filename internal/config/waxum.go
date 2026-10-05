@@ -67,6 +67,23 @@ func loadWaxum(cfg *Config) error {
 		cfg.WaxumEventsEnabled = b
 	}
 
+	cfg.ReconcileInterval = DefaultReconcileInterval
+	if raw := os.Getenv("WSM_RECONCILE_INTERVAL"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d < 0 {
+			return fmt.Errorf("invalid WSM_RECONCILE_INTERVAL %q (a Go duration, 0 disables): %v", raw, err)
+		}
+		cfg.ReconcileInterval = d
+	}
+	cfg.ReconcileGrace = DefaultReconcileGrace
+	if raw := os.Getenv("WSM_RECONCILE_GRACE"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("invalid WSM_RECONCILE_GRACE %q: %v", raw, err)
+		}
+		cfg.ReconcileGrace = d
+	}
+
 	if cfg.WABackend != "waxum" {
 		return nil // URL/token only matter to whichever backend is actually selected
 	}

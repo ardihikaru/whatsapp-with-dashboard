@@ -4,6 +4,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
 )
@@ -96,5 +97,46 @@ func TestUnmountedPrefixIsExactlyNothing(t *testing.T) {
 	}
 	if strings.Contains(out, `"sessions/`) {
 		t.Errorf("unmounted output lost its leading slash:\n%s", out)
+	}
+}
+
+// The reconcile banner names each disagreeing session with both views, always
+// carries the "Check now" button when a reconciler runs, and renders NOTHING
+// when none does (asserting presence AND absence, per the note above
+// rowSession).
+func TestTheReconcileBannerNamesTheMismatchAndCarriesTheCheckNowButton(t *testing.T) {
+	type mm struct {
+		Name, WSM, Waxum string
+		Since            time.Time
+	}
+	type report struct {
+		Enabled, OK    bool
+		CheckedAt      time.Time
+		Mismatches     []mm
+		BackendProblem *struct {
+			Since       time.Time
+			Sessions    int
+			RateLimited bool
+		}
+	}
+	type data struct {
+		Report   report
+		Cooldown bool
+	}
+
+	bad := renderPartial(t, "/wsm", "reconcile_banner", data{Report: report{Enabled: true, CheckedAt: time.Now(),
+		Mismatches: []mm{{Name: "Arie", WSM: "logged_out", Waxum: "logged_in=true socket_alive=true", Since: time.Now()}}}})
+	for _, want := range []string{"alert-error", "Arie", "logged_out", "socket_alive=true",
+		`hx-post="/wsm/sessions/reconcile"`, `hx-disabled-elt="this"`, "Check now", "Checking..."} {
+		if !strings.Contains(bad, want) {
+			t.Errorf("banner missing %q in %q", want, bad)
+		}
+	}
+	green := renderPartial(t, "", "reconcile_banner", data{Report: report{Enabled: true, OK: true, CheckedAt: time.Now()}, Cooldown: true})
+	if strings.Contains(green, "alert-error") || !strings.Contains(green, "Check now") || !strings.Contains(green, "Checked moments ago") {
+		t.Errorf("green banner = %q", green)
+	}
+	if out := strings.TrimSpace(renderPartial(t, "", "reconcile_banner", data{Report: report{}})); out != "" {
+		t.Errorf("banner with no reconciler = %q, want empty", out)
 	}
 }

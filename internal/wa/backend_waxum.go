@@ -131,6 +131,11 @@ type waxumSessionState struct {
 	// alongside the rest of this struct in sessionState — see that
 	// method's doc comment.
 	poke chan struct{}
+
+	// obs is the reconciler's read-only view of this session's last polls
+	// (manager_reconcile.go) — fed by statusPump from data it ALREADY
+	// fetched, so the reconciler costs waxum zero extra requests.
+	obs pollObservation
 }
 
 // loggedOutHysteresisPolls is how many CONSECUTIVE GET /status polls must
@@ -705,9 +710,11 @@ func (b *waxumBackend) statusPump(ctx context.Context, s *ManagedSession) {
 		wait := b.pollInterval
 		switch {
 		case err == nil:
+			sst.obs.recordOK(st, lastPoll)
 			b.applyStatus(s, st)
 			failCount = 0
 		default:
+			sst.obs.recordFailure(err, lastPoll)
 			failCount++
 			slog.Warn("wa: waxum status poll failed", "session", s.ID, "consecutive_failures", failCount, "err", err)
 			s.ringLevel("warn", fmt.Sprintf("status poll failed (%d in a row): %s", failCount, err))
@@ -778,11 +785,29 @@ func (b *waxumBackend) applyStatus(s *ManagedSession, st *waxum.Status) {
 
 	sst := b.sessionState(s.ID)
 
+	s.mu.Lock()
+	wasLoggedOut := s.state == StateLoggedOut
+	s.mu.Unlock()
+
 	mapped := mapWaxumStatus(st, paired)
 	streak := &sst.loggedOutStreak
 	if mapped != StateLoggedOut {
 		streak.Store(0) // any non-qualifying poll resets the evidence — loggedOutHysteresisPolls's doc comment
-	} else if streak.Add(1) < loggedOutHysteresisPolls {
+	} else if streak.Add(1) == loggedOutHysteresisPolls {
+		// The poll that COMMITS the terminal verdict. Log exactly what waxum
+		// said, because the 2026-09-30 incident committed it for four
+		// sessions whose credentials were intact and nothing recorded the
+		// evidence — see CLAUDE.md. No phone number / push name: this goes
+		// to the container log and the system log page.
+		reach := "null"
+		if st.Reachability != nil {
+			reach = *st.Reachability
+		}
+		note := fmt.Sprintf("declaring logged_out after %d consecutive polls; waxum said status=%q is_logged_in=%t socket_alive=%t reachability=%s pair.attempts=%d pair.last_error=%q",
+			loggedOutHysteresisPolls, st.Status, st.IsLoggedIn, st.SocketAlive, reach, st.Pair.Attempts, st.Pair.LastError)
+		slog.Warn("wa: "+note, "session", s.ID)
+		s.ringLevel("warn", note)
+	} else if streak.Load() < loggedOutHysteresisPolls {
 		// Qualifying, but not yet confirmed loggedOutHysteresisPolls times
 		// in a row: report the same non-terminal state point 2 already
 		// uses for "credential probably still fine, socket is not" rather
@@ -790,8 +815,53 @@ func (b *waxumBackend) applyStatus(s *ManagedSession, st *waxum.Status) {
 		mapped = StateDisconnected
 	}
 	s.setState(mapped)
+	if wasLoggedOut && paired && st.IsLoggedIn {
+		b.adoptWaxumLogin(s, st, mapped)
+	}
 
 	b.applyWedgeDetection(s, st, sst)
+}
+
+// adoptWaxumLogin is the recovery for a terminal StateLoggedOut that waxum
+// has since contradicted (is_logged_in): WSM's logged_out verdict is
+// hysteresis-gated but still a verdict from a handful of polls, and
+// 2026-09-30 showed it can be wrong for sessions whose credentials were
+// intact. setState has already moved the state and persisted last_status;
+// what a bare state flip does NOT restore — and what made the old in-process
+// recovery half-working — is the operator intent (wa_sessions.active, which
+// the reconnect supervisor and the next boot both read) and, when the socket
+// is up, the sender loop (Live/State say connected while sendQ==nil fails
+// every send; CLAUDE.md's "three meanings of connected"). Leaving
+// logged_out only on is_logged_in evidence keeps the narrow rule: a poll
+// that merely says "not logged out" (e.g. status:"connecting" with
+// is_logged_in:false) never reaches here.
+func (b *waxumBackend) adoptWaxumLogin(s *ManagedSession, st *waxum.Status, now State) {
+	s.mu.Lock()
+	s.active = true
+	s.stalled, s.stalledReason = false, ""
+	if now == StateConnected {
+		s.startSenderLocked()
+	}
+	s.mu.Unlock()
+	if err := s.mgr.repo.SetActive(s.mgr.persistCtx, s.ID, true); err != nil {
+		slog.Warn("persist active", "session", s.ID, "err", err)
+	}
+	note := fmt.Sprintf("session %s (%s): WSM held logged_out but waxum reports is_logged_in=%t socket_alive=%t (status %q) — adopting waxum's view, now %s",
+		s.ID, s.Name, st.IsLoggedIn, st.SocketAlive, st.Status, now)
+	slog.Warn("wa: "+note, "session", s.ID)
+	s.ringLevel("warn", note)
+}
+
+// Observe starts the status poller for a session StartAll restored as
+// logged_out. Without it a restored logged_out session had NO poller (the
+// boot reconnect skips it, and Connect is what starts statusPump), so
+// nothing could ever contradict the row — the terminal state outlived
+// contrary evidence across every restart. Read-only: it never calls Connect.
+func (b *waxumBackend) Observe(s *ManagedSession) {
+	s.mu.Lock()
+	sctx := s.ensureCtxLocked()
+	s.mu.Unlock()
+	b.ensureStatusPump(sctx, s)
 }
 
 // applyWedgeDetection is applyStatus's other hysteresis-gated escalation —

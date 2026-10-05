@@ -35,6 +35,13 @@ import (
 // pagesWithChrome's shared newLogsTestServer (whose Manager has a nil
 // backend and is never StartAll'd, so Manager.Get 404s).
 func newSessionAdminTestServer(t *testing.T, backend wa.Backend, callsEnabled bool) (http.Handler, *auth.Store, *wa.ManagedSession, call.Repository) {
+	return newSessionAdminTestServerReconcile(t, backend, callsEnabled, 2*time.Millisecond)
+}
+
+// newSessionAdminTestServerReconcile is newSessionAdminTestServer with the
+// periodic reconciler's interval chosen by the caller — 0 turns the loop off,
+// which a test counting backend consultations needs.
+func newSessionAdminTestServerReconcile(t *testing.T, backend wa.Backend, callsEnabled bool, reconcileInterval time.Duration) (http.Handler, *auth.Store, *wa.ManagedSession, call.Repository) {
 	t.Helper()
 	pool, err := db.Open(filepath.Join(t.TempDir(), "test.db"), db.SQLiteDialect)
 	if err != nil {
@@ -58,7 +65,10 @@ func newSessionAdminTestServer(t *testing.T, backend wa.Backend, callsEnabled bo
 	msgRepo := message.NewRepository(pool)
 	callRepo := call.NewRepository(pool)
 	mgr := wa.NewManager(context.Background(), backend, wasession.NewRepository(pool),
-		msgRepo, nil, wa.Config{SendRate: 100, SendBurst: 5, ReconcilePar: 2})
+		msgRepo, nil, wa.Config{SendRate: 100, SendBurst: 5, ReconcilePar: 2,
+			// Only a backend implementing wa's Observations hook ever starts the
+			// reconciler; every other backend in these tests is unaffected.
+			ReconcileInterval: reconcileInterval, ReconcileGrace: time.Millisecond})
 	s, err := mgr.Create(context.Background(), "gw", "+62 812-0000-9999")
 	if err != nil {
 		t.Fatal(err)

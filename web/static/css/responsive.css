@@ -213,3 +213,20 @@
  * e2e/overflow.spec.ts measures per element so no page-level rule can mask a
  * regression again.
  */
+
+/* Reconcile bar on /sessions (partials/reconcile_banner.html): status text and
+   the "Check now" button share a row and wrap, instead of squeezing the text
+   against the button on a 320px phone. Tokens only. */
+.reconcile-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+}
+.reconcile-status {
+  flex: 1 1 220px;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+}

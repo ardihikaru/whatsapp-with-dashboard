@@ -167,6 +167,52 @@ condition now surfaces as a 503 (`ErrBackendBusy`) or a generic 500 on
 `pair/start` within about a minute, not a session wedged in `pairing` for
 hours.
 
+**A terminal `logged_out` outlived the evidence against it, and nothing compared
+WSM with waxum.** Observed 2026-10-02: between 2026-09-30T05:56:38Z and
+05:58:39Z WSM wrote `last_status='logged_out'` for all six sessions. Four had
+intact credentials (two days later waxum's `/status` said
+`is_logged_in:true, socket_alive:true, reachability:reachable` for three of
+them while `/api/v1/health` said `connected:0`). The window is exactly
+`loggedOutHysteresisPolls` (3) polls at the 60s default interval, so every
+session answered `!is_logged_in` + `waiting_for_qr`/`waiting_for_pair_code`
+three polls running. What is PROVEN from the code: that response cannot come
+from a failed or zero-valued decode (an empty body gives `status:""` ->
+`StateDisconnected`; a 429/transport error never reaches `applyStatus`), so
+waxum itself said it. What is NOT proven is why it said it for paired
+sessions — the leading hypothesis is waxum answering from a freshly rebuilt
+runtime after a suspend/resume (waxum's own log has a 92-minute silence the
+same afternoon), but no log line decides it. `applyStatus` now logs
+the exact fields behind a committed `logged_out` ("declaring logged_out
+after 3 consecutive polls; waxum said …") — capture that line, plus
+waxum's `/status` body and debug log for the same minute, next time.
+
+Why it stuck: `StartAll` restored `logged_out` from the row and never
+`Connect`ed it, and `Connect` is what starts `statusPump`, so after any restart
+the session had NO poller and nothing could ever contradict the row. (In
+process the pump kept polling and flipped the state back, but without
+restoring `active` or the sender loop.) Now `waxumBackend.Observe` starts a
+read-only poller for restored `logged_out` sessions, and `applyStatus` adopts
+waxum's view the moment it reports `is_logged_in` for one
+(`adoptWaxumLogin`: state, `last_status`, `active=1`, sender loop, a warn
+event naming the session). The other direction keeps its hysteresis.
+
+The same incident ended with waxum answering 429 `Retry-After: 231683`
+(~2.7 days) after the suspend/resume, `backend.reachable:false`, until the
+waxum PROCESS was restarted — the same limiter wedge as the 2026-09-13 entry
+above, and again invisible (waxum never logs a 429). `internal/wa/
+manager_reconcile.go` is the watcher: it reads the polls statusPump already
+made (ZERO extra waxum requests — mind the tiny burst) and reports, after
+`WSM_RECONCILE_GRACE`, WSM-vs-waxum disagreements, sessions waxum 404s, and a
+backend that keeps failing or answering 429, via slog.Warn, the system log, a
+banner on `/sessions`, and the `reconcile` object in `/api/v1/health`
+(booleans and counts ONLY — that route is public). NOT covered: waxum sessions
+WSM does not know, because the list-sessions response shape has never been
+captured from a live waxum. There is no outbound notification channel in this
+repo and none was invented. `/sessions` also has a "Check now" button
+(`POST /sessions/reconcile`, cookie-only page route, coalesced to one pass per
+10s by `Manager.ReconcileNow`); it re-reads the same cached polls, so it cannot
+feed waxum's rate limiter.
+
 **"Connected" means three different things here, and they can disagree.**
 `s.state` (statusPump's verdict), `Live()` (an atomic fed by the same poll),
 and `s.sendQ != nil` (whether a sender loop exists) are independent. Two of
