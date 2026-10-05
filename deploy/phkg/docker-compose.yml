@@ -57,7 +57,7 @@ services:
     # one promised an unlink waxum cannot perform); nothing under migrations/
     # or Dockerfile.migrate changed, so re-stamping the migrate image would
     # claim a rebuild that never happened.
-    image: whatsapp-with-dashboard:phkg-20260902
+    image: whatsapp-with-dashboard:phkg-20261005
     restart: unless-stopped
 
     # HARD SINGLETON. One device websocket, one store. Two replicas against one
@@ -196,7 +196,7 @@ services:
   #   docker compose --profile migrate run --rm migrate status
   migrate:
     profiles: ["migrate"]
-    image: whatsapp-with-dashboard-migrate:phkg-20260901
+    image: whatsapp-with-dashboard-migrate:phkg-20261005
     env_file:
       - .env
     environment:
