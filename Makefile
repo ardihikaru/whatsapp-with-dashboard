@@ -42,7 +42,7 @@ COMPOSE := docker compose$(if $(REMOTE_DB), -f docker-compose.yml -f docker-comp
 WA_DSN := $(WSM_MYSQL_USER):$(WSM_MYSQL_PASSWORD)@tcp($(WSM_MYSQL_HOST):$(WSM_MYSQL_PORT))/$(WSM_MYSQL_DATABASE)?parseTime=true&charset=utf8mb4&loc=UTC&multiStatements=true
 
 .PHONY: help build test vet hashpw convo-seed db-bootstrap db-verify db-drop db-bootstrap-waxum db-verify-waxum migrate-up migrate-status \
-        migrate-down-all run docker-build up down logs e2e-install e2e e2e-headed e2e-report e2e-serve e2e-evidence e2e-reset
+        migrate-down-all run docker-build up down logs e2e-install e2e e2e-headed e2e-report e2e-serve e2e-evidence e2e-reset mcp-tools mcp-build
 
 help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) \
@@ -56,6 +56,12 @@ test: ## Unit tests (SQLite-backed; no MySQL required)
 
 vet: ## go vet
 	go vet ./...
+
+mcp-tools: ## Regenerate mcp/tools.md from the live wsm-mcp registry (see CLAUDE.md's wsm-mcp sync rule)
+	go run ./cmd/wsm-mcp tools > mcp/tools.md
+
+mcp-build: ## Build the wsm-mcp Docker image (Dockerfile.mcp)
+	docker build -f Dockerfile.mcp -t wsm-mcp:local .
 
 hashpw: ## Print a bcrypt hash for WSM_ADMIN_PASSWORD_HASH (password not echoed)
 	@stty -echo 2>/dev/null; printf 'password: ' >&2; \

@@ -621,6 +621,64 @@ will cheerfully mislabel it. When it matters, `GET /api/v1/health` is the
 honest answer — its `sessions`/`connected` counts differ between the two
 deployments.
 
+**wsm-mcp must track every WSM and waxum change.** A separate process,
+wsm-mcp (`mcp/README.md`, `mcp/TUTORIAL.md`), wraps every `/api/v1` route in
+`internal/handler/routes_api.go` and every exported method on
+`internal/waxum.Client` as an MCP (Streamable HTTP + gRPC) tool for other AI
+agents, sharing one registry (`internal/mcp/registry`) between both front
+doors (`internal/mcp/mcpsrv`, `internal/mcp/grpcsrv`). It runs over a
+failover pool of hosts (`internal/mcp/upstream`) — mini-PC first, laptop
+backup, same priority as `wa_pool` above — reaching each host's WSM over
+HTTP Basic (`api_clients` row `wsm-mcp`, mirrored across both DBs, same
+reasoning as the "failing over changes which phone number sends" entry
+above: a bearer token would need a separate login per host) and waxum over
+the shared `SUPERADMIN_TOKEN`. Deployed independently on `clinodb`
+(`10.10.0.5:18811` gRPC, `:18812` MCP HTTP, WireGuard-only, no public
+vhost), via `deploy/clinodb/{install,update,rollback}.sh`.
+
+- **The sync tests are the enforcement, not the rule.**
+  `internal/mcp/registry/sync_test.go`'s `TestEveryAPIRouteHasAnMCPTool` and
+  `TestEveryWaxumClientMethodHasAnMCPTool` parse `routes_api.go` and every
+  `internal/waxum/*.go` file with `go/ast` and fail the build the moment a
+  route or an exported method has no matching tool (`Tool.Route`/
+  `Tool.WaxumMethod`). `TestToolsMdIsCurrent` fails if `mcp/tools.md` drifts
+  from what `go run ./cmd/wsm-mcp tools` (or `make mcp-tools`) generates.
+  Any change to either source therefore needs, in the same commit: a
+  matching tool in `internal/mcp/registry`, a regenerated `mcp/tools.md`, a
+  bumped `mcp/VERSION`, and a redeploy via `deploy/clinodb/update.sh`.
+- **Per-host session ids, same as `wa_pool`'s own split identity.** A WSM
+  session id IS the waxum session id (`backend_waxum.go` passes it straight
+  to `waxum.CreateSession`), and each host paired its own device under its
+  own id — Ardi's number is `59c90033bb24b0badf408566b26fe835` on the
+  mini-PC and `14069e6d6cd7ca92513633ee77e87453` on the laptop. Every
+  session-scoped tool therefore accepts `session_id` OR `phone`
+  (normalised, cached ~30s against `GET /api/v1/sessions`); an explicit
+  `session_id` is looked up on every host until the one that actually owns
+  it is found, never assumed to be the first configured host.
+  `WSM_MCP_DEFAULT_PHONE` is the fallback when neither is given.
+- **The danger gate is the one thing standing between an AI agent and a
+  destructive call.** Session delete, every `calls/*` tool, `spam-report`,
+  webhook register/delete, and the raw-waxum-write tools
+  (`DeleteSession`, `Disconnect`, `CreateSession`, `SendText`, `SendMedia`,
+  `SendUploaded`, `UploadMedia`, the call methods, webhook
+  register/unregister, `ReportSpam`) all refuse with an `isError`/`error`
+  result naming `WSM_MCP_ALLOW_DANGEROUS` unless that env var is `true`
+  (default `false`). WSM's own sends (`wsm_send_*`) are deliberately NOT
+  gated — they go through WSM's own auth/routing/queue/log like any other
+  caller — but still carry `destructiveHint:true`. Widening this list is a
+  security decision, not a routing tweak, same posture as the nginx
+  allowlist above.
+- **Failover follows the same read/write split as every other proxy in this
+  file.** A read fails over to the next host on a dial error, a timeout, or
+  a 5xx; a write fails over ONLY on a dial error (the request never left,
+  so it cannot have been double-sent); a 4xx never fails over, on either
+  kind of call. An optional `target` argument pins one host and disables
+  failover for that call.
+- **Logging never carries arguments or results** — only tool name, host,
+  duration, ok (CLAUDE.md's general secrets posture, applied to tool calls
+  specifically because a phone number or message text is exactly the kind
+  of thing that must never reach a log line here).
+
 ---
 
 ## Layout

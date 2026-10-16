@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 
+### Added
+- **wsm-mcp: one MCP (Streamable HTTP + gRPC) server exposing every WSM
+  `/api/v1` route and every exported `internal/waxum.Client` method as a
+  tool**, over a failover pool of hosts (mini-PC first, laptop backup),
+  deployed independently on clinodb. Session-scoped tools resolve by
+  `session_id` or `phone` (the same phone has a different session_id per
+  host); destructive/raw-waxum-write tools refuse unless
+  `WSM_MCP_ALLOW_DANGEROUS=true`. See `mcp/README.md`, `mcp/TUTORIAL.md`, and
+  CLAUDE.md's "wsm-mcp must track every WSM and waxum change" section for the
+  sync rule two new tests (`internal/mcp/registry/sync_test.go`) enforce.
+
 ### Fixed
 - **A suspended/resumed host could see waxum rate-limit every request for
   hours, and WSM used to honour that verbatim.** Observed live 2026-09-13:

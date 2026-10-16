@@ -1,0 +1,16 @@
+# wsm-mcp: MCP (Streamable HTTP) + gRPC server over WSM's /api/v1 and
+# waxum's client API. Built from the SAME module as the main app (it
+# imports internal/waxum directly) but packaged as its own image, deployed
+# independently on clinodb — see deploy/clinodb/README.md.
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /out/wsm-mcp ./cmd/wsm-mcp
+
+FROM gcr.io/distroless/static:nonroot
+COPY --from=build /out/wsm-mcp /usr/local/bin/wsm-mcp
+USER nonroot:nonroot
+ENTRYPOINT ["/usr/local/bin/wsm-mcp"]
+CMD ["serve"]

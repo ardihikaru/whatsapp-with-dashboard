@@ -1,0 +1,22 @@
+[Unit]
+Description=wsm-mcp — MCP (Streamable HTTP) + gRPC over WSM's /api/v1 and waxum, Docker
+After=network-online.target docker.service
+
+[Service]
+Type=simple
+ExecStartPre=-/usr/bin/docker rm -f wsm-mcp
+# --network host: binds WSM_MCP_GRPC_ADDR/WSM_MCP_HTTP_ADDR directly, which
+# mcp.env pins to clinodb's WireGuard address (10.10.0.5), not 0.0.0.0 — see
+# README.md. No volume mount: this process holds no credential at rest
+# other than what mcp.env carries into its environment.
+ExecStart=/usr/bin/docker run --rm --name wsm-mcp --network host \
+  --read-only --tmpfs /tmp:rw,size=16m \
+  --cap-drop ALL --security-opt no-new-privileges --memory 200m \
+  --env-file %h/.config/wsm-mcp/mcp.env \
+  wsm-mcp:current serve
+ExecStop=/usr/bin/docker stop -t 15 wsm-mcp
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
