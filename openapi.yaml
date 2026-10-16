@@ -583,6 +583,59 @@ paths:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
 
+  /api/v1/sessions/{id}/messages/group:
+    parameters:
+      - {name: id, in: path, required: true, schema: {type: string}}
+    post:
+      summary: Send a plain-text message to a WhatsApp GROUP through this session (explicit)
+      description: |
+        The explicit-session counterpart of POST /api/v1/messages/group: the session in the path
+        sends, and group_code / master_only / allow_master are ignored, so the message can never
+        leave from another handset. The session's device must already be a member of the group
+        (discover group_jid with GET /api/v1/sessions/{id}/groups). Same status vocabulary as every
+        other send route; `routing` is reported as "explicit".
+      operationId: sendGroupMessageViaSession
+      tags: [messages]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [group_jid, text]
+              properties:
+                group_jid: {type: string, description: 'Group JID, e.g. 120363021234567890@g.us (the bare id is accepted).'}
+                text: {type: string, maxLength: 4096, description: 'Plain text; line breaks preserved'}
+                client_ref: {type: string, description: 'Optional client uid for the message log'}
+                tenant_ref: {type: string, description: 'Optional tenant uid for the message log'}
+                category: {type: string, enum: [otp, notification, alert, manual], description: 'Optional; group sends default to alert'}
+      responses:
+        '200':
+          description: Terminal outcome within 15s; status is sent or failed.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendResponse'}
+        '202':
+          description: Still queued after 15s.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/SendResponse'}
+        '400':
+          description: Validation (text required <=4096; group_jid must be a group JID).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Session not connected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/sessions/{id}/messages/media:
     post:
       summary: Send a media message (image, video, audio or document) through this session

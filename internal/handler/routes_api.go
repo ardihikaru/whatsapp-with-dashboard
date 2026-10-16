@@ -102,6 +102,7 @@ func (h *handlers) mountAPI(mux *http.ServeMux) {
 	mux.Handle("POST /api/v1/messages", api(http.HandlerFunc(h.PostAPISendMessageAuto)))
 	mux.Handle("POST /api/v1/messages/group", api(http.HandlerFunc(h.PostAPISendGroupMessage)))
 	mux.Handle("POST /api/v1/sessions/{id}/messages", api(http.HandlerFunc(h.PostAPISendMessage)))
+	mux.Handle("POST /api/v1/sessions/{id}/messages/group", api(http.HandlerFunc(h.PostAPISendGroupMessageViaSession)))
 	mux.Handle("GET /api/v1/sessions/{id}/messages", api(http.HandlerFunc(h.GetAPISessionMessages)))
 	mux.Handle("GET /api/v1/sessions/{id}/groups", api(http.HandlerFunc(h.GetAPISessionGroups)))
 

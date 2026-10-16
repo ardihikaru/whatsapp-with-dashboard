@@ -42,6 +42,34 @@ func (h *handlers) PostAPISendGroupMessage(w http.ResponseWriter, r *http.Reques
 	h.postAPISendThrough(w, r, s, jid, jid.String(), req.Text, attr, routingModeFor(req.Route))
 }
 
+// PostAPISendGroupMessageViaSession sends to a WhatsApp GROUP through ONE NAMED session.
+//
+//	POST /api/v1/sessions/{id}/messages/group  {"group_jid": "...@g.us", "text": "..."}
+//
+// The group counterpart of PostAPISendMessage: the session in the path is used as-is — group_code,
+// master_only and allow_master are ignored, exactly as on the explicit text route — so the message can
+// never leave from another session. That is the whole point: POST /api/v1/messages/group picks a
+// session (a master of the group_code cluster) and so cannot promise WHICH handset a message came from.
+// Status vocabulary is identical to every other send route; routing is reported as "explicit". The
+// session's device must already be a member of the group (WhatsApp refuses otherwise → status failed).
+func (h *handlers) PostAPISendGroupMessageViaSession(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		writeError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	req, jid, ok := decodeGroupSendRequest(w, r)
+	if !ok {
+		return
+	}
+	attr := message.Attribution{
+		ClientRef: strings.TrimSpace(req.ClientRef),
+		TenantRef: strings.TrimSpace(req.TenantRef),
+		Category:  message.NormalizeCategory(req.Category, message.CategoryAlert),
+	}
+	h.postAPISendThrough(w, r, s, jid, jid.String(), req.Text, attr, routingExplicit)
+}
+
 // groupSendRequest is decodeGroupSendRequest's parsed body. Kept as its OWN
 // struct rather than sharing textSendRequest (api_messages.go): a group
 // send has a group_jid, not a phone number, and no Digits field at all —
