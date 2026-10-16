@@ -3,6 +3,12 @@
 ## [Unreleased]
 
 ### Added
+- **`POST /api/v1/sessions/{id}/messages/group` — send to a WhatsApp group through ONE named session**
+  (explicit routing, like `POST /api/v1/sessions/{id}/messages`): `group_code`/`master_only`/`allow_master`
+  are ignored, so the message can never leave from another handset (the auto route
+  `POST /api/v1/messages/group` picks a session and cannot promise which). The device must be a group
+  member. wsm-mcp 0.3.0 adds the tool `wsm_session_send_group_message`. Lets Hikaru AI send an approved
+  draft to a group from "Ardi New" only.
 - **wsm-mcp 0.2.0: read tools for waxum's message search, per-chat history and
   contacts** — `waxum_messages_search`, `waxum_chat_messages`, `waxum_contacts`
   (new `waxum.Client` methods `SearchMessages`, `ChatMessages`, `Contacts`;
