@@ -3,6 +3,11 @@
 ## [Unreleased]
 
 ### Added
+- **wsm-mcp 0.2.0: read tools for waxum's message search, per-chat history and
+  contacts** — `waxum_messages_search`, `waxum_chat_messages`, `waxum_contacts`
+  (new `waxum.Client` methods `SearchMessages`, `ChatMessages`, `Contacts`;
+  read-only, session-scoped by `session_id`/`phone`). Lets a caller (Hikaru's
+  MCP) find and read WhatsApp history by text or by chat.
 - **wsm-mcp: one MCP (Streamable HTTP + gRPC) server exposing every WSM
   `/api/v1` route and every exported `internal/waxum.Client` method as a
   tool**, over a failover pool of hosts (mini-PC first, laptop backup),
