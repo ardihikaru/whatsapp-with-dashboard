@@ -2118,3 +2118,52 @@ App killed by PID (`ss` shows no `:8801` listener), `docker rm -f
 wsm-e2e-minio` (0 containers left), throwaway password and MinIO secret files
 deleted from the scratch dir. No secret was written into this file or the
 repository.
+
+## 2026-10-16 — wsm-mcp deployed on clinodb, live MCP + gRPC verification
+
+Build: `081f975` (merge of PR #7), image `wsm-mcp:0.1.0` = `wsm-mcp:current`,
+built on clinodb by `deploy/clinodb/install.sh`; systemd user unit `wsm-mcp`
+reported `active`. `ss -ltn` on clinodb: `10.10.0.5:18811` and
+`10.10.0.5:18812` listening. Startup log:
+`"msg":"wsm-mcp up","version":"0.1.0","tools":89,"hosts":2,"allow_dangerous":false`.
+
+Pre-merge: `go vet ./...` clean, `go test ./...` every package `ok`. The
+sync tests were shown red by the implementing agent (removing `wsm_stats` →
+`[GET /api/v1/stats]`; removing the `Health` wrapper → `[Health]`), then
+green restored.
+
+Credential: new API client `wsm-mcp` (one row, same id + `secret_hash`,
+inserted into both hosts' `wa_dashboard`). HTTP Basic `GET /api/v1/stats`
+→ `200` on `10.10.0.4:18801` and on `10.10.0.3:18801`.
+
+### MCP Streamable HTTP, from the laptop over WireGuard
+
+| Check | Result |
+|---|---|
+| `tools/list` without `Authorization` | HTTP `401` |
+| `initialize` | protocolVersion `2025-06-18`, serverInfo `wsm-mcp 0.1.0` |
+| `tools/list` | 89 tools |
+| `wsm_resolve_session {phone:"085132148259"}` | minipc `59c90033bb24b0badf408566b26fe835`, laptop `14069e6d6cd7ca92513633ee77e87453` |
+| `wsm_hosts_status` | minipc WSM 200, 9 sessions / 7 connected, reconcile ok; laptop 3 connected, reconcile ok; both waxum reachable |
+| `wsm_session_get {phone, target:"laptop"}` | `14069e6d…`, `connected:true`, `is_master:true`, group `clino` |
+| `waxum_delete_session` (gate off) | `isError:true`, "disabled: set WSM_MCP_ALLOW_DANGEROUS=true" |
+
+### gRPC, via `mcp/client` from the laptop
+
+| Check | Result |
+|---|---|
+| `Health` | `ok:true version:"0.1.0" tools:89` |
+| `ListTools` | 89 |
+| `CallTool waxum_status {phone:"085132148259"}` | host `minipc`, `status:"logged_in"`, `socket_alive:true`, `reachability:"reachable"` |
+| `Health` with a wrong password | `code = Unauthenticated desc = basic auth required` |
+
+`docker exec wsm-mcp wsm-mcp smoke`: `wsm_hosts_status ok`, `wsm_resolve_session ok`,
+`smoke ok tools=2`.
+
+### Not verified, and why
+
+No message was sent and no Danger-gated tool was executed: the gate stays off
+and a live send was not requested. Failover was exercised only by unit tests
+(fake transports), not by taking a real host down. grpcurl against the
+registered reflection service was not run (no grpcurl on the laptop).
+No secret was written into this file or the repository.
