@@ -238,6 +238,27 @@ func waxumMethodTools() []Tool {
 				}
 				return []any{after, a.Int("limit", 50)}, nil
 			}},
+		{name: "waxum_messages_search", method: "SearchMessages", desc: "Full-text search over a session's stored WhatsApp message history (DMs and groups, both directions), newest first. Hits carry chat_jid, sender_jid, direction, msg_type, body and a UTC received_at.", sessionScoped: true, readOnly: true, idempotent: true,
+			extraParams: []Param{{Name: "q", Type: "string", Desc: "Search text (required, matched against message bodies/captions).", Required: true}, {Name: "limit", Type: "integer", Desc: "Page size (default 20, max 200)."}, {Name: "offset", Type: "integer", Desc: "Rows to skip (default 0)."}},
+			build: func(a Args) ([]any, error) {
+				if a.Str("q") == "" {
+					return nil, fmt.Errorf("q must not be empty")
+				}
+				return []any{a.Str("q"), a.Int("limit", 20), a.Int("offset", 0)}, nil
+			}},
+		{name: "waxum_chat_messages", method: "ChatMessages", desc: "Read one chat's stored history (a DM partner JID or a group JID), newest first, with sender display names. Take chat_jid from a search hit, waxum_groups or waxum_contacts.", sessionScoped: true, readOnly: true, idempotent: true,
+			extraParams: []Param{{Name: "chat_jid", Type: "string", Desc: "Chat JID, e.g. 62811@s.whatsapp.net or 1203...@g.us.", Required: true}, {Name: "limit", Type: "integer", Desc: "Page size (default 20, max 200)."}, {Name: "offset", Type: "integer", Desc: "Rows to skip (default 0)."}},
+			build: func(a Args) ([]any, error) {
+				if a.Str("chat_jid") == "" {
+					return nil, fmt.Errorf("chat_jid must not be empty")
+				}
+				return []any{a.Str("chat_jid"), a.Int("limit", 20), a.Int("offset", 0)}, nil
+			}},
+		{name: "waxum_contacts", method: "Contacts", desc: "List the session's synced WhatsApp contacts (jid, phone, names), optionally filtered by q. Use to turn a person's name into a chat_jid.", sessionScoped: true, readOnly: true, idempotent: true,
+			extraParams: []Param{{Name: "q", Type: "string", Desc: "Optional name/phone filter."}, {Name: "limit", Type: "integer", Desc: "Page size (default 50, max 1000)."}, {Name: "offset", Type: "integer", Desc: "Rows to skip (default 0)."}},
+			build: func(a Args) ([]any, error) {
+				return []any{a.Str("q"), a.Int("limit", 50), a.Int("offset", 0)}, nil
+			}},
 		{name: "waxum_resolve_lid", method: "ResolveLID", desc: "Resolve the phone number behind a @lid sender/chat JID, directly through waxum.", sessionScoped: true, readOnly: true, idempotent: true,
 			extraParams: []Param{{Name: "jid", Type: "string", Desc: "@lid JID to resolve.", Required: true}},
 			build:       func(a Args) ([]any, error) { return []any{a.Str("jid")}, nil }},
