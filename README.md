@@ -16,6 +16,10 @@ Standalone fork of the `whatsapp-session-management` module from the
 
 Single Go binary; templates, CSS, JS and `openapi.yaml` are all embedded.
 
+A separate process, **wsm-mcp**, exposes the full `/api/v1` and waxum API
+surface as MCP (Streamable HTTP + gRPC) tools for other AI agents — see
+`mcp/README.md`.
+
 ## ⚠️ Read this first
 
 1. **Hard singleton.** One device websocket and one SQLite crypto file. Never

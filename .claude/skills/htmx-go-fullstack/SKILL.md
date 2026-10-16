@@ -75,6 +75,25 @@ rules to `responsive.css` (loaded ninth, last) over editing the eight.
 `base.html` and `login.html` each own a complete `<head>`. Every stylesheet or
 script goes in **both**.
 
+## Add or change a /api/v1 route or a waxum.Client method
+
+**wsm-mcp must track every change here.** A separate process (`mcp/README.md`,
+`internal/mcp/registry`) wraps every `/api/v1` route in `routes_api.go` and
+every exported `internal/waxum.Client` method as an MCP/gRPC tool for other AI
+agents. `internal/mcp/registry/sync_test.go`'s `TestEveryAPIRouteHasAnMCPTool`
+and `TestEveryWaxumClientMethodHasAnMCPTool` parse both sources with `go/ast`
+and fail the build if a route or method has no matching tool — so:
+
+- Adding/changing a route in `routes_api.go`, or an exported method on
+  `internal/waxum.Client`, needs a matching tool change in
+  `internal/mcp/registry` (a `t_wsm_*.go`/`t_waxum_*.go` file, or an entry in
+  one of the declarative tables there) in the SAME commit.
+- Regenerate `mcp/tools.md`: `go run ./cmd/wsm-mcp tools > mcp/tools.md` (or
+  `make mcp-tools`) — `TestToolsMdIsCurrent` fails if it's stale.
+- Bump `mcp/VERSION`.
+- See CLAUDE.md's "wsm-mcp must track every WSM and waxum change" section for
+  the danger-gate list and the redeploy step (`deploy/clinodb/update.sh`).
+
 ## Tests
 
 House style, visible in all 30+ existing `_test.go` files:

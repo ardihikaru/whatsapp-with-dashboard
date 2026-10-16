@@ -1,0 +1,57 @@
+// wsm-mcp gRPC contract — a generic Health/ListTools/CallTool service over
+// the SAME tool registry served as MCP Streamable HTTP
+// (internal/mcp/mcpsrv). One RPC per tool was deliberately rejected (see
+// mcp/README.md): registry.Registry already holds every tool, and this
+// mirrors that shape instead of inventing 90-odd RPCs. Every call needs
+// HTTP Basic credentials in the "authorization" metadata.
+syntax = "proto3";
+
+package wsmmcp.v1;
+
+option go_package = "github.com/ardihikaru/whatsapp-with-dashboard/proto/wsmmcp/v1;wsmmcpv1";
+
+service WSMMCP {
+  // Health reports readiness and version.
+  rpc Health(HealthRequest) returns (HealthResponse);
+  // ListTools lists every tool with its JSON Schema input and annotations.
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+  // CallTool runs one tool; tool-level failures come back as is_error
+  // (the caller can read and retry), not a gRPC error.
+  rpc CallTool(CallToolRequest) returns (CallToolResponse);
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool ok = 1;
+  string version = 2;
+  int32 tools = 3;
+}
+
+message ListToolsRequest {}
+
+message ToolInfo {
+  string name = 1;
+  string description = 2;
+  string input_schema_json = 3;
+  string annotations_json = 4;
+  string route = 5;         // "METHOD /api/v1/..." this tool wraps, "" if none
+  string waxum_method = 6;  // waxum.Client method this tool wraps, "" if none
+  bool danger = 7;
+}
+
+message ListToolsResponse {
+  repeated ToolInfo tools = 1;
+}
+
+message CallToolRequest {
+  string name = 1;
+  string arguments_json = 2; // JSON object, "" = {}
+}
+
+message CallToolResponse {
+  string result_json = 1;
+  bool is_error = 2;
+  string error = 3;
+  int64 duration_ms = 4;
+}

@@ -97,6 +97,19 @@ server round-trips**, not client-side state management. A skill that assumes
 React or a CSS framework is describing a technique to adapt, not a dependency
 to add.
 
+## wsm-mcp must track every WSM and waxum change
+
+A separate process, wsm-mcp (`mcp/README.md`), wraps every `/api/v1` route
+(`internal/handler/routes_api.go`) and every exported method on
+`internal/waxum.Client` as an MCP/gRPC tool for other AI agents.
+`internal/mcp/registry/sync_test.go` parses both sources with `go/ast` and
+fails the build the moment a route or method has no matching tool — so any
+change to either needs, in the same commit: a matching tool in
+`internal/mcp/registry`, a regenerated `mcp/tools.md`
+(`go run ./cmd/wsm-mcp tools > mcp/tools.md`, or `make mcp-tools`), and a
+bumped `mcp/VERSION`. See CLAUDE.md's "wsm-mcp must track every WSM and
+waxum change" section for the danger-gate list and the clinodb redeploy step.
+
 ## Reporting
 
 State what you changed, what you ran, and what it printed. Include the failing
