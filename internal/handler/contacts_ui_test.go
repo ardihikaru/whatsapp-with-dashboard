@@ -234,3 +234,61 @@ func TestContactsNavEntryAndChromeRender(t *testing.T) {
 		}
 	}
 }
+
+// TestPickVerifySnapshotFallsBackToAGroupedMasterSessionWhenNothingUngroupedIsConnected
+// pins the bug fixed 2026-10-17: on a host where every connected session
+// is either is_master or carries a non-empty GroupCode,
+// h.Manager.SelectForRoute(ctx, wa.Route{}) (verifyContact's OLD call —
+// see contacts_ui.go's git history) admits none of them, even though
+// several sessions are genuinely connected. This test calls
+// pickVerifySnapshot directly, the function verifyContact now uses, with
+// literal snapshots shaped exactly like that host's live state (two
+// is_master sessions, two sessions grouped "clino", nothing ungrouped and
+// non-master) and requires it to still choose one.
+func TestPickVerifySnapshotFallsBackToAGroupedMasterSessionWhenNothingUngroupedIsConnected(t *testing.T) {
+	snaps := []wa.Snapshot{
+		{ID: "ardi-laptop", Connected: true, IsMaster: true, GroupCode: ""},
+		{ID: "arie", Connected: true, IsMaster: true, GroupCode: ""},
+		{ID: "clino-2", Connected: true, IsMaster: false, GroupCode: "clino"},
+		{ID: "clino-3", Connected: true, IsMaster: false, GroupCode: "clino"},
+	}
+	got, ok := pickVerifySnapshot(snaps)
+	if !ok {
+		t.Fatalf("pickVerifySnapshot = (_, false), want a fallback pick from %d connected sessions", len(snaps))
+	}
+	if got.ID == "" {
+		t.Errorf("pickVerifySnapshot returned an empty snapshot despite ok=true")
+	}
+}
+
+// TestPickVerifySnapshotStillPrefersTheUngroupedNonMasterPool pins that
+// this fix only WIDENS the fallback — it must not change which session
+// gets picked when an ordinary ungrouped, non-master, connected session
+// already exists alongside a master and a grouped session.
+func TestPickVerifySnapshotStillPrefersTheUngroupedNonMasterPool(t *testing.T) {
+	snaps := []wa.Snapshot{
+		{ID: "master", Connected: true, IsMaster: true, GroupCode: ""},
+		{ID: "grouped", Connected: true, IsMaster: false, GroupCode: "clino"},
+		{ID: "ordinary", Connected: true, IsMaster: false, GroupCode: ""},
+	}
+	got, ok := pickVerifySnapshot(snaps)
+	if !ok {
+		t.Fatal("pickVerifySnapshot = (_, false), want the ordinary session")
+	}
+	if got.ID != "ordinary" {
+		t.Errorf("pickVerifySnapshot = %q, want %q (the ungrouped non-master pool must still win)", got.ID, "ordinary")
+	}
+}
+
+// TestPickVerifySnapshotReturnsFalseWhenNothingIsConnected pins the
+// no-fallback floor: no connected session anywhere must still answer
+// false, not a zero-value snapshot mistaken for a real pick.
+func TestPickVerifySnapshotReturnsFalseWhenNothingIsConnected(t *testing.T) {
+	snaps := []wa.Snapshot{
+		{ID: "a", Connected: false, IsMaster: false, GroupCode: ""},
+		{ID: "b", Connected: false, IsMaster: true, GroupCode: "clino"},
+	}
+	if _, ok := pickVerifySnapshot(snaps); ok {
+		t.Error("pickVerifySnapshot = (_, true) with nothing connected, want false")
+	}
+}

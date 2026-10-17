@@ -95,18 +95,78 @@ func splitAliasesInput(raw string) []string {
 	return out
 }
 
-// verifyContact checks one contact's phone through an auto-routed
-// connected session (wa.Route{}, the same ungrouped/any-session pool
-// selectSendSession's "routing=auto" branch and PostAPIContactsCheckAuto
-// both use) and persists the outcome via SetVerification. It NEVER writes
-// StatusNotRegistered on a routing/backend failure — only a real
-// "not_registered" verdict from checkContacts does that — matching
-// contactVerdict's own doc comment (contacts_check.go) on why "unknown"
-// and "not_registered" must stay distinct. Returns a human-readable error
-// to surface to the operator, or "" on a clean verify (any resulting
-// status, including "unknown" for a verdict waxum itself did not answer).
+// pickVerifySnapshot chooses the connected session used for ONE owner-
+// contact usync lookup (checkContacts), and is deliberately WIDER than
+// send routing: verification is a single read-only CheckContacts call
+// against whichever device is live, never a message a recipient sees, so
+// unlike selectSendSession/SelectForRoute(wa.Route{}) it has no reason to
+// stay confined to the ungrouped, non-master pool a send must respect
+// (CLAUDE.md's load-balancing rules exist to keep sends away from a
+// single-point-of-failure master or a group's dedicated numbers — neither
+// concern applies to reading usync results).
+//
+// Root cause this exists to fix (observed live 2026-10-17): on a host
+// where every connected session is either is_master or carries a
+// non-empty GroupCode, wa.Route{} admits none of them
+// (wa.EligibleForRoute), so verification answered "no connected session
+// available" with 3 sessions connected. Tiers, in order:
+//
+//  1. wa.SelectSnapshotForRoute(snaps, wa.Route{}) — the ordinary
+//     ungrouped/non-master pool, UNCHANGED preference from before this fix;
+//  2. wa.SelectSnapshotForRoute(snaps, wa.Route{AllowMaster: true}) — same
+//     ungrouped pool, now also admitting a master;
+//  3. any connected snapshot at all, regardless of GroupCode or IsMaster —
+//     picked deterministically: non-master before master (an owner-contact
+//     lookup has no reason to prefer burning the master's socket when an
+//     ordinary grouped session is just as able to answer it), then the
+//     stable tie-break every other ranking in this package uses, lowest
+//     ID.
+//
+// Each tier still requires Connected == true; a Route{} with GroupCode ""
+// never matches a non-empty GroupCode, which is why tier 3 must fall back
+// to a hand-rolled scan rather than another Route value — there is no
+// Route that means "any group".
+func pickVerifySnapshot(snaps []wa.Snapshot) (wa.Snapshot, bool) {
+	if s, ok := wa.SelectSnapshotForRoute(snaps, wa.Route{}); ok {
+		return s, true
+	}
+	if s, ok := wa.SelectSnapshotForRoute(snaps, wa.Route{AllowMaster: true}); ok {
+		return s, true
+	}
+	var best wa.Snapshot
+	found := false
+	for _, s := range snaps {
+		if !s.Connected {
+			continue
+		}
+		if !found {
+			best, found = s, true
+			continue
+		}
+		if better := func() bool {
+			if s.IsMaster != best.IsMaster {
+				return !s.IsMaster // non-master beats master
+			}
+			return s.ID < best.ID
+		}(); better {
+			best = s
+		}
+	}
+	return best, found
+}
+
+// verifyContact checks one contact's phone through a connected session
+// chosen by pickVerifySnapshot (wider than send routing — see that
+// function's doc comment for why) and persists the outcome via
+// SetVerification. It NEVER writes StatusNotRegistered on a
+// routing/backend failure — only a real "not_registered" verdict from
+// checkContacts does that — matching contactVerdict's own doc comment
+// (contacts_check.go) on why "unknown" and "not_registered" must stay
+// distinct. Returns a human-readable error to surface to the operator, or
+// "" on a clean verify (any resulting status, including "unknown" for a
+// verdict waxum itself did not answer).
 func (h *handlers) verifyContact(r *http.Request, c *contact.Contact) string {
-	s, _, ok := h.Manager.SelectForRoute(r.Context(), wa.Route{})
+	s, ok := pickVerifySnapshot(h.Manager.Snapshots())
 	if !ok {
 		h.setContactUnknown(r, c.ID)
 		return "could not verify: no connected session available"
