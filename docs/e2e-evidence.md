@@ -2167,3 +2167,17 @@ and a live send was not requested. Failover was exercised only by unit tests
 (fake transports), not by taking a real host down. grpcurl against the
 registered reflection service was not run (no grpcurl on the laptop).
 No secret was written into this file or the repository.
+
+## 2026-10-17 — Contacts + ranked waxum_contacts (PR #11, #12), wsm-mcp 0.4.0
+
+- Migration `0012_contacts.sql` applied via `make migrate-up`: mini-PC 12:02:08 UTC, laptop 12:03:34 UTC (`make migrate-status`).
+- Both hosts redeployed at `392d9ee`; `/api/v1/health` `status:ok`, `reconcile.ok:true` (laptop connected 3/6, mini-PC 7/9 after reconnect).
+- clinodb wsm-mcp `/healthz` → `{"ok":true,"version":"0.4.0"}`.
+- `wsm_contacts_create` Ria (alias `istri`) → 201 on minipc, `wa_status:registered`.
+  On laptop the first verify answered `no connected session available` (every
+  connected laptop session is master or group `clino`); fixed by PR #12
+  (`pickVerifySnapshot`), re-verify → `registered`.
+- Acceptance: `waxum_contacts q="Ria"` on minipc and laptop → #1 `source:wsm`,
+  `match_score:95`, `matched_field:name`, `chat_jid` Ria's JID.
+- `GET /contacts` on wa / wa-minipc / wa-laptop → 303 to `/login` (unknown path → 404); public `GET /api/v1/contacts` → 404 (not on the edge allowlist, as intended).
+- NOT verified: logged-in render of `/contacts` in a browser; no Playwright run.
