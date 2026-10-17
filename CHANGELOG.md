@@ -39,6 +39,22 @@
   sync rule two new tests (`internal/mcp/registry/sync_test.go`) enforce.
 
 ### Fixed
+- **Owner-contact verification (`POST /contacts`'s auto-verify, the
+  `/contacts` page's Verify button, `POST /api/v1/contacts/{contactID}/verify`)
+  could answer "no connected session available" with every session
+  connected.** Observed live 2026-10-17 on the laptop host: `verifyContact`
+  picked a session with `h.Manager.SelectForRoute(ctx, wa.Route{})`, which
+  only admits the ungrouped, non-master pool (`wa.EligibleForRoute`), and
+  every connected session there was either `is_master` or carried a
+  `group_code` — so a 3-connected host verified nothing. A single
+  `CheckContacts` usync lookup is read-only and never a send, so it has no
+  reason to respect send routing's master/group exclusions. `verifyContact`
+  now resolves its session through a new pure selector,
+  `pickVerifySnapshot` (`internal/handler/contacts_ui.go`), which still
+  prefers the ordinary ungrouped/non-master pool first, then widens to
+  allow a master, then falls back to any connected snapshot at all
+  (non-master before master, then lowest ID) — so verification always
+  succeeds whenever ANY session is connected, regardless of grouping.
 - **A suspended/resumed host could see waxum rate-limit every request for
   hours, and WSM used to honour that verbatim.** Observed live 2026-09-13:
   after the laptop resumed from suspend, waxum's tower_governor answered
