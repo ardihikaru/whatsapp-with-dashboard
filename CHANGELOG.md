@@ -3,6 +3,20 @@
 ## [Unreleased]
 
 ### Added
+- **A real, owner-managed WhatsApp Contacts feature** (`internal/domain/contact`,
+  `GET/POST /api/v1/contacts`, `DELETE/POST /api/v1/contacts/{contactID}[/verify]`, the `/contacts`
+  dashboard page) — a global (not per-session) name/phone/aliases book, each number verifiable on
+  WhatsApp through the existing `checkContacts` auto-routed session path; a routing/backend failure
+  during verify leaves `wa_status` at `unknown` (never fabricated as `not_registered`) and the create
+  still succeeds either way. A new pure package, `internal/contactmatch`, ranks name/alias text against
+  a query (NFKD-transliterated, so "Réné" matches "rene"; alias exact > whole-name exact > per-token
+  exact > per-token prefix > substring; every query token must match something or the candidate is
+  excluded) — used both by `GET /api/v1/contacts?q=` and by wsm-mcp's `waxum_contacts` below. wsm-mcp
+  0.4.0 adds `wsm_contacts_list/create/delete/verify` and makes `waxum_contacts` (with `q` set) rank
+  waxum's own synced contacts together with this book, owner contacts winning ties and deduping by
+  jid/phone — answers Hikaru AI's request that `waxum_contacts q="Ria"` return Ardi's wife Ria first.
+  Also documents `mcp/README.md`'s "Response schemas" section (casing/cursor direction per tool) and
+  fixes `waxum_session_messages`' `after` param description, which previously read as paging forward.
 - **`POST /api/v1/sessions/{id}/messages/group` — send to a WhatsApp group through ONE named session**
   (explicit routing, like `POST /api/v1/sessions/{id}/messages`): `group_code`/`master_only`/`allow_master`
   are ignored, so the message can never leave from another handset (the auto route

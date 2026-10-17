@@ -1,0 +1,51 @@
+{{/* Bare <tr> rows — no <tbody> wrapper — for every DIRECT swap target:
+     GetContactRows' poll, and PostContactDelete/PostContactVerify, which
+     all swap hx-swap="innerHTML" into the page's own #contact-rows tbody
+     (contacts.html). This is the SAME shape known_group_rows.html uses for
+     exactly the same reason. */}}
+{{define "contact_rows"}}
+{{if .Error}}<tr><td colspan="6"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{range .Contacts}}
+<tr>
+  <td>{{.Name}}</td>
+  <td class="mono">{{.Phone}}</td>
+  <td>{{if .Aliases}}{{.Aliases}}{{else}}<span class="muted">&mdash;</span>{{end}}</td>
+  <td>
+    <span class="badge badge-{{.WAStatus}}">{{if eq (print .WAStatus) "registered"}}Registered
+      {{- else if eq (print .WAStatus) "not_registered"}}Not registered
+      {{- else}}Unknown{{end}}</span>
+    {{if and (eq (print .WAStatus) "registered") .JID}} <span class="mono">{{.JID}}</span>{{end}}
+  </td>
+  <td>{{if .VerifiedAt.IsZero}}<span class="muted">&mdash;</span>{{else}}{{.VerifiedAt.Format "2006-01-02 15:04"}}{{end}}</td>
+  <td class="row-actions">
+    <button class="btn btn-outline" hx-post="{{u "/contacts"}}/{{.ID}}/verify"
+            hx-target="#contact-rows" hx-swap="innerHTML">Verify</button>
+    <button class="btn btn-outline btn-danger" hx-post="{{u "/contacts"}}/{{.ID}}/delete"
+            hx-target="#contact-rows" hx-swap="innerHTML"
+            hx-confirm="Delete this contact?">Delete</button>
+  </td>
+</tr>
+{{else}}
+<tr><td colspan="6">No contacts yet — save one above.</td></tr>
+{{end}}
+{{end}}
+
+{{/* OOB wrapper: a <tbody> carrying hx-swap-oob="true", for the create
+     response ONLY — the create form's hx-target is #contact-form-error
+     (an error message, never row markup), and the rows table is refreshed
+     separately via this out-of-band swap, the same technique
+     partials/log_rows.html's log_more already uses in this codebase. This
+     is the fix for the known-groups bug named in contacts_ui.go's doc
+     comment: known_group_rows.html's bare <tr> rows get swapped straight
+     into #known-group-form-error on a successful create there, instead of
+     into the table they belong in. */}}
+{{define "contact_rows_oob"}}
+<tbody id="contact-rows" hx-swap-oob="true">
+{{template "contact_rows" .}}
+</tbody>
+{{end}}
+
+{{define "contact_create_response"}}
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+{{template "contact_rows_oob" .Rows}}
+{{end}}

@@ -1,0 +1,43 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Contacts</h4>
+</div>
+<p class="page-subtitle">Save a name, phone number and optional aliases — each number can be verified on
+  WhatsApp. This book is shared across every session; it is not scoped to one.</p>
+
+<div class="card form-card">
+  <div id="contact-form-error"></div>
+  <form hx-post="{{u "/contacts"}}" hx-target="#contact-form-error" hx-swap="innerHTML"
+        action="{{u "/contacts"}}" method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Name</span>
+      <input type="text" name="name" maxlength="120" placeholder="e.g. Ria" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Phone</span>
+      <input type="text" name="phone" placeholder="+62 812-0000-0000" required>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Aliases</span>
+      <input type="text" name="aliases" placeholder="nickname, other name (comma-separated)">
+      <small class="muted">Extra names a search also matches against — case is folded automatically.</small>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save &amp; verify</button>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr><th>Name</th><th>Phone</th><th>Aliases</th><th>WhatsApp status</th><th>Verified</th><th>Actions</th></tr>
+      </thead>
+      <tbody id="contact-rows" hx-get="{{u "/contacts/rows"}}" hx-trigger="load, every 10s" hx-swap="innerHTML">
+        <tr><td colspan="6">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}

@@ -141,6 +141,14 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("POST "+bp+"/groups/{id}/delete", page(http.HandlerFunc(h.PostKnownGroupDelete)))
 	mux.Handle("GET "+bp+"/groups/picker", page(http.HandlerFunc(h.GetKnownGroupPicker)))
 
+	// Contacts — the owner-managed, GLOBAL (not per-session) WhatsApp
+	// contact book (internal/domain/contact).
+	mux.Handle("GET "+bp+"/contacts", page(http.HandlerFunc(h.GetContacts)))
+	mux.Handle("GET "+bp+"/contacts/rows", page(http.HandlerFunc(h.GetContactRows)))
+	mux.Handle("POST "+bp+"/contacts", page(http.HandlerFunc(h.PostContactCreate)))
+	mux.Handle("POST "+bp+"/contacts/{id}/delete", page(http.HandlerFunc(h.PostContactDelete)))
+	mux.Handle("POST "+bp+"/contacts/{id}/verify", page(http.HandlerFunc(h.PostContactVerify)))
+
 	// Group Broadcast Schedule — same static-before-wildcard registration
 	// order convention as the self-convo schedules block above.
 	mux.Handle("GET "+bp+"/group-broadcast/schedules", page(http.HandlerFunc(h.GetGroupBroadcastSchedules)))

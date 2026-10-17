@@ -120,6 +120,62 @@ message text, tokens, or results.
 argument; `WSM_MCP_MAX_BODY_BYTES` raises it (140 MiB default in
 `mcp.env.example`, comfortably above `WSM_MEDIA_MAX_BYTES`).
 
+## Response schemas
+
+Casing is NOT uniform across tools — each result's shape is whatever the
+underlying Go type already serializes as (`encoding/json` on a struct with
+no tags emits its field names verbatim, PascalCase included), and this
+registry does not re-shape it. Check the exact field before writing a
+caller against one of these.
+
+- **`waxum_groups`** (wraps `waxum.Client.Groups`, `internal/waxum/
+  client.go`'s `Group` struct) — **PascalCase, no json tags**: each entry is
+  `{"JID": "...", "Name": "...", "ParticipantCount": N, "AddressingMode":
+  "..."}`. `Name` is mapped from waxum's own wire field `subject`;
+  `ParticipantCount` is `len(participants)`, not a field waxum sends.
+- **`waxum_session_messages`** (wraps `waxum.Client.SessionMessages`,
+  `internal/waxum/messages.go`'s `SessionMessagesPage`) — **PascalCase, no
+  json tags**: `{"Messages": [{"ID", "MessageID", "SessionID", "ChatJID",
+  "SenderJID", "Direction", "MsgType", "Body", "PushName", "ReceivedAt"}],
+  "Count": N, "NextCursor": N|null}`. `NextCursor` pages **OLDER**, not
+  newer — there is no "since" cursor on this route at all. Omit `after`
+  entirely to get the newest page; to page further back, pass the
+  previous page's last row `ID` as `after`.
+- **`waxum_contacts`** — with `q` empty, an unranked passthrough to
+  `waxum.Client.Contacts` (`internal/waxum/search.go`'s `ContactsPage`,
+  **snake_case, real json tags**: `{"contacts": [{"jid", "phone",
+  "lid_jid", "full_name", "first_name", "push_name", "business_name"}],
+  "total", "limit", "offset"}`). With `q` set, the shape is DIFFERENT: it
+  ranks this session's waxum contacts together with WSM's own owner
+  contact book (`wsm_contacts_list`) via `internal/contactmatch`, dedupes
+  by jid/phone (an owner contact wins the slot), and returns
+  `{"host", "data": {"contacts": [{...the snake_case StoredContact fields
+  above..., "chat_jid", "name", "match_score", "matched_field",
+  "source": "wsm"|"waxum"}], "total", "limit", "offset", "query"}}`. A
+  failure fetching WSM's own contacts does not fail the call — it adds a
+  `"warnings"` array and still returns waxum's contacts ranked alone.
+- **`waxum_messages_search` / `waxum_chat_messages`** (wrap
+  `waxum.Client.SearchMessages`/`ChatMessages`, `internal/waxum/
+  search.go`'s `MessageHitsPage`) — **snake_case, real json tags**:
+  `{"messages": [{"id", "message_id", "session_id", "chat_jid",
+  "sender_jid", "direction", "msg_type", "body", "snippet", "push_name",
+  "received_at"}], "count"}`. `received_at` is a real UTC `time.Time`
+  (waxum sends a zone-less string that `messageTimestampLayout`'s doc
+  comment explains is interpreted as UTC, not host-local).
+- **`wsm_contacts_list` / `wsm_contacts_create` / `wsm_contacts_delete` /
+  `wsm_contacts_verify`** (wrap `GET/POST /api/v1/contacts`, `DELETE/POST
+  /api/v1/contacts/{contactID}[/verify]`) — **snake_case**, see
+  `openapi.yaml`'s `Contact`/`ContactsListResponse`/`ContactCreateResponse`
+  schemas for the exact fields. `wa_status` is one of `registered` /
+  `not_registered` / `unknown`; `unknown` means no verdict was ever
+  obtained, which is NOT the same claim as "confirmed absent from
+  WhatsApp" — never treat it as `not_registered`. `match_score`/
+  `matched_field` are only present when the list was ranked by `?q=`.
+  `{contactID}` in the route is deliberately NOT the generic `{id}`
+  session-resolution placeholder every other session-scoped tool uses —
+  a contact id is not a session id, and `wsm_contacts_delete`/
+  `wsm_contacts_verify` take no `session_id`/`phone` params at all.
+
 ## Keeping this in sync (read before changing routes_api.go or internal/waxum)
 
 See CLAUDE.md's **"wsm-mcp must track every WSM and waxum change"** section.

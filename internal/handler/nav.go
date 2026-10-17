@@ -66,6 +66,11 @@ const (
 	// a small tag/label glyph — "a saved name for a group", the known-groups
 	// CRUD page.
 	iconKnownGroups template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M20.6 12.9 12.7 21a1 1 0 0 1-1.4 0l-8-8a1 1 0 0 1-.3-.7V4a1 1 0 0 1 1-1h8.3c.3 0 .5.1.7.3l8 8a1 1 0 0 1 .3 1.6zM7 8a1.5 1.5 0 1 0 0-3 1.5 1.5 0 0 0 0 3z"/></svg>`
+	// a single person glyph — "a saved name for a PERSON", distinct from
+	// iconKnownGroups' tag (a saved name for a group JID): the Contacts
+	// page is the owner's own name/phone book, verifiable on WhatsApp,
+	// global rather than per-session.
+	iconContacts template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>`
 )
 
 // platformLink is the sidebar footer's way back out to the platform backoffice.
@@ -100,6 +105,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 			{Title: "Send Message", Path: "/send", Icon: iconSend},
 			{Title: "Voice Calls", Path: "/calls", Icon: iconCalls},
 			{Title: "Verify Number", Path: "/verify", Icon: iconVerify},
+			{Title: "Contacts", Path: "/contacts", Icon: iconContacts},
 			{Title: "Self Convo", Path: "/self-convo", Icon: iconSelfConvo},
 			{Title: "Convo Schedules", Path: "/self-convo/schedules", Icon: iconSchedules},
 			{Title: "Group Broadcast", Path: "/group-broadcast/schedules", Icon: iconGroupBroadcast},

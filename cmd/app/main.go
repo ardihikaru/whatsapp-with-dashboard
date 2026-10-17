@@ -36,6 +36,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/contact"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
 	gb "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/groupbroadcast"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
@@ -176,6 +177,7 @@ func run() error {
 	callRepo := call.NewRepository(appDB)
 	convoRepo := convo.NewRepository(appDB)
 	knownGroupRepo := knowngroup.NewRepository(appDB)
+	contactRepo := contact.NewRepository(appDB)
 	groupBroadcastRepo := gb.NewRepository(appDB)
 	// inboundRepo is nil-able on Manager (see Manager.inbound's doc
 	// comment) but always real in production — WSM_INBOUND_ENABLED only
@@ -248,6 +250,7 @@ func run() error {
 			SelfConvoEnabled:       cfg.SelfConvoEnabled,
 			Planner:                planner,
 			KnownGroups:            knownGroupRepo,
+			Contacts:               contactRepo,
 			GroupBroadcast:         groupBroadcastRepo,
 			GroupBroadcastRunner:   gbRunner,
 			GroupBroadcastEnabled:  cfg.GroupBroadcastEnabled,

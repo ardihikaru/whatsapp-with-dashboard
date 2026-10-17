@@ -228,8 +228,8 @@ func waxumMethodTools() []Tool {
 				}
 				return []any{waxum.MediaKind(a.Str("kind")), a.Str("to"), d, a.Str("caption"), a.Str("filename"), a.Bool("ptt")}, nil
 			}},
-		{name: "waxum_session_messages", method: "SessionMessages", desc: "Paginate a session's inbound message log directly from waxum.", sessionScoped: true, readOnly: true, idempotent: true,
-			extraParams: []Param{{Name: "after", Type: "integer", Desc: "Cursor: only messages after this id/timestamp. 0 means from the start."}, {Name: "limit", Type: "integer", Desc: "Max rows to return."}},
+		{name: "waxum_session_messages", method: "SessionMessages", desc: "Paginate a session's inbound message log directly from waxum, newest first. Omit \"after\" for the newest page.", sessionScoped: true, readOnly: true, idempotent: true,
+			extraParams: []Param{{Name: "after", Type: "integer", Desc: "waxum's own keyset cursor (its \"id\" column). Pages OLDER, not newer: pass the previous page's last row id to get the NEXT (older) page. Omit entirely (0 means \"omit\" here, not \"from the start\") to get the newest page."}, {Name: "limit", Type: "integer", Desc: "Max rows to return."}},
 			build: func(a Args) ([]any, error) {
 				var after *int64
 				if n := a.Int("after", 0); n > 0 {
@@ -254,16 +254,18 @@ func waxumMethodTools() []Tool {
 				}
 				return []any{a.Str("chat_jid"), a.Int("limit", 20), a.Int("offset", 0)}, nil
 			}},
-		{name: "waxum_contacts", method: "Contacts", desc: "List the session's synced WhatsApp contacts (jid, phone, names), optionally filtered by q. Use to turn a person's name into a chat_jid.", sessionScoped: true, readOnly: true, idempotent: true,
-			extraParams: []Param{{Name: "q", Type: "string", Desc: "Optional name/phone filter."}, {Name: "limit", Type: "integer", Desc: "Page size (default 50, max 1000)."}, {Name: "offset", Type: "integer", Desc: "Rows to skip (default 0)."}},
-			build: func(a Args) ([]any, error) {
-				return []any{a.Str("q"), a.Int("limit", 50), a.Int("offset", 0)}, nil
-			}},
+		// "waxum_contacts" is NOT declared here — see waxumContactsTool()
+		// (t_waxum_contacts.go): with q set, it is bespoke (combines this
+		// session's waxum contacts with WSM's own owner contacts and
+		// ranks both together via internal/contactmatch), so it cannot be
+		// expressed as one waxumSpec.build call. WaxumMethod stays
+		// "Contacts" so sync_test.go's TestEveryWaxumClientMethodHasAnMCPTool
+		// still sees it covered.
 		{name: "waxum_resolve_lid", method: "ResolveLID", desc: "Resolve the phone number behind a @lid sender/chat JID, directly through waxum.", sessionScoped: true, readOnly: true, idempotent: true,
 			extraParams: []Param{{Name: "jid", Type: "string", Desc: "@lid JID to resolve.", Required: true}},
 			build:       func(a Args) ([]any, error) { return []any{a.Str("jid")}, nil }},
 	}
-	out := make([]Tool, 0, len(specs)+1)
+	out := make([]Tool, 0, len(specs)+2)
 	for _, s := range specs {
 		if s.method == "CreateSession" {
 			out = append(out, createSessionTool())
@@ -272,6 +274,7 @@ func waxumMethodTools() []Tool {
 		out = append(out, s.tool())
 	}
 	out = append(out, waxumEventsTailTool())
+	out = append(out, waxumContactsTool())
 	return out
 }
 
