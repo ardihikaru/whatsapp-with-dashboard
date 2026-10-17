@@ -102,6 +102,10 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/known_groups.html"),
 		root:  "base",
 	},
+	"contacts": {
+		files: append(chrome(), "templates/contacts.html"),
+		root:  "base",
+	},
 	// group_broadcast_schedule_form is shared by GET .../schedules/new AND
 	// GET .../schedules/{id}/edit, same IsEdit-picks-the-difference
 	// convention as self_convo_schedule_form above.
@@ -195,6 +199,7 @@ var partialFiles = []string{
 	"templates/partials/convo_schedule_rows.html",
 	"templates/partials/known_group_rows.html",
 	"templates/partials/known_group_picker.html",
+	"templates/partials/contact_rows.html",
 	"templates/partials/group_broadcast_schedule_rows.html",
 	"templates/partials/group_broadcast_occurrence_rows.html",
 }

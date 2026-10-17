@@ -9,6 +9,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/call"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/contact"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
 	gb "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/groupbroadcast"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
@@ -109,6 +110,12 @@ type Deps struct {
 	// (internal/domain/knowngroup) backing the /groups page. nil is legal
 	// (older test servers); guarded the same way h.Calls is.
 	KnownGroups *knowngroup.Repository
+	// Contacts is the owner-managed WhatsApp contact-book CRUD seam
+	// (internal/domain/contact) backing the /contacts page and the
+	// GET/POST/DELETE /api/v1/contacts* routes. GLOBAL, not per-session —
+	// unlike KnownGroups above. nil is legal (older test servers); guarded
+	// the same way h.KnownGroups is.
+	Contacts *contact.Repository
 	// GroupBroadcast is the Group Broadcast Schedule persistence seam
 	// (internal/domain/groupbroadcast) — schedule CRUD/listing and
 	// occurrence/turn history go through it directly from the handlers,

@@ -443,6 +443,22 @@ var schema = []string{
 	  ON wa_group_broadcast_turns(occurrence_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_wa_gb_turns_session_due
 	  ON wa_group_broadcast_turns(session_id, due_at)`,
+	// 0012: owner-managed Contacts — a global (not per-session) name/phone
+	// book with optional aliases and a last-known WhatsApp verification
+	// status. See migrations/0012_contacts.sql's header.
+	`CREATE TABLE IF NOT EXISTS wa_contacts (
+	  id          TEXT PRIMARY KEY,
+	  name        TEXT NOT NULL,
+	  phone       TEXT NOT NULL UNIQUE,
+	  aliases     TEXT NOT NULL DEFAULT '',
+	  jid         TEXT NOT NULL DEFAULT '',
+	  wa_status   TEXT NOT NULL DEFAULT 'unknown',
+	  verified_at TEXT NOT NULL DEFAULT '',
+	  created_at  TEXT NOT NULL,
+	  updated_at  TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_contacts_name
+	  ON wa_contacts(name)`,
 }
 
 // EnsureSchema creates the app tables and index if missing, inside one

@@ -1740,6 +1740,134 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/contacts:
+    get:
+      summary: List or rank-search the owner-managed contact book
+      description: >
+        GLOBAL (not per-session) — see internal/domain/contact. Without
+        ?q=, returns every saved contact, newest first. With ?q=, ranks
+        every contact against name+aliases using internal/contactmatch
+        (alias exact match > whole-name exact > per-token exact > per-token
+        prefix > substring; a query that shares nothing with a contact is
+        excluded entirely rather than scored 0) and returns only the
+        matching ones, highest score first; match_score/matched_field are
+        only populated on a ranked response.
+      operationId: listContacts
+      tags: [contacts]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: q, in: query, required: false, schema: {type: string}, description: 'Optional name/alias search; omit for an unranked full list.'}
+      responses:
+        '200':
+          description: The contact list (ranked when q was given).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContactsListResponse'}
+        '503':
+          description: Contacts are not wired on this deployment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+    post:
+      summary: Save a new contact, then immediately verify it on WhatsApp
+      description: >
+        Creates the contact first; a verification failure (no connected
+        session, backend error, or no verdict for the number) never fails
+        the create — the contact is still saved, its wa_status is left at
+        "unknown" (never fabricated as "not_registered"), and the problem
+        is reported in the response's verify_error field alongside the
+        201.
+      operationId: createContact
+      tags: [contacts]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, phone]
+              properties:
+                name: {type: string, maxLength: 120}
+                phone: {type: string, description: 'International format accepted with human formatting, e.g. "+62 812-0000-0000" or "6289900000000".'}
+                aliases:
+                  type: array
+                  items: {type: string}
+                  description: 'Extra names a ranked search also matches against; lowercased on save.'
+      responses:
+        '201':
+          description: Contact saved (verify_error present only when the auto-verify step itself failed).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContactCreateResponse'}
+        '400':
+          description: Missing name, or an unparseable phone number.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: A contact with this phone number already exists.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Contacts are not wired on this deployment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/contacts/{contactID}:
+    delete:
+      summary: Delete a saved contact
+      description: >
+        Deletes WSM's own record only — this has nothing to do with
+        unlinking any WhatsApp device (see CLAUDE.md's session-delete
+        hazard for that unrelated concept).
+      operationId: deleteContact
+      tags: [contacts]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: contactID, in: path, required: true, schema: {type: string}}
+      responses:
+        '204': {description: Deleted.}
+        '404':
+          description: Unknown contact id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Contacts are not wired on this deployment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/contacts/{contactID}/verify:
+    post:
+      summary: Re-verify a saved contact's phone on WhatsApp
+      description: >
+        Same auto-routed checkContacts path POST /api/v1/contacts uses at
+        create time. A routing/backend failure leaves wa_status at
+        "unknown" and reports it in verify_error; it is never reported as
+        "not_registered".
+      operationId: verifyContact
+      tags: [contacts]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: contactID, in: path, required: true, schema: {type: string}}
+      responses:
+        '200':
+          description: The contact's current state after the verify attempt (verify_error present only on failure).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ContactCreateResponse'}
+        '404':
+          description: Unknown contact id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '503':
+          description: Contacts are not wired on this deployment.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
 components:
   securitySchemes:
     bearerAuth:
@@ -1982,3 +2110,31 @@ components:
         results:
           type: array
           items: {$ref: '#/components/schemas/ContactVerdict'}
+    Contact:
+      type: object
+      description: One row of the owner-managed contact book (internal/domain/contact), GLOBAL across sessions.
+      properties:
+        id: {type: string}
+        name: {type: string}
+        phone: {type: string, description: 'Canonical digits (wa.NormalizePhone output).'}
+        aliases: {type: array, items: {type: string}}
+        jid: {type: string, description: 'Set only once wa_status is "registered".'}
+        wa_status: {type: string, enum: [registered, not_registered, unknown], description: 'Last-known verification verdict; "unknown" means no verdict was ever obtained, NOT "not on WhatsApp".'}
+        verified_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        match_score: {type: integer, description: 'Only present when the list was ranked by ?q= — higher is a better match.'}
+        matched_field: {type: string, description: 'Only present when ranked: which field (name/alias) produced match_score.'}
+    ContactsListResponse:
+      type: object
+      properties:
+        contacts:
+          type: array
+          items: {$ref: '#/components/schemas/Contact'}
+        total: {type: integer}
+        query: {type: string, description: 'Echoed back only when ?q= was given.'}
+    ContactCreateResponse:
+      type: object
+      properties:
+        contact: {$ref: '#/components/schemas/Contact'}
+        verify_error: {type: string, description: 'Present only when the auto-verify step itself failed (no connected session, backend error, or no verdict); the contact is saved/updated regardless.'}

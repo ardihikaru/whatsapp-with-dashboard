@@ -218,6 +218,19 @@ func wsmRouteTools() []Tool {
 
 		{name: "wsm_contacts_check_auto", desc: "Check whether one or more phone numbers are registered on WhatsApp, using automatic session routing. body: {phones: [string], group_code?, allow_master?}. 501 on a backend with no ContactDirectory support (e.g. whatsmeow).", method: "POST", route: "/api/v1/contacts/check", hasBody: true},
 		{name: "wsm_session_contacts_check", desc: "Check whether one or more phone numbers are registered on WhatsApp, through one explicit session. body: {phones: [string]}.", method: "POST", route: "/api/v1/sessions/{id}/contacts/check", hasBody: true},
+
+		// Contacts (internal/domain/contact): the owner-managed, GLOBAL
+		// (not per-session) WhatsApp contact book. The {contactID} path
+		// segment is deliberately NOT named "{id}" in routes_api.go, so
+		// routeSpec.tool()'s containsPathVar(s.route, "id") check (above)
+		// does NOT fire for these three — a contact id is not a session
+		// id, and resolving it via session_id/phone would be wrong. See
+		// also waxum_contacts (t_waxum_methods.go) for the RANKED read
+		// that combines this list with waxum's own synced contacts.
+		{name: "wsm_contacts_list", desc: "List the owner-managed contact book, or (with query: {q}) rank-search it by name/alias via internal/contactmatch — the same ranking waxum_contacts applies on top of waxum's own synced contacts. GLOBAL, not session-scoped.", method: "GET", route: "/api/v1/contacts", hasQuery: true, readOnly: true, idempotent: true},
+		{name: "wsm_contacts_create", desc: "Save a new contact (body: {name, phone, aliases?: [string]}) and immediately verify it on WhatsApp through an auto-routed connected session. The create always succeeds even if that verify step fails; a failure is reported in the response's verify_error and leaves wa_status \"unknown\", never \"not_registered\".", method: "POST", route: "/api/v1/contacts", hasBody: true},
+		{name: "wsm_contacts_delete", desc: "DANGER: delete a saved contact from WSM's own book. Does NOT touch any WhatsApp device or linked-device list — this is WSM-local bookkeeping only.", method: "DELETE", route: "/api/v1/contacts/{contactID}", pathParams: []string{"contactID"}, danger: true},
+		{name: "wsm_contacts_verify", desc: "Re-verify a saved contact's phone on WhatsApp through an auto-routed connected session. A routing/backend failure leaves wa_status \"unknown\" (reported in verify_error), never fabricated as \"not_registered\".", method: "POST", route: "/api/v1/contacts/{contactID}/verify", pathParams: []string{"contactID"}},
 	}
 	out := make([]Tool, 0, len(specs)+2)
 	for _, s := range specs {

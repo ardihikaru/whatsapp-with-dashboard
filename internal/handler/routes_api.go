@@ -158,4 +158,13 @@ func (h *handlers) mountAPI(mux *http.ServeMux) {
 	// /api/v1/sessions/{id}/messages' own split.
 	mux.Handle("POST /api/v1/contacts/check", api(http.HandlerFunc(h.PostAPIContactsCheckAuto)))
 	mux.Handle("POST /api/v1/sessions/{id}/contacts/check", api(http.HandlerFunc(h.PostAPIContactsCheck)))
+
+	// Contacts (internal/domain/contact) — the owner-managed, GLOBAL
+	// contact book. {contactID} is deliberately NOT named "{id}" — see
+	// api_contacts_crud.go's doc comment on why wsm-mcp's generic
+	// session-id resolution must not fire for these routes.
+	mux.Handle("GET /api/v1/contacts", api(http.HandlerFunc(h.GetAPIContacts)))
+	mux.Handle("POST /api/v1/contacts", api(http.HandlerFunc(h.PostAPIContacts)))
+	mux.Handle("DELETE /api/v1/contacts/{contactID}", api(http.HandlerFunc(h.DeleteAPIContact)))
+	mux.Handle("POST /api/v1/contacts/{contactID}/verify", api(http.HandlerFunc(h.PostAPIContactVerify)))
 }
