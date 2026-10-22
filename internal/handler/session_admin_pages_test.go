@@ -55,7 +55,7 @@ func newSessionAdminTestServerReconcile(t *testing.T, backend wa.Backend, callsE
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

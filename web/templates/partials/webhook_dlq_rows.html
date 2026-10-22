@@ -9,7 +9,7 @@
   <td class="mono cell-clip">{{.WebhookURL}}</td>
   <td>{{.Attempts}}</td>
   <td class="cell-clip" title="{{.LastError}}">{{.LastError}}</td>
-  <td class="mono">{{.FailedAt}}</td>
+  <td class="mono">{{.FailedAtLabel}}</td>
   <td class="row-actions">
     <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{$.SessionID}}/webhooks/dlq/{{.ID}}/replay"
             hx-target="#webhook-dlq-rows" hx-swap="innerHTML">Replay</button>

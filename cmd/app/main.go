@@ -29,6 +29,7 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	_ "time/tzdata" // embeds the IANA tz database so WSM_TIMEZONE (config.loadTimezone) can never fail to resolve for want of host zoneinfo — the distroless runtime image ships none.
 
 	wsm "github.com/ardihikaru/whatsapp-with-dashboard"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/auth"
@@ -212,7 +213,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	rend, err := renderer.New(webFS, cfg.BasePath)
+	rend, err := renderer.New(webFS, cfg.BasePath, cfg.Location)
 	if err != nil {
 		return err
 	}
@@ -272,6 +273,7 @@ func run() error {
 			DarkMode:               cfg.DarkMode,
 			PlatformURL:            cfg.PlatformURL,
 			HostLabel:              cfg.HostLabel,
+			Location:               cfg.Location,
 			AssetsFS:               wsm.FS,
 			Admin: auth.AdminCredential{
 				Username:     cfg.AdminUser,

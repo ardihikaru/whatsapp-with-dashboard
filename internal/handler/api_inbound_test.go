@@ -37,7 +37,7 @@ func newInboundTestServer(t *testing.T) (http.Handler, *apiclient.Repository, in
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

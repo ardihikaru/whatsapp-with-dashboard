@@ -845,7 +845,7 @@ func (h *handlers) GetSelfConvoScheduleRunRows(w http.ResponseWriter, r *http.Re
 		if rs, err := h.Convo.RunsForSchedule(r.Context(), r.PathValue("id"), selfConvoScheduleRunsLimit); err == nil {
 			runs = make([]convoRunView, len(rs))
 			for i, run := range rs {
-				runs[i] = toConvoRunView(run)
+				runs[i] = toConvoRunView(run, h.loc())
 			}
 		}
 	}

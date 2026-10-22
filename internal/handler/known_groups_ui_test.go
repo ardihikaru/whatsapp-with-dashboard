@@ -46,7 +46,7 @@ func newKnownGroupsTestServerWithBackend(t *testing.T, backend wa.Backend) (http
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

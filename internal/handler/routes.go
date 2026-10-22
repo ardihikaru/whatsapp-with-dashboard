@@ -147,7 +147,13 @@ type Deps struct {
 	// during a failover — see config.Config.HostLabel's doc comment. ""
 	// hides the chip.
 	HostLabel string
-	AssetsFS  fs.FS // embedded FS rooted at the app dir (web/..., openapi.yaml)
+	// Location is the UI display timezone (config.Config.Location,
+	// WSM_TIMEZONE) every Go-side time-view formatter in this package reads
+	// through the loc() method below — see that method's doc comment for
+	// the nil-fallback convention every handler test built before this
+	// field existed relies on.
+	Location *time.Location
+	AssetsFS fs.FS // embedded FS rooted at the app dir (web/..., openapi.yaml)
 
 	// BasePath is the mount prefix for the BROWSER surface ("/wsm" when served
 	// under a path, "" at a host root). Derived from WA_BASE_URL by config.Load,
@@ -227,4 +233,25 @@ func (h *handlers) cookiePath() string {
 // applies, and whether it may cross a plaintext hop.
 func (h *handlers) cookieOpts() auth.CookieOpts {
 	return auth.CookieOpts{Path: h.cookiePath(), Secure: h.CookieSecure}
+}
+
+// loc is the UI display timezone every Go-side time-view formatter in this
+// package converts into before calling Format — logs_view.go's toRowViews,
+// outgoing_chat.go's toOutgoingRowViews, system_log.go's
+// toSystemLogRowViews, api_clients_form.go/api_clients_expiry.go's
+// view/parse helpers, and self_convo_ui.go's toConvoRunView.
+//
+// nil (every handler test server built before Deps.Location existed)
+// falls back to time.Local, not time.UTC: every one of those call sites
+// already called .Local()/time.Local directly before this field existed
+// (system_log.go's e.At.Local(), api_clients_expiry.go's
+// time.ParseInLocation(..., time.Local), etc.), so this fallback is the
+// one that reproduces every existing test's behaviour exactly rather than
+// silently shifting it to UTC. Contrast internal/renderer.New's OWN nil
+// fallback, which is UTC — that function has no such history to preserve.
+func (h *handlers) loc() *time.Location {
+	if h.Location != nil {
+		return h.Location
+	}
+	return time.Local
 }

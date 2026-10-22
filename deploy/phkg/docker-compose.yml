@@ -57,7 +57,7 @@ services:
     # one promised an unlink waxum cannot perform); nothing under migrations/
     # or Dockerfile.migrate changed, so re-stamping the migrate image would
     # claim a rebuild that never happened.
-    image: whatsapp-with-dashboard:phkg-20261005
+    image: whatsapp-with-dashboard:phkg-20261022
     restart: unless-stopped
 
     # HARD SINGLETON. One device websocket, one store. Two replicas against one

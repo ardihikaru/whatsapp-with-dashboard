@@ -38,7 +38,7 @@ func newSystemLogTestServer(t *testing.T) (http.Handler, *auth.Store, *wa.Manage
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

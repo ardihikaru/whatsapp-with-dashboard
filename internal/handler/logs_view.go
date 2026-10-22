@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 )
@@ -131,8 +132,11 @@ func (h *handlers) buildGroups(ctx context.Context, f message.Filter, consumers,
 	return groups
 }
 
-// toRowViews maps repo rows to the table view, resolving names and clipping body.
-func toRowViews(rows []message.LogRow, consumers, sessions nameMap) []logRowView {
+// toRowViews maps repo rows to the table view, resolving names and clipping
+// body. loc is the UI display timezone (handlers.loc()) — CreatedAt is
+// stored UTC and converted here, the one place html/template has no
+// formatter for it (see this package's loc doc comment).
+func toRowViews(rows []message.LogRow, consumers, sessions nameMap, loc *time.Location) []logRowView {
 	out := make([]logRowView, 0, len(rows))
 	for _, m := range rows {
 		name := m.SessionName
@@ -140,7 +144,7 @@ func toRowViews(rows []message.LogRow, consumers, sessions nameMap) []logRowView
 			name = sessions.label(m.SessionID)
 		}
 		out = append(out, logRowView{
-			CreatedAt:   m.CreatedAt.Format("2006-01-02 15:04"),
+			CreatedAt:   m.CreatedAt.In(loc).Format("2006-01-02 15:04"),
 			Status:      m.Status,
 			Category:    m.Category,
 			ToPhone:     m.ToPhone,

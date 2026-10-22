@@ -49,7 +49,7 @@ type convoRunView struct {
 	convo.Run
 	Progress  string // "turn 7/20"
 	Pair      string // "Alpha → Beta"
-	NextFire  string // RFC3339 UTC, or "—" when there is nothing scheduled
+	NextFire  string // formatted in the UI display timezone, or "—" when there is nothing scheduled
 	CanCancel bool
 }
 
@@ -63,11 +63,14 @@ type convoRunRowsData struct {
 	Runs    []convoRunView
 }
 
-// toConvoRunView builds the view fields for one run.
-func toConvoRunView(r convo.Run) convoRunView {
+// toConvoRunView builds the view fields for one run. loc is the UI display
+// timezone (handlers.loc()) — NextFire used to be a fixed RFC3339 UTC
+// string; nothing in web/static/js parses it, so reformatting it into the
+// operator's configured zone is safe.
+func toConvoRunView(r convo.Run, loc *time.Location) convoRunView {
 	nextFire := "—"
 	if r.NextDueAt != nil {
-		nextFire = r.NextDueAt.UTC().Format(time.RFC3339)
+		nextFire = r.NextDueAt.In(loc).Format("2006-01-02 15:04:05")
 	}
 	return convoRunView{
 		Run:       r,
@@ -92,7 +95,7 @@ func (h *handlers) selfConvoRuns(r *http.Request) []convoRunView {
 	}
 	out := make([]convoRunView, len(runs))
 	for i, run := range runs {
-		out[i] = toConvoRunView(run)
+		out[i] = toConvoRunView(run, h.loc())
 	}
 	return out
 }

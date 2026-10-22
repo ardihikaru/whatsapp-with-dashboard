@@ -28,7 +28,7 @@ func sendTestRenderer(t *testing.T) *renderer.Renderer {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

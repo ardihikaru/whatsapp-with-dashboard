@@ -20,7 +20,7 @@ import (
 // FUNCTION instead.
 func renderPartial(t *testing.T, basePath, name string, data any) string {
 	t.Helper()
-	r, err := renderer.New(webFS(t), basePath)
+	r, err := renderer.New(webFS(t), basePath, nil)
 	if err != nil {
 		t.Fatalf("parse templates (basePath=%q): %v", basePath, err)
 	}

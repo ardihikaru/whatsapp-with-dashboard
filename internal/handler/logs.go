@@ -43,7 +43,7 @@ func (h *handlers) GetLogs(w http.ResponseWriter, r *http.Request) {
 	data.Groups = h.buildGroups(ctx, f, consumers, sessions)
 
 	rows, next, _ := h.MessageStats.List(ctx, f, "", logPageSize)
-	data.Rows = logRowsData{Rows: toRowViews(rows, consumers, sessions), MoreURL: moreURL(h.BasePath, f, next)}
+	data.Rows = logRowsData{Rows: toRowViews(rows, consumers, sessions, h.loc()), MoreURL: moreURL(h.BasePath, f, next)}
 	data.Filter = logFilterView{
 		Filter:       f,
 		SessionOpts:  sessions.opts(),
@@ -72,7 +72,7 @@ func (h *handlers) GetLogRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.Renderer.RenderPartial(w, "log_rows_page", logRowsData{
-		Rows:    toRowViews(rows, h.consumerNames(ctx), h.sessionNames()),
+		Rows:    toRowViews(rows, h.consumerNames(ctx), h.sessionNames(), h.loc()),
 		MoreURL: moreURL(h.BasePath, f, next),
 		OOB:     true,
 	})

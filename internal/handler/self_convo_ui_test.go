@@ -47,7 +47,7 @@ func newSelfConvoTestServer(t *testing.T, enabled bool) (http.Handler, *auth.Sto
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -464,11 +464,16 @@ func TestTheRunRowsPartialShowsProgressPairAndNextFireTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	next := time.Date(2026, 9, 10, 3, 4, 5, 0, time.UTC)
+	// A FIXED +7h zone (WIB's actual offset, no DST ever), not time.UTC and
+	// not time.Local — a loc argument this test controls directly proves
+	// toConvoRunView actually converts rather than merely formatting
+	// whatever zone NextDueAt happened to arrive in.
+	loc := time.FixedZone("WIB", 7*3600)
 	data := convoRunRowsData{
 		Enabled: true,
 		Runs: []convoRunView{
@@ -476,18 +481,18 @@ func TestTheRunRowsPartialShowsProgressPairAndNextFireTime(t *testing.T) {
 				ID: "run-running", TemplateName: "Weekend Plans", State: convo.RunRunning,
 				SessionAName: "Alpha", SessionBName: "Beta", TurnCount: 20, TurnsDone: 7,
 				NextDueAt: &next,
-			}),
+			}, loc),
 			toConvoRunView(convo.Run{
 				ID: "run-done", TemplateName: "Weekend Plans", State: convo.RunDone,
 				SessionAName: "Alpha", SessionBName: "Beta", TurnCount: 4, TurnsDone: 4,
-			}),
+			}, loc),
 		},
 	}
 	res := httptest.NewRecorder()
 	rend.RenderPartial(res, "convo_run_rows", data)
 	body := res.Body.String()
 
-	for _, want := range []string{"7/20", "Alpha → Beta", "2026-09-10T03:04:05Z", "badge-running", "badge-done"} {
+	for _, want := range []string{"7/20", "Alpha → Beta", "2026-09-10 10:04:05", "badge-running", "badge-done"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("rows partial is missing %q; body:\n%s", want, body)
 		}
@@ -665,7 +670,7 @@ func newSelfConvoTestServerWithFakeGateway(t *testing.T, gw selfconvo.Gateway) (
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

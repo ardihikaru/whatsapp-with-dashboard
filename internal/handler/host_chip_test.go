@@ -38,7 +38,7 @@ func newHostLabelTestServer(t *testing.T, hostLabel string) (http.Handler, *auth
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

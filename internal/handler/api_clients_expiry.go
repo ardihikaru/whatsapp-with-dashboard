@@ -44,12 +44,14 @@ var presetTTLs = map[int]string{
 const defaultExpiryChoice = "86400"
 
 // tokenSettings maps the submitted form onto the domain's expiry policy.
-func (f apiClientForm) tokenSettings() (apiclient.TokenSettings, error) {
+// loc is the UI display timezone (handlers.loc()) — only the "date" custom
+// mode (customSettings -> parseExpiryDate) actually reads it.
+func (f apiClientForm) tokenSettings(loc *time.Location) (apiclient.TokenSettings, error) {
 	switch f.ExpiryChoice {
 	case "no_expiry":
 		return apiclient.TokenSettings{NoExpiry: true}, nil
 	case "custom":
-		return f.customSettings()
+		return f.customSettings(loc)
 	default:
 		n, err := strconv.Atoi(f.ExpiryChoice)
 		if err != nil || presetTTLs[n] == "" {
@@ -62,10 +64,10 @@ func (f apiClientForm) tokenSettings() (apiclient.TokenSettings, error) {
 // customSettings resolves the "Durasi khusus" sub-form. Each mode reads exactly
 // one input; the template disables the others so a stale value in a hidden field
 // can never be the one that counts.
-func (f apiClientForm) customSettings() (apiclient.TokenSettings, error) {
+func (f apiClientForm) customSettings(loc *time.Location) (apiclient.TokenSettings, error) {
 	switch f.CustomMode {
 	case "date":
-		t, err := parseExpiryDate(f.CustomDate)
+		t, err := parseExpiryDate(f.CustomDate, loc)
 		if err != nil {
 			return apiclient.TokenSettings{}, err
 		}
@@ -95,14 +97,16 @@ func (f apiClientForm) customSettings() (apiclient.TokenSettings, error) {
 	}
 }
 
-// parseExpiryDate reads a YYYY-MM-DD picker value as the END of that day in the
-// server's local zone: an admin who types 2027-12-31 means "still works on the
-// 31st", not "dies at midnight as the 31st begins".
-func parseExpiryDate(value string) (time.Time, error) {
+// parseExpiryDate reads a YYYY-MM-DD picker value as the END of that day in
+// the UI's configured display zone (loc, handlers.loc()): an admin who
+// types 2027-12-31 means "still works on the 31st", not "dies at midnight
+// as the 31st begins" — in the zone they are LOOKING AT the picker in, not
+// necessarily the server process's own time.Local.
+func parseExpiryDate(value string, loc *time.Location) (time.Time, error) {
 	if value == "" {
 		return time.Time{}, fmt.Errorf("tanggal kedaluwarsa harus diisi")
 	}
-	day, err := time.ParseInLocation(dateLayout, value, time.Local)
+	day, err := time.ParseInLocation(dateLayout, value, loc)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("tanggal kedaluwarsa tidak valid")
 	}
@@ -130,15 +134,18 @@ func positiveCount(value string, max int, label string) (int, error) {
 // expiryFormFromClient prefills the expiry controls from a stored client. Any
 // TTL that is not a preset comes back through "Durasi khusus" in the largest
 // unit that divides it exactly, so a value saved as 3 tahun re-opens as 3 tahun
-// rather than as 94608000 detik.
-func expiryFormFromClient(c apiclient.Client, form *apiClientForm) {
+// rather than as 94608000 detik. loc is the UI display timezone
+// (handlers.loc()) — the picker prefill must round-trip through the SAME
+// zone parseExpiryDate reads it back in, or an edit could silently shift
+// the cutoff by a day.
+func expiryFormFromClient(c apiclient.Client, form *apiClientForm, loc *time.Location) {
 	form.CustomMode = "date"
 	switch {
 	case c.NoExpiry:
 		form.ExpiryChoice = "no_expiry"
 	case c.TokenExpiresAt != nil:
 		form.ExpiryChoice = "custom"
-		form.CustomDate = c.TokenExpiresAt.Local().Format(dateLayout)
+		form.CustomDate = c.TokenExpiresAt.In(loc).Format(dateLayout)
 	case c.TokenTTLSeconds == nil:
 		form.ExpiryChoice = defaultExpiryChoice
 	case presetTTLs[*c.TokenTTLSeconds] != "":
@@ -157,13 +164,14 @@ func expiryFormFromClient(c apiclient.Client, form *apiClientForm) {
 	}
 }
 
-// expiryLabel is the human summary shown in the admin table.
-func expiryLabel(c apiclient.Client) string {
+// expiryLabel is the human summary shown in the admin table. loc is the UI
+// display timezone (handlers.loc()).
+func expiryLabel(c apiclient.Client, loc *time.Location) string {
 	if c.NoExpiry {
 		return "Tanpa kedaluwarsa"
 	}
 	if c.TokenExpiresAt != nil {
-		return "Sampai " + c.TokenExpiresAt.Local().Format(dateLayout)
+		return "Sampai " + c.TokenExpiresAt.In(loc).Format(dateLayout)
 	}
 	if c.TokenTTLSeconds == nil {
 		return presetTTLs[86400]

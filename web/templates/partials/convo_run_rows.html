@@ -7,7 +7,7 @@
   <td><span class="badge badge-{{.State}}">{{.State}}</span></td>
   <td class="mono">{{.Progress}}</td>
   <td class="mono">{{.NextFire}}</td>
-  <td class="mono">{{if .StartedAt}}{{.StartedAt.UTC.Format "2006-01-02 15:04:05"}}{{else}}—{{end}}</td>
+  <td class="mono">{{if .StartedAt}}{{fmtTime .StartedAt "2006-01-02 15:04:05"}}{{else}}—{{end}}</td>
   <td>{{if .Error}}<small class="muted" title="{{.Error}}">{{.Error}}</small>{{end}}</td>
   <td class="row-actions">
     {{if .CanCancel}}

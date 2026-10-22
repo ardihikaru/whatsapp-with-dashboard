@@ -108,7 +108,7 @@ type loginStub struct {
 // A real render of the login document, proving the link survives execution and
 // is prefixed like every other in-app URL when the app is mounted under a path.
 func TestLoginPageRendersTheResponsiveStylesheetUnderBasePath(t *testing.T) {
-	r, err := renderer.New(webFS(t), "/wsm")
+	r, err := renderer.New(webFS(t), "/wsm", nil)
 	if err != nil {
 		t.Fatalf("parse embedded templates: %v", err)
 	}

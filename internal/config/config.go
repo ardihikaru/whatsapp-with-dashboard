@@ -76,6 +76,14 @@ const (
 	// WSM_* value in this file.
 	MaxHostLabelLen = 40
 
+	// DefaultTimezone is the display timezone every UI datetime renders in
+	// when WSM_TIMEZONE is unset — see loadTimezone below. Asia/Jakarta
+	// because that is where this deployment's operators are; set
+	// WSM_TIMEZONE to any tz database name (time.LoadLocation) to change
+	// it. This governs RENDERING only: stored timestamps stay UTC, and
+	// /api/v1 JSON is untouched (see Config.Location's doc comment).
+	DefaultTimezone = "Asia/Jakarta"
+
 	// No proxy is trusted unless one is named. See TrustedProxies.
 	DefaultTrustedProxies = ""
 
@@ -191,6 +199,13 @@ type Config struct {
 	// here verifies it matches the machine actually running this process, so
 	// a copied .env will happily lie.
 	HostLabel string
+
+	// Location is every UI datetime's display timezone, resolved from
+	// WSM_TIMEZONE (see DefaultTimezone and loadTimezone below). It governs
+	// rendering ONLY — stored timestamps (database rows) and the
+	// /api/v1 JSON contract stay UTC, same split CLAUDE.md documents for
+	// schedule forms' own per-schedule tz.
+	Location *time.Location
 
 	// TrustedProxies are the peers whose X-Forwarded-For this service will
 	// believe, from WSM_TRUSTED_PROXIES. EMPTY BY DEFAULT, and that default is
@@ -432,7 +447,28 @@ func Load() (*Config, error) {
 	if err := loadHostLabel(cfg); err != nil {
 		return nil, err
 	}
+	if err := loadTimezone(cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+// loadTimezone resolves WSM_TIMEZONE into cfg.Location. Unlike
+// loadHostLabel's LookupEnv convention, WSM_TIMEZONE="" is NOT a meaningful
+// distinct value — there is no "hide the timezone" concept, so an empty
+// string falls back to DefaultTimezone exactly like envOr's normal
+// semantics elsewhere in this file. An unrecognised zone is a boot-time
+// failure, not a silent fallback to UTC: a wrong displayed timezone would
+// be a silent, confusing bug for every operator reading the dashboard,
+// matching every other malformed WSM_* value's fail-fast convention here.
+func loadTimezone(cfg *Config) error {
+	name := envOr("WSM_TIMEZONE", DefaultTimezone)
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return fmt.Errorf("invalid WSM_TIMEZONE %q: %v", name, err)
+	}
+	cfg.Location = loc
+	return nil
 }
 
 // loadHostLabel resolves WSM_HOST_LABEL. LookupEnv, not envOr/Getenv — same

@@ -67,7 +67,7 @@ func (h *handlers) GetAPIClients(w http.ResponseWriter, r *http.Request) {
 
 func (h *handlers) PostAPIClientCreate(w http.ResponseWriter, r *http.Request) {
 	form := apiClientFormFromRequest(r)
-	settings, err := form.tokenSettings()
+	settings, err := form.tokenSettings(h.loc())
 	if err != nil {
 		h.renderAPIClients(w, r, form, err.Error(), "")
 		return
@@ -86,13 +86,13 @@ func (h *handlers) GetAPIClientEdit(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h.renderAPIClientEdit(w, r, c, formFromClient(c), "", "")
+	h.renderAPIClientEdit(w, r, c, formFromClient(c, h.loc()), "", "")
 }
 
 func (h *handlers) PostAPIClientEdit(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	form := apiClientFormFromRequest(r)
-	settings, err := form.tokenSettings()
+	settings, err := form.tokenSettings(h.loc())
 	if err != nil {
 		h.renderAPIClientEditFallback(w, r, id, form, err.Error(), "")
 		return
@@ -124,7 +124,7 @@ func (h *handlers) PostAPIClientRotate(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	h.renderAPIClientEdit(w, r, c, formFromClient(c), "", secret)
+	h.renderAPIClientEdit(w, r, c, formFromClient(c, h.loc()), "", secret)
 }
 
 func (h *handlers) PostAPIClientDelete(w http.ResponseWriter, r *http.Request) {
@@ -159,7 +159,7 @@ func (h *handlers) renderAPIClients(w http.ResponseWriter, r *http.Request, form
 	}
 
 	data := apiClientsPageData{
-		Clients: viewClients(clients), Search: search, Pager: pager,
+		Clients: viewClients(clients, h.loc()), Search: search, Pager: pager,
 		Form: form, Error: errMsg, Secret: secret,
 	}
 	data.PageBase = h.newPageBase(r, "API Client", "/admin/api-clients")
@@ -185,7 +185,7 @@ func (h *handlers) renderAPIClientEditFallback(w http.ResponseWriter, r *http.Re
 }
 
 func (h *handlers) renderAPIClientEdit(w http.ResponseWriter, r *http.Request, c apiclient.Client, form apiClientForm, errMsg, secret string) {
-	data := apiClientEditPageData{Client: viewClient(c), Form: form, Error: errMsg, Secret: secret}
+	data := apiClientEditPageData{Client: viewClient(c, h.loc()), Form: form, Error: errMsg, Secret: secret}
 	data.PageBase = h.newPageBase(r, "Edit API Client", "/admin/api-clients")
 	h.Renderer.RenderPage(w, "api_clients/edit", data)
 }

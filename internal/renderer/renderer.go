@@ -6,6 +6,7 @@ import (
 	"html/template"
 	"io/fs"
 	"net/http"
+	"time"
 )
 
 // pageDef declares which files make up a page set and which template in the
@@ -230,7 +231,17 @@ type Renderer struct {
 //
 // A FuncMap is bound at parse time and is therefore in scope for every template
 // in the set, page and partial alike, regardless of the data handed to it.
-func New(fsys fs.FS, basePath string) (*Renderer, error) {
+//
+// loc is the UI display timezone (config.Config.Location, WSM_TIMEZONE) that
+// backs the `localtime`/`fmtTime` funcs below. nil falls back to UTC rather
+// than panicking or silently using the host's time.Local — every caller that
+// predates this parameter (every test server built before WSM_TIMEZONE
+// existed) gets a deterministic, explicit zone instead of inheriting
+// whatever /etc/localtime happens to be on the machine running the test.
+func New(fsys fs.FS, basePath string, loc *time.Location) (*Renderer, error) {
+	if loc == nil {
+		loc = time.UTC
+	}
 	r := &Renderer{
 		pages: make(map[string]*template.Template),
 		roots: make(map[string]string),
@@ -238,8 +249,20 @@ func New(fsys fs.FS, basePath string) (*Renderer, error) {
 	// u joins the mount prefix to an app-absolute path. Paths passed to it must
 	// start with "/" — that is what makes "" (unmounted) a no-op rather than a
 	// source of "wsmsessions".
+	//
+	// localtime/fmtTime are the ONLY time-aware template funcs: every other
+	// displayed timestamp in this codebase is pre-formatted in Go (see
+	// logs_view.go's toRowViews doc comment) specifically because, until
+	// this parameter existed, html/template had no formatter registered at
+	// all. These two cover the templates that still call time.Time.Format
+	// directly on a struct field (widgets.html, reconcile_banner.html,
+	// convo_run_rows.html, call_rows.html, convo_template_rows.html,
+	// template_view.html, contact_rows.html) — localtime converts, fmtTime
+	// converts AND formats in one call for the common case.
 	fm := template.FuncMap{
-		"u": func(p string) string { return basePath + p },
+		"u":         func(p string) string { return basePath + p },
+		"localtime": func(t time.Time) time.Time { return t.In(loc) },
+		"fmtTime":   func(t time.Time, layout string) string { return t.In(loc).Format(layout) },
 	}
 	for name, def := range pageDefs {
 		// template.New(...).Funcs(...) before ParseFS: a FuncMap added after

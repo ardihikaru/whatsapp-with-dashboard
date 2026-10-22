@@ -29,7 +29,7 @@ func loginMux(t *testing.T, cookieSecure bool) (http.Handler, *auth.Store) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

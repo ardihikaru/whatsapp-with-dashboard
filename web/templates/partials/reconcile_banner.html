@@ -4,11 +4,11 @@
 <div class="alert alert-error" role="alert">
   <strong>WSM and the WhatsApp backend disagree.</strong>
   {{if .Report.BackendProblem}}
-    <div>The backend has not answered usefully since {{.Report.BackendProblem.Since.Format "15:04:05 MST"}}
+    <div>The backend has not answered usefully since {{fmtTime .Report.BackendProblem.Since "15:04:05 MST"}}
       ({{.Report.BackendProblem.Sessions}} session poll(s) failing){{if .Report.BackendProblem.RateLimited}} — it is answering 429 Too Many Requests; restart the waxum process (never <code>down -v</code>){{end}}.</div>
   {{end}}
   {{range .Report.Mismatches}}
-    <div><strong>{{.Name}}</strong>: WSM says <code>{{.WSM}}</code>, backend says <code>{{.Waxum}}</code> since {{.Since.Format "15:04:05 MST"}}.</div>
+    <div><strong>{{.Name}}</strong>: WSM says <code>{{.WSM}}</code>, backend says <code>{{.Waxum}}</code> since {{fmtTime .Since "15:04:05 MST"}}.</div>
   {{end}}
 </div>
 {{end}}
@@ -17,7 +17,7 @@
      lands while one is in flight; hx-disabled-elt greys the button meanwhile. -->
 <div class="reconcile-bar">
   <span class="reconcile-status">
-    {{if .Report.CheckedAt.IsZero}}Not checked yet.{{else}}{{if .Report.OK}}WSM and the backend agree.{{else}}Disagreement reported above.{{end}} Last checked {{.Report.CheckedAt.Format "15:04:05 MST"}}.{{end}}
+    {{if .Report.CheckedAt.IsZero}}Not checked yet.{{else}}{{if .Report.OK}}WSM and the backend agree.{{else}}Disagreement reported above.{{end}} Last checked {{fmtTime .Report.CheckedAt "15:04:05 MST"}}.{{end}}
     {{if .Cooldown}}Checked moments ago — showing that result.{{end}}
   </span>
   <button class="btn btn-outline" type="button" hx-post="{{u "/sessions/reconcile"}}"

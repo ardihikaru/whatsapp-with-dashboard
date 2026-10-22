@@ -26,7 +26,7 @@ func mountedMux(t *testing.T, basePath string) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, basePath)
+	rend, err := renderer.New(webFS, basePath, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

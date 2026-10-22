@@ -5,7 +5,7 @@
   <td><a href="{{u "/self-convo/templates"}}/{{.ID}}">{{.Name}}</a></td>
   <td>{{if .Topic}}{{.Topic}}{{else}}—{{end}}</td>
   <td class="mono">{{.TurnCount}}</td>
-  <td class="mono">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+  <td class="mono">{{fmtTime .CreatedAt "2006-01-02 15:04:05"}}</td>
   <td>
     <form class="row-actions" hx-post="{{u "/self-convo/templates"}}/{{.ID}}/rename"
           hx-target="#convo-template-rows" hx-swap="innerHTML"
