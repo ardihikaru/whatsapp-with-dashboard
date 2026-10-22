@@ -203,7 +203,7 @@ func (h *handlers) GetOutgoingChat(w http.ResponseWriter, r *http.Request) {
 
 	rows, next, _ := h.MessageStats.List(ctx, f, "", outgoingChatPageSize)
 	data.Rows = outgoingRowsData{
-		Rows: toOutgoingRowViews(rows, sessions),
+		Rows: toOutgoingRowViews(rows, sessions, h.loc()),
 		Page: 1,
 	}
 	if next != "" {
@@ -232,7 +232,7 @@ func (h *handlers) GetOutgoingChatRows(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out := outgoingRowsData{
-		Rows: toOutgoingRowViews(rows, h.sessionNames()),
+		Rows: toOutgoingRowViews(rows, h.sessionNames(), h.loc()),
 		Page: len(prevStack) + 1,
 		OOB:  true,
 	}
@@ -309,8 +309,9 @@ func outgoingRowsURL(basePath string, f message.Filter, cursor string, prevStack
 
 // toOutgoingRowViews maps repo rows to the detail table view: to which
 // number, success or failure, at what time — resolving the session name the
-// same way toRowViews (logs_view.go) does.
-func toOutgoingRowViews(rows []message.LogRow, sessions nameMap) []outgoingRowView {
+// same way toRowViews (logs_view.go) does. loc is the UI display timezone
+// (handlers.loc()), same convention as toRowViews.
+func toOutgoingRowViews(rows []message.LogRow, sessions nameMap, loc *time.Location) []outgoingRowView {
 	out := make([]outgoingRowView, 0, len(rows))
 	for _, m := range rows {
 		name := m.SessionName
@@ -318,7 +319,7 @@ func toOutgoingRowViews(rows []message.LogRow, sessions nameMap) []outgoingRowVi
 			name = sessions.label(m.SessionID)
 		}
 		out = append(out, outgoingRowView{
-			CreatedAt:   m.CreatedAt.Format("2006-01-02 15:04:05"),
+			CreatedAt:   m.CreatedAt.In(loc).Format("2006-01-02 15:04:05"),
 			Status:      m.Status,
 			ToPhone:     m.ToPhone,
 			SessionName: name,

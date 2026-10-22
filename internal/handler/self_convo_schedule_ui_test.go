@@ -42,7 +42,7 @@ func newScheduleTestServer(t *testing.T, gw selfconvo.Gateway, enabled bool) (ht
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

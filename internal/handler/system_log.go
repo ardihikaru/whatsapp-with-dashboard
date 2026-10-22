@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
@@ -24,12 +25,11 @@ type systemLogRowsData struct {
 	Rows []systemLogRowView
 }
 
-// systemLogRowView is wa.Event with At pre-formatted — html/template has no
-// time formatter registered (internal/renderer.New's FuncMap only carries
-// `u`), so every other list page in this codebase formats timestamps to a
-// string in its own Go view layer (see logs_view.go's toRowViews); this
-// follows the same pattern rather than adding a template func nothing else
-// needs.
+// systemLogRowView is wa.Event with At pre-formatted — pre-dating
+// internal/renderer.New's localtime/fmtTime funcs, this list page formats
+// timestamps in its own Go view layer the same way logs_view.go's
+// toRowViews does, rather than switching to a template func now that one
+// exists.
 type systemLogRowView struct {
 	At      string
 	Level   string
@@ -41,8 +41,9 @@ type systemLogRowView struct {
 // back to SessionID when SessionName is empty (a session deleted since the
 // event was recorded still has a real, if now-orphaned, id worth showing)
 // and is "—" only for a genuinely manager-level event (SessionID == "" —
-// e.g. boot reconciliation, Manager.RecordEvent's own doc comment).
-func toSystemLogRowViews(events []wa.Event) []systemLogRowView {
+// e.g. boot reconciliation, Manager.RecordEvent's own doc comment). loc is
+// the UI display timezone (handlers.loc()).
+func toSystemLogRowViews(events []wa.Event, loc *time.Location) []systemLogRowView {
 	out := make([]systemLogRowView, 0, len(events))
 	for _, e := range events {
 		session := e.SessionName
@@ -57,7 +58,7 @@ func toSystemLogRowViews(events []wa.Event) []systemLogRowView {
 			level = "info"
 		}
 		out = append(out, systemLogRowView{
-			At: e.At.Local().Format("2006-01-02 15:04:05"), Level: level, Session: session, Note: e.Note,
+			At: e.At.In(loc).Format("2006-01-02 15:04:05"), Level: level, Session: session, Note: e.Note,
 		})
 	}
 	return out
@@ -86,5 +87,5 @@ func (h *handlers) GetSystemLog(w http.ResponseWriter, r *http.Request) {
 // whole page to see what just happened.
 func (h *handlers) GetSystemLogRows(w http.ResponseWriter, r *http.Request) {
 	h.Renderer.RenderPartial(w, "system_log_rows",
-		systemLogRowsData{Rows: toSystemLogRowViews(h.Manager.RecentEvents(systemLogLimit))})
+		systemLogRowsData{Rows: toSystemLogRowViews(h.Manager.RecentEvents(systemLogLimit), h.loc())})
 }

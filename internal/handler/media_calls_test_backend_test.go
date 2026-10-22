@@ -201,7 +201,7 @@ func newMediaTestServer(t *testing.T, cfg mediaTestConfig) (http.Handler, *wa.Ma
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

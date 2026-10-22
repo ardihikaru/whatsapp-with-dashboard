@@ -7,7 +7,7 @@
   <td>{{.Kind}}</td>
   <td><span class="badge badge-{{.Status}}">{{.Status}}</span>
       {{if .Error}}<br><small class="muted" title="{{.Error}}">{{.Error}}</small>{{end}}</td>
-  <td class="mono">{{.CreatedAt.Format "2006-01-02 15:04:05"}}</td>
+  <td class="mono">{{fmtTime .CreatedAt "2006-01-02 15:04:05"}}</td>
   <td class="row-actions">
     {{if and (eq .Status "placed") .CallID}}
     <button class="btn btn-outline btn-danger"

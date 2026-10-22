@@ -7,6 +7,7 @@ package handler
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
 )
@@ -30,28 +31,32 @@ func formFromPostOrEmpty(r *http.Request) apiClientForm {
 	}
 }
 
-func formFromClient(c apiclient.Client) apiClientForm {
+// formFromClient and its callers all take loc (handlers.loc(), the UI
+// display timezone) and thread it down to expiryFormFromClient/
+// expiryLabel/viewClient, which format or re-derive a date-picker value
+// from a stored UTC timestamp.
+func formFromClient(c apiclient.Client, loc *time.Location) apiClientForm {
 	form := apiClientForm{
 		Name:        c.Name,
 		LoginID:     c.LoginID,
 		Description: c.Description,
 	}
-	expiryFormFromClient(c, &form)
+	expiryFormFromClient(c, &form, loc)
 	return form
 }
 
-func viewClients(clients []apiclient.Client) []apiClientView {
+func viewClients(clients []apiclient.Client, loc *time.Location) []apiClientView {
 	out := make([]apiClientView, 0, len(clients))
 	for _, c := range clients {
-		out = append(out, viewClient(c))
+		out = append(out, viewClient(c, loc))
 	}
 	return out
 }
 
-func viewClient(c apiclient.Client) apiClientView {
+func viewClient(c apiclient.Client, loc *time.Location) apiClientView {
 	return apiClientView{
 		ID: c.ID, Name: c.Name, LoginID: c.LoginID, Description: c.Description,
-		Active: c.Active, ExpiryLabel: expiryLabel(c),
-		CreatedAt: c.CreatedAt.Local().Format("2006-01-02 15:04"),
+		Active: c.Active, ExpiryLabel: expiryLabel(c, loc),
+		CreatedAt: c.CreatedAt.In(loc).Format("2006-01-02 15:04"),
 	}
 }

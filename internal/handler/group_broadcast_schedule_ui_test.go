@@ -73,7 +73,7 @@ func newGBScheduleTestServer(t *testing.T, gw groupbroadcast.Gateway, enabled bo
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

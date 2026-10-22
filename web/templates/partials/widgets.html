@@ -8,5 +8,5 @@
   </div>
   {{end}}
 </div>
-<div class="widget-meta">Generated {{.GeneratedAt.Format "15:04:05 MST"}} · refreshes every 60s</div>
+<div class="widget-meta">Generated {{fmtTime .GeneratedAt "15:04:05 MST"}} · refreshes every 60s</div>
 {{end}}

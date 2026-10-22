@@ -46,7 +46,7 @@ func newOutgoingChatTestServer(t *testing.T, sendRate float64, sendBurst int) (h
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@
       {{- else}}Unknown{{end}}</span>
     {{if and (eq (print .WAStatus) "registered") .JID}} <span class="mono">{{.JID}}</span>{{end}}
   </td>
-  <td>{{if .VerifiedAt.IsZero}}<span class="muted">&mdash;</span>{{else}}{{.VerifiedAt.Format "2006-01-02 15:04"}}{{end}}</td>
+  <td>{{if .VerifiedAt.IsZero}}<span class="muted">&mdash;</span>{{else}}{{fmtTime .VerifiedAt "2006-01-02 15:04"}}{{end}}</td>
   <td class="row-actions">
     <button class="btn btn-outline" hx-post="{{u "/contacts"}}/{{.ID}}/verify"
             hx-target="#contact-rows" hx-swap="innerHTML">Verify</button>

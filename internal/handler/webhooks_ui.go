@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
@@ -57,7 +58,30 @@ type webhookDLQRowsData struct {
 	SessionID   string
 	Unsupported bool
 	Error       string
-	Entries     []wa.DLQEntry
+	Entries     []dlqRowView
+}
+
+// dlqRowView wraps wa.DLQEntry with FailedAt pre-formatted. FailedAt itself
+// is a unix int64 (wa.DLQEntry's doc comment), not a time.Time, so it
+// cannot go through internal/renderer's fmtTime func the way every other
+// displayed timestamp in this codebase now does — this view-model
+// conversion is the Go-side equivalent, same convention as
+// logs_view.go's toRowViews. The /api/v1 JSON field (api_webhooks.go's
+// dlqEntryResponse) is untouched — this label is UI-only.
+type dlqRowView struct {
+	wa.DLQEntry
+	FailedAtLabel string
+}
+
+func toDLQRowViews(entries []wa.DLQEntry, loc *time.Location) []dlqRowView {
+	out := make([]dlqRowView, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, dlqRowView{
+			DLQEntry:      e,
+			FailedAtLabel: time.Unix(e.FailedAt, 0).In(loc).Format("2006-01-02 15:04:05"),
+		})
+	}
+	return out
 }
 
 // GetSessionWebhooks renders the per-session webhooks page. 404s only when
@@ -219,7 +243,7 @@ func (h *handlers) renderWebhookDLQRows(w http.ResponseWriter, r *http.Request, 
 	if err != nil && data.Error == "" {
 		data.Error = err.Error()
 	}
-	data.Entries = entries
+	data.Entries = toDLQRowViews(entries, h.loc())
 	h.Renderer.RenderPartial(w, "webhook_dlq_rows", data)
 }
 

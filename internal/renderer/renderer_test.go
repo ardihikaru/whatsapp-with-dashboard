@@ -25,7 +25,7 @@ func webFS(t *testing.T) fs.FS {
 // which in production is process start-up. Without this test a broken page set
 // ships a green `go test` and a dead binary.
 func TestNewParsesEveryPageAndPartial(t *testing.T) {
-	if _, err := renderer.New(webFS(t), ""); err != nil {
+	if _, err := renderer.New(webFS(t), "", nil); err != nil {
 		t.Fatalf("parse embedded templates: %v", err)
 	}
 }
@@ -33,7 +33,7 @@ func TestNewParsesEveryPageAndPartial(t *testing.T) {
 // RenderPartial must be able to execute the partials the HTMX routes name. A
 // typo'd name is otherwise only visible as a 500 in the browser.
 func TestRenderPartialNamesResolve(t *testing.T) {
-	r, err := renderer.New(webFS(t), "")
+	r, err := renderer.New(webFS(t), "", nil)
 	if err != nil {
 		t.Fatalf("parse embedded templates: %v", err)
 	}

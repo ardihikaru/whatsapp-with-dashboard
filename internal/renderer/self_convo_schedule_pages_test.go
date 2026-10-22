@@ -42,7 +42,7 @@ type pageBaseMirror struct {
 // pageDefs keys, not merely files that happen to parse as part of some
 // other page's set) and execute without error against realistic data.
 func TestConvoSchedulingPagesAreRegisteredAndParse(t *testing.T) {
-	r, err := renderer.New(webFS(t), "")
+	r, err := renderer.New(webFS(t), "", nil)
 	if err != nil {
 		t.Fatalf("parse embedded templates: %v", err)
 	}

@@ -31,7 +31,7 @@ func newAuthTestServer(t *testing.T) (http.Handler, *auth.Store, *apiclient.Repo
 	if err != nil {
 		t.Fatal(err)
 	}
-	rend, err := renderer.New(webFS, "")
+	rend, err := renderer.New(webFS, "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

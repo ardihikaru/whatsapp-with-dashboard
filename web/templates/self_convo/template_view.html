@@ -8,7 +8,7 @@
   <p><strong>Topic:</strong> {{if .Template.Topic}}{{.Template.Topic}}{{else}}—{{end}}</p>
   <p><strong>Stage:</strong> {{if .Template.Stage}}{{.Template.Stage}}{{else}}—{{end}}</p>
   <p><strong>Origin:</strong> {{.Template.Origin}}</p>
-  <p><strong>Created:</strong> <span class="mono">{{.Template.CreatedAt.Format "2006-01-02 15:04:05"}}</span></p>
+  <p><strong>Created:</strong> <span class="mono">{{fmtTime .Template.CreatedAt "2006-01-02 15:04:05"}}</span></p>
   <p><a href="{{u "/self-convo/templates"}}/{{.Template.ID}}/download">Download</a> ·
      <a href="{{u "/self-convo/templates"}}">Back to templates</a></p>
 </div>

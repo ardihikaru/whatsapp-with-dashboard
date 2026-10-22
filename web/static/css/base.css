@@ -3,9 +3,9 @@
    custom-shadows.ts; layout metrics from layouts/dashboard + nav-section. */
 
 :root {
-  /* palette — Clino/Sneat (design/tokens/laundry.tokens.json): primary indigo,
+  /* palette — Sneat (design/tokens/laundry.tokens.json): primary indigo,
      ink #22303E. Restyled from the module's original green so the WhatsApp
-     gateway matches the rest of the Clino platform. */
+     gateway matches the rest of the platform. */
   --primary-lighter: #E7E7FF; --primary-light: #B4B5FF; --primary: #5E61FF;
   --primary-dark: #595CF2;    --primary-darker: #2B2D7A;
   --secondary-lighter: #EFD6FF; --secondary-light: #C684FF; --secondary: #8E33FF;
@@ -22,10 +22,10 @@
   --grey-400: #C4CDD5; --grey-500: #919EAB; --grey-600: #637381;
   --grey-700: #454F5B; --grey-800: #1C252E; --grey-900: #141A21;
 
-  --text-primary: #22303E; /* Clino ink */
+  --text-primary: #22303E; /* ink */
   --text-secondary: var(--grey-600);
   --text-disabled: var(--grey-500);
-  --bg-body: #F5F5F9; /* Clino background */
+  --bg-body: #F5F5F9; /* background */
   --bg-paper: #FFFFFF;
 
   /* per-mode surfaces & inks (overridden in [data-theme="dark"]) */
@@ -67,7 +67,7 @@
 [data-theme="dark"] {
   color-scheme: dark;
 
-  /* Clino/Sneat dark: brighter indigo primary for contrast on dark surfaces. */
+  /* Sneat dark: brighter indigo primary for contrast on dark surfaces. */
   --primary-lighter: #3B3D6B; --primary-light: #8789FF; --primary: #8789FF;
   --primary-dark: #6D70FF;    --primary-darker: #E7E7FF;
 
