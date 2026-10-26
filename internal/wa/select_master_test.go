@@ -29,7 +29,7 @@ func masterTestManager(t *testing.T, specs ...struct {
 		if sp.connected {
 			state = StateConnected
 		}
-		m.sessions[sp.id] = &ManagedSession{ID: sp.id, Name: sp.id, Phone: "628120000",
+		m.sessions[sp.id] = &ManagedSession{ID: sp.id, name: sp.id, Phone: "628120000",
 			mgr: m, state: state, isMaster: sp.isMaster, events: NewRing(ringSize)}
 	}
 	return m

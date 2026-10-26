@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
@@ -41,9 +43,14 @@ const (
 // second backend pays for that is backend_meow.go reaching into fields it
 // doesn't "own" in a strict sense; see backend.go for the fuller rationale.
 type ManagedSession struct {
-	ID, Name, Phone string    // immutable after construction
-	CreatedAt       time.Time // immutable; drives stable snapshot ordering
-	LastSelectedAt  *time.Time
+	ID, Phone      string    // immutable after construction
+	CreatedAt      time.Time // immutable; drives stable snapshot ordering
+	LastSelectedAt *time.Time
+
+	// name is operator-editable (SetName), so unlike ID/Phone it is guarded -- by
+	// its OWN lock, not mu: ring/ringLevel read it and may run with mu held.
+	nameMu sync.RWMutex
+	name   string
 
 	mgr *Manager
 
@@ -156,7 +163,7 @@ type Snapshot struct {
 func (s *ManagedSession) Snapshot() Snapshot {
 	s.mu.Lock()
 	snap := Snapshot{
-		ID: s.ID, Name: s.Name, Phone: s.Phone, CreatedAt: s.CreatedAt,
+		ID: s.ID, Name: s.Name(), Phone: s.Phone, CreatedAt: s.CreatedAt,
 		LastSelectedAt: cloneTime(s.LastSelectedAt),
 		State:          s.state,
 		QueueLen:       len(s.sendQ),
@@ -343,6 +350,39 @@ func (s *ManagedSession) SetGroupCode(ctx context.Context, code string) error {
 	} else {
 		s.ring("routing group cleared — back in the ungrouped automatic routing pool")
 	}
+	return nil
+}
+
+// maxSessionNameLen mirrors the wa_sessions.name column (VARCHAR(190)).
+const maxSessionNameLen = 190
+
+// Name returns the session's display name. It is guarded by nameMu, not mu,
+// because ring/ringLevel read it from paths that may already hold mu.
+func (s *ManagedSession) Name() string {
+	s.nameMu.RLock()
+	defer s.nameMu.RUnlock()
+	return s.name
+}
+
+// SetName renames the session (display name only). It validates BEFORE any
+// state or DB write -- trimmed, non-empty, at most maxSessionNameLen runes --
+// and returns a *ValidationError{Field:"name"} otherwise, leaving the session
+// untouched. waxum keeps the name it was given at CreateSession: it has no
+// rename call, and WSM's name is purely cosmetic there.
+func (s *ManagedSession) SetName(ctx context.Context, name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return &ValidationError{Field: "name", Msg: "name is required"}
+	}
+	if utf8.RuneCountInString(name) > maxSessionNameLen {
+		return &ValidationError{Field: "name", Msg: fmt.Sprintf("name must be at most %d characters", maxSessionNameLen)}
+	}
+	if err := s.mgr.repo.SetName(s.mgr.persistCtx, s.ID, name); err != nil {
+		return err
+	}
+	s.nameMu.Lock()
+	s.name = name
+	s.nameMu.Unlock()
 	return nil
 }
 

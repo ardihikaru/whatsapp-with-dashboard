@@ -8,7 +8,7 @@ import (
 )
 
 func testSession(mgr *Manager, state State) *ManagedSession {
-	return &ManagedSession{ID: NewID(), Name: "t", Phone: "628120000",
+	return &ManagedSession{ID: NewID(), name: "t", Phone: "628120000",
 		mgr: mgr, state: state, events: NewRing(ringSize)}
 }
 

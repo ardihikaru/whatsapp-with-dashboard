@@ -244,7 +244,7 @@ func (m *Manager) reconcileOnce(now time.Time) {
 		s.mu.Unlock()
 		add := func(kind, waxumView string) {
 			cands = append(cands, cand{key: o.SessionID + "|" + kind, mm: &Mismatch{
-				SessionID: o.SessionID, Name: s.Name, Kind: kind, WSM: string(wsm), Waxum: waxumView}})
+				SessionID: o.SessionID, Name: s.Name(), Kind: kind, WSM: string(wsm), Waxum: waxumView}})
 		}
 		if !o.FailingSince.IsZero() {
 			if o.NotFound {

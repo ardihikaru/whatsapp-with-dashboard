@@ -55,7 +55,7 @@ func (h *handlers) PostSendMedia(w http.ResponseWriter, r *http.Request) {
 	msgID := wa.NewID()
 	media, err := h.uploadAndDescribeMedia(r.Context(), s, msgID, req)
 	if err != nil {
-		h.sendResult(w, sendResultData{Error: err.Error(), SessionName: s.Name})
+		h.sendResult(w, sendResultData{Error: err.Error(), SessionName: s.Name()})
 		return
 	}
 
@@ -63,7 +63,7 @@ func (h *handlers) PostSendMedia(w http.ResponseWriter, r *http.Request) {
 
 	result := sendResultData{
 		Status: outcome.Status, WAMessageID: outcome.WAMessageID, Error: outcome.Error,
-		SessionName: s.Name, Kind: string(req.Kind), Filename: req.Filename,
+		SessionName: s.Name(), Kind: string(req.Kind), Filename: req.Filename,
 	}
 	// Best-effort presigned link back to the archived original — see
 	// archiveMedia's (api_media.go) doc comment on why a MinIO failure

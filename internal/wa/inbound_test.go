@@ -152,7 +152,7 @@ func newInboundTestManager(t *testing.T, backend *fakeMessageHistoryBackend, rep
 	// fixture below needs a KNOWN id to key messagesBySession/resolvePhone
 	// by. Live()=true (fakeMessageHistoryBackend) + StateConnected is what
 	// Snapshot.Connected requires (session.go).
-	s := &ManagedSession{ID: sessionID, Name: "t", Phone: "628120000",
+	s := &ManagedSession{ID: sessionID, name: "t", Phone: "628120000",
 		mgr: mgr, state: StateConnected, events: NewRing(ringSize)}
 	registerSession(mgr, s)
 	return mgr

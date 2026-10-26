@@ -244,6 +244,57 @@ func (h *handlers) PostSessionSetGroupCode(w http.ResponseWriter, r *http.Reques
 	h.Renderer.RenderPartial(w, "session_group_code_result", sessionGroupCodeResultData{GroupCode: snap.GroupCode})
 }
 
+// sessionNameEditorData feeds the session_name_editor partial, loaded into
+// #session-name-editor (list.html) outside the polled tbody for the same
+// reason as the group editor. Value carries the operator's typed text on a
+// validation error, the stored name otherwise.
+type sessionNameEditorData struct {
+	Session wa.Snapshot
+	Value   string
+	Error   string
+	Saved   bool
+}
+
+// GetSessionNameEditor renders the on-demand rename editor; 404 on unknown id.
+func (h *handlers) GetSessionNameEditor(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	snap := s.Snapshot()
+	h.Renderer.RenderPartial(w, "session_name_editor", sessionNameEditorData{Session: snap, Value: snap.Name})
+}
+
+// PostSessionSetName saves a new display name. A *wa.ValidationError is shown
+// inline with the typed value kept; success fires HX-Trigger: sessions-changed
+// so the polled rows pick up the new name immediately. The name is cosmetic on
+// waxum, which has no rename call and keeps the name given at CreateSession.
+func (h *handlers) PostSessionSetName(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	name := r.FormValue("name")
+	if err := s.SetName(r.Context(), name); err != nil {
+		var verr *wa.ValidationError
+		msg := "could not save name"
+		if errors.As(err, &verr) {
+			msg = verr.Msg
+		} else {
+			slog.Warn("set session name", "session", s.ID, "err", err)
+		}
+		h.Renderer.RenderPartial(w, "session_name_editor", sessionNameEditorData{
+			Session: s.Snapshot(), Value: name, Error: msg,
+		})
+		return
+	}
+	snap := s.Snapshot()
+	w.Header().Set("HX-Trigger", "sessions-changed")
+	h.Renderer.RenderPartial(w, "session_name_editor", sessionNameEditorData{Session: snap, Value: snap.Name, Saved: true})
+}
+
 // PostSessionDeactivate drops the socket, keeps credentials.
 func (h *handlers) PostSessionDeactivate(w http.ResponseWriter, r *http.Request) {
 	if s, ok := h.Manager.Get(r.PathValue("id")); ok {

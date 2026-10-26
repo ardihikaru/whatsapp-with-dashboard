@@ -17,13 +17,14 @@ type stubSessions struct {
 	active   map[string][]bool
 	master   map[string][]bool
 	groups   map[string][]string
+	names    map[string][]string
 	deleted  []string
 }
 
 func newStubSessions(rows ...wasession.Session) *stubSessions {
 	return &stubSessions{rows: rows,
 		statuses: map[string][]string{}, active: map[string][]bool{}, master: map[string][]bool{},
-		groups: map[string][]string{}}
+		groups: map[string][]string{}, names: map[string][]string{}}
 }
 
 func (s *stubSessions) All(context.Context) ([]wasession.Session, error) {
@@ -71,6 +72,13 @@ func (s *stubSessions) SetGroupCode(_ context.Context, id, code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.groups[id] = append(s.groups[id], code)
+	return nil
+}
+
+func (s *stubSessions) SetName(_ context.Context, id, name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.names[id] = append(s.names[id], name)
 	return nil
 }
 

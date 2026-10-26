@@ -1,0 +1,23 @@
+{{define "session_name_editor"}}
+<div class="card form-card">
+  <h5>Rename — {{.Session.Name}}</h5>
+  <p class="muted">Changes the name shown in this dashboard. On the waxum backend
+     the name is cosmetic: waxum keeps the name it was given when the session
+     was created.</p>
+  {{if .Error}}<div class="alert alert-error">{{.Error}}</div>
+  {{else if .Saved}}<p class="muted">Saved — session renamed to <strong>{{.Value}}</strong>.</p>
+  {{end}}
+  <form hx-post="{{u "/sessions"}}/{{.Session.ID}}/name" hx-target="#session-name-editor" hx-swap="innerHTML"
+        action="{{u "/sessions"}}/{{.Session.ID}}/name" method="post" novalidate>
+    <label class="textfield">
+      <span class="textfield-label">Name</span>
+      <input name="name" value="{{.Value}}" maxlength="190" autocomplete="off" required>
+    </label>
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+      <button class="btn btn-outline" type="button"
+              hx-on:click="document.getElementById('session-name-editor').replaceChildren()">Cancel</button>
+    </div>
+  </form>
+</div>
+{{end}}

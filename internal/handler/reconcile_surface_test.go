@@ -72,7 +72,7 @@ func TestHealthReportsReconcileCountsOnlyAndTheSessionsPageShowsTheBanner(t *tes
 	if out.Reconcile.OK || !out.Reconcile.BackendProblem || out.Reconcile.LastChecked == "" {
 		t.Errorf("reconcile = %+v, want ok=false backend_problem=true with last_checked; body=%s", out.Reconcile, body)
 	}
-	if strings.Contains(body, s.ID) || strings.Contains(body, s.Name) {
+	if strings.Contains(body, s.ID) || strings.Contains(body, s.Name()) {
 		t.Errorf("unauthenticated health leaked a session id/name: %s", body)
 	}
 
