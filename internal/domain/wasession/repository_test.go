@@ -161,3 +161,27 @@ func TestSetGroupCodeRoundTripsThroughTheSessionsTable(t *testing.T) {
 		t.Errorf("GroupCode = %q after SetGroupCode(\"\"), want \"\"", got.GroupCode)
 	}
 }
+
+// TestSetNameRoundTripsThroughTheSessionsTable proves Insert -> SetName -> All
+// carries the new name, and that only the targeted row changes.
+func TestSetNameRoundTripsThroughTheSessionsTable(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	for _, id := range []string{"sess-1", "sess-2"} {
+		if err := r.Insert(ctx, &Session{ID: id, Name: id, Phone: "628000" + id, LastStatus: "new"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SetName(ctx, "sess-1", "Renamed Gateway"); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := findByID(all, "sess-1"); got.Name != "Renamed Gateway" {
+		t.Errorf("Name = %q after SetName, want %q", got.Name, "Renamed Gateway")
+	}
+	if got, _ := findByID(all, "sess-2"); got.Name != "sess-2" {
+		t.Errorf("sess-2 Name = %q, want untouched", got.Name)
+	}
+}

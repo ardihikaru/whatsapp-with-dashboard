@@ -381,7 +381,7 @@ func (h *handlers) validateScheduleForm(r *http.Request, form scheduleForm) (sch
 	if !ok {
 		return out, "unknown sender session"
 	}
-	out.SenderID, out.SenderName, out.SenderPhone = sender.ID, sender.Name, sender.Phone
+	out.SenderID, out.SenderName, out.SenderPhone = sender.ID, sender.Name(), sender.Phone
 
 	receiverIDs := dedupeStrings(form.ReceiverIDs)
 	if len(receiverIDs) == 0 {
@@ -399,7 +399,7 @@ func (h *handlers) validateScheduleForm(r *http.Request, form scheduleForm) (sch
 			return out, "unknown receiver session"
 		}
 		receivers = append(receivers, convo.ScheduleReceiver{
-			SessionID: s.ID, SessionName: s.Name, Phone: s.Phone, Position: i,
+			SessionID: s.ID, SessionName: s.Name(), Phone: s.Phone, Position: i,
 		})
 	}
 	out.Receivers = receivers

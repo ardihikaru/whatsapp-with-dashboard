@@ -665,3 +665,58 @@ func TestTheOpsPageGroupSaveStillRendersItsOwnResultPartial(t *testing.T) {
 		t.Errorf("ops page's save response does not say \"Saved\"; body:\n%s", body)
 	}
 }
+
+func TestTheNameEditorPrefillsTheCurrentName(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+	res := authedGet(t, srv, sessions, "/sessions/"+s.ID+"/name/edit")
+	if res.Code != http.StatusOK {
+		t.Fatalf("GET name/edit = %d: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, `name="name" value="`+s.Snapshot().Name+`"`) {
+		t.Errorf("editor does not prefill the current name %q; body:\n%s", s.Snapshot().Name, body)
+	}
+}
+
+func TestTheNameEditorIs404ForAnUnknownSession(t *testing.T) {
+	srv, sessions, _, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+	if res := authedGet(t, srv, sessions, "/sessions/does-not-exist/name/edit"); res.Code != http.StatusNotFound {
+		t.Fatalf("GET = %d, want 404", res.Code)
+	}
+	if res := authedPostForm(t, srv, sessions, "/sessions/does-not-exist/name", url.Values{"name": {"x"}}); res.Code != http.StatusNotFound {
+		t.Fatalf("POST = %d, want 404", res.Code)
+	}
+}
+
+func TestSavingANewNameFiresHXTriggerAndTheRowsShowIt(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/name", url.Values{"name": {"Renamed Gateway"}})
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST name = %d: %s", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("HX-Trigger"); got != "sessions-changed" {
+		t.Errorf(`HX-Trigger = %q, want "sessions-changed"`, got)
+	}
+	rows := authedGet(t, srv, sessions, "/sessions/rows").Body.String()
+	if !strings.Contains(rows, "Renamed Gateway") {
+		t.Errorf("rows do not show the new name; body:\n%s", rows)
+	}
+}
+
+func TestAnInvalidNameStaysInTheEditorWithTheErrorAndNoTrigger(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+	before := s.Snapshot().Name
+	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/name", url.Values{"name": {"   "}})
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST name = %d: %s", res.Code, res.Body.String())
+	}
+	if got := res.Header().Get("HX-Trigger"); got != "" {
+		t.Errorf("HX-Trigger = %q on a rejected save, want none", got)
+	}
+	if body := res.Body.String(); !strings.Contains(body, "alert-error") || !strings.Contains(body, "<form") {
+		t.Errorf("rejected save should re-render the editor with an inline error; body:\n%s", body)
+	}
+	if got := s.Snapshot().Name; got != before {
+		t.Errorf("Name = %q after rejected save, want %q", got, before)
+	}
+}

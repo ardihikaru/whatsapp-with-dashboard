@@ -232,7 +232,7 @@ func (h *handlers) validateGBScheduleForm(r *http.Request, form gbScheduleForm) 
 	if !ok {
 		return out, "unknown sender session"
 	}
-	out.SenderID, out.SenderName, out.SenderPhone = sender.ID, sender.Name, sender.Phone
+	out.SenderID, out.SenderName, out.SenderPhone = sender.ID, sender.Name(), sender.Phone
 
 	rawJID := form.GroupJID
 	groupName := form.GroupName
@@ -272,7 +272,7 @@ func (h *handlers) validateGBScheduleForm(r *http.Request, form gbScheduleForm) 
 			return out, "unknown receiver session"
 		}
 		receivers = append(receivers, gb.ScheduleReceiver{
-			SessionID: s.ID, SessionName: s.Name, Phone: s.Phone, Position: i,
+			SessionID: s.ID, SessionName: s.Name(), Phone: s.Phone, Position: i,
 		})
 	}
 	out.Receivers = receivers

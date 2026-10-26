@@ -96,12 +96,12 @@ func (h *handlers) PostSend(w http.ResponseWriter, r *http.Request) {
 	attr := message.Attribution{Category: message.CategoryManual}
 	outcome, statusCode := h.sendThroughSession(r, s, digits, text, attr)
 	if statusCode >= 400 {
-		h.sendResult(w, sendResultData{Status: outcome.Status, Error: outcome.Error, SessionName: s.Name})
+		h.sendResult(w, sendResultData{Status: outcome.Status, Error: outcome.Error, SessionName: s.Name()})
 		return
 	}
 	h.sendResult(w, sendResultData{
 		Status: outcome.Status, WAMessageID: outcome.WAMessageID, Error: outcome.Error,
-		SessionName: s.Name,
+		SessionName: s.Name(),
 	})
 }
 

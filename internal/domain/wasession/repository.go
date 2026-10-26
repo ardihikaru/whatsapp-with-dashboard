@@ -16,6 +16,7 @@ type Repository interface {
 	SetActive(ctx context.Context, id string, active bool) error
 	SetMaster(ctx context.Context, id string, master bool) error
 	SetGroupCode(ctx context.Context, id, code string) error
+	SetName(ctx context.Context, id, name string) error
 	MarkSelected(ctx context.Context, id string, at time.Time) error
 	// SetPaired records a successful pairing: jid, active=1, last_status=connected.
 	SetPaired(ctx context.Context, id, jid string) error
@@ -101,6 +102,13 @@ func (r *SQLRepository) SetGroupCode(ctx context.Context, id, code string) error
 	_, err := r.pool.ExecContext(ctx,
 		`UPDATE wa_sessions SET group_code = ?, updated_at = ? WHERE id = ?`,
 		code, now(), id)
+	return err
+}
+
+func (r *SQLRepository) SetName(ctx context.Context, id, name string) error {
+	_, err := r.pool.ExecContext(ctx,
+		`UPDATE wa_sessions SET name = ?, updated_at = ? WHERE id = ?`,
+		name, now(), id)
 	return err
 }
 

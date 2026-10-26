@@ -38,6 +38,8 @@
     {{end}}
     <!-- Offered on EVERY row, master or not — group_code is deliberately
          uncoupled from is_master (list.html's own explainer paragraph). -->
+    <button class="btn btn-outline" hx-get="{{u "/sessions"}}/{{.ID}}/name/edit"
+            hx-target="#session-name-editor" hx-swap="innerHTML show:#session-name-editor:top">Edit name</button>
     <button class="btn btn-outline" hx-get="{{u "/sessions"}}/{{.ID}}/group-code/edit"
             hx-target="#session-group-editor" hx-swap="innerHTML show:#session-group-editor:top">Edit group</button>
     <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/ops">Ops</a>

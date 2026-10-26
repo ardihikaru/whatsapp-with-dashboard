@@ -411,3 +411,38 @@ func TestEverySessionRowOffersEditGroupRegardlessOfMaster(t *testing.T) {
 		t.Errorf(`hx-target="#session-group-editor" appears %d times, want 2 (one per row); body:`+"\n%s", got, body)
 	}
 }
+
+// TestTheSessionsPageCarriesANameEditorSlotOutsideThePolledTbodyAndRowsOfferEditName
+// pins the rename editor's layout: the slot sits after </tbody> (a poll would
+// wipe a half-typed name) and every row has an "Edit name" button aimed at it.
+func TestTheSessionsPageCarriesANameEditorSlotOutsideThePolledTbodyAndRowsOfferEditName(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := httptest.NewRecorder()
+	rend.RenderPage(rec, "sessions", sessionsPageData{})
+	body := rec.Body.String()
+	tbodyEnd, slot := strings.Index(body, "</tbody>"), strings.Index(body, `id="session-name-editor"`)
+	if slot == -1 || tbodyEnd == -1 || slot < tbodyEnd {
+		t.Errorf("#session-name-editor must exist after </tbody> (slot=%d, tbodyEnd=%d)", slot, tbodyEnd)
+	}
+
+	rec = httptest.NewRecorder()
+	rend.RenderPartial(rec, "session_rows", sessionRowsData{Sessions: []wa.Snapshot{
+		{ID: "a-1", Name: "A", State: wa.StateConnected}, {ID: "b-1", Name: "B", State: wa.StateConnected},
+	}})
+	rows := rec.Body.String()
+	for _, id := range []string{"a-1", "b-1"} {
+		if want := `hx-get="/sessions/` + id + `/name/edit"`; !strings.Contains(rows, want) {
+			t.Errorf("row %q lacks %s", id, want)
+		}
+	}
+	if got := strings.Count(rows, `hx-target="#session-name-editor"`); got != 2 {
+		t.Errorf(`hx-target="#session-name-editor" count = %d, want 2`, got)
+	}
+}

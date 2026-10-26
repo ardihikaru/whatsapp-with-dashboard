@@ -364,7 +364,7 @@ func mapErr(err error) error {
 // MUST be idempotent, exactly like whatsmeow's Connect (backend_meow.go)
 // reusing an already-attached client instead of erroring.
 func (b *waxumBackend) Connect(ctx context.Context, s *ManagedSession) error {
-	if err := b.client.CreateSession(ctx, s.ID, s.Name, true); err != nil && !errors.Is(err, waxum.ErrConflict) {
+	if err := b.client.CreateSession(ctx, s.ID, s.Name(), true); err != nil && !errors.Is(err, waxum.ErrConflict) {
 		return mapErr(err)
 	}
 	if err := b.client.Connect(ctx, s.ID); err != nil && !errors.Is(err, waxum.ErrConflict) {
@@ -847,7 +847,7 @@ func (b *waxumBackend) adoptWaxumLogin(s *ManagedSession, st *waxum.Status, now 
 		slog.Warn("persist active", "session", s.ID, "err", err)
 	}
 	note := fmt.Sprintf("session %s (%s): WSM held logged_out but waxum reports is_logged_in=%t socket_alive=%t (status %q) — adopting waxum's view, now %s",
-		s.ID, s.Name, st.IsLoggedIn, st.SocketAlive, st.Status, now)
+		s.ID, s.Name(), st.IsLoggedIn, st.SocketAlive, st.Status, now)
 	slog.Warn("wa: "+note, "session", s.ID)
 	s.ringLevel("warn", note)
 }
@@ -961,7 +961,7 @@ func (b *waxumBackend) StartPairing(ctx context.Context, s *ManagedSession, mode
 	setupCtx, cancel := context.WithTimeout(ctx, b.setupTimeout())
 	defer cancel()
 
-	createErr := b.client.CreateSession(setupCtx, s.ID, s.Name, true)
+	createErr := b.client.CreateSession(setupCtx, s.ID, s.Name(), true)
 	if createErr != nil && !errors.Is(createErr, waxum.ErrConflict) {
 		b.rollbackPairing(s)
 		return mapErr(createErr)

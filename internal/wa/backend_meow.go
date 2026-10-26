@@ -434,7 +434,7 @@ func (s *ManagedSession) ring(note string) {
 // share one Event value (and so one timestamp) rather than being
 // constructed twice.
 func (s *ManagedSession) ringLevel(level, note string) {
-	e := Event{At: time.Now(), Note: note, SessionID: s.ID, SessionName: s.Name, Level: level}
+	e := Event{At: time.Now(), Note: note, SessionID: s.ID, SessionName: s.Name(), Level: level}
 	s.events.Append(e)
 	if s.mgr != nil { // mgr is always set in production; guarded for any hand-built test session
 		s.mgr.sysRing.Append(e)

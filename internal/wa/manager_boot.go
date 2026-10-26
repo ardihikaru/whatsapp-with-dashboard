@@ -21,7 +21,7 @@ func (m *Manager) StartAll(ctx context.Context) error {
 	var toConnect []*ManagedSession
 	for _, row := range rows {
 		s := &ManagedSession{
-			ID: row.ID, Name: row.Name, Phone: row.Phone, CreatedAt: row.CreatedAt,
+			ID: row.ID, name: row.Name, Phone: row.Phone, CreatedAt: row.CreatedAt,
 			LastSelectedAt: row.LastSelectedAt,
 			mgr:            m, state: StateDisconnected, events: NewRing(ringSize),
 			// active hydrates from the persisted intent regardless of whether

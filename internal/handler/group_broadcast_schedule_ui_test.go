@@ -225,7 +225,7 @@ func newGBEditableReceiversFixture(t *testing.T) *gbEditableReceiversFixture {
 	if err != nil {
 		t.Fatalf("create sender: %v", err)
 	}
-	gw.participants[sender.ID] = groupbroadcast.Participant{ID: sender.ID, Name: sender.Name, Phone: sender.Phone, Connected: true}
+	gw.participants[sender.ID] = groupbroadcast.Participant{ID: sender.ID, Name: sender.Name(), Phone: sender.Phone, Connected: true}
 	f.senderID = sender.ID
 
 	for i := 0; i < 3; i++ {
@@ -256,7 +256,7 @@ func (f *gbEditableReceiversFixture) newConnectedReceiver(t *testing.T, name str
 	if err != nil {
 		t.Fatalf("create %s: %v", name, err)
 	}
-	f.gw.participants[s.ID] = groupbroadcast.Participant{ID: s.ID, Name: s.Name, Phone: s.Phone, Connected: true}
+	f.gw.participants[s.ID] = groupbroadcast.Participant{ID: s.ID, Name: s.Name(), Phone: s.Phone, Connected: true}
 	return s.ID
 }
 

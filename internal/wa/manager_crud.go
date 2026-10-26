@@ -26,7 +26,7 @@ func (m *Manager) Create(ctx context.Context, name, phone string) (*ManagedSessi
 		return nil, err
 	}
 	s := &ManagedSession{
-		ID: row.ID, Name: name, Phone: digits, CreatedAt: time.Now().UTC(),
+		ID: row.ID, name: name, Phone: digits, CreatedAt: time.Now().UTC(),
 		mgr: m, state: StateNew, events: NewRing(ringSize),
 	}
 	m.mu.Lock()

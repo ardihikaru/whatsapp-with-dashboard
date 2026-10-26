@@ -13,7 +13,7 @@ import (
 func TestSetGroupCodeRejectsAnInvalidCodeWithoutTouchingState(t *testing.T) {
 	repo := newStubSessions()
 	m := newTestManager(repo, newStubMsgs())
-	s := &ManagedSession{ID: "s1", Name: "s1", Phone: "628120000",
+	s := &ManagedSession{ID: "s1", name: "s1", Phone: "628120000",
 		mgr: m, state: StateDisconnected, groupCode: "alpha", events: NewRing(ringSize)}
 	m.sessions[s.ID] = s
 
