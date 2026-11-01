@@ -106,6 +106,16 @@ export WSM_SESSION_TTL="${WSM_SESSION_TTL:-2h}"
 # instead — hermetic, no second process to boot, and no coverage lost.
 export WSM_WA_BACKEND="${WSM_WA_BACKEND:-whatsmeow}"
 
+# AI-written status posts: /status/schedules only offers the "Write each post
+# with AI" switch when the ai-codex-cli client is configured, and the browser
+# suite needs it enabled to drive it. These are FIXED dummies, not defaults
+# (the caller's real WSM_CODEX_CLI_* must never be reachable from a test run):
+# port 9 (discard) refuses connections, so a schedule that ever reached
+# generation would fail fast and fall back, never call a real service.
+export WSM_CODEX_CLI_URL="http://127.0.0.1:9"
+export WSM_CODEX_CLI_LOGIN_ID="e2e-dummy"
+export WSM_CODEX_CLI_SECRET_KEY="e2e-dummy"
+
 # Seed realistic content. An empty database makes the layout assertions
 # meaningless — "no page scrolls horizontally" is trivially true with zero rows,
 # and phone layouts break on CONTENT. cmd/e2eseed is idempotent and refuses any

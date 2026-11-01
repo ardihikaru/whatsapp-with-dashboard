@@ -214,7 +214,12 @@ func run() error {
 
 	// Scheduled WhatsApp status posts: always on, no env flag. Started after
 	// the manager (it posts through it) and stopped before manager.Close.
-	statusScheduler := startStatusSchedules(ctx, statusScheduleRepo, manager, contactRepo, objectStore)
+	aiClient := buildAIClient(cfg)
+	if aiClient == nil {
+		log.Print("status-schedules: AI writing unavailable (WSM_CODEX_CLI_URL/_LOGIN_ID/_SECRET_KEY not all set and valid)")
+	}
+	statusScheduler := startStatusSchedules(ctx, statusScheduleRepo, manager, contactRepo, objectStore,
+		statusTextGenerator(aiClient, cfg.CodexCLIModel), cfg.GroupBroadcastAIDeadline)
 
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
@@ -261,6 +266,7 @@ func run() error {
 			Contacts:               contactRepo,
 			GroupBroadcast:         groupBroadcastRepo,
 			StatusSchedules:        statusScheduleRepo,
+			StatusAIAvailable:      aiClient != nil,
 			GroupBroadcastRunner:   gbRunner,
 			GroupBroadcastEnabled:  cfg.GroupBroadcastEnabled,
 			GroupBroadcastPlanner:  gbPlanner,

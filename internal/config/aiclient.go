@@ -17,7 +17,8 @@ const DefaultCodexCLITimeout = 20 * time.Second
 
 // loadAIClient resolves WSM_CODEX_CLI_URL/LOGIN_ID/SECRET_KEY/TIMEOUT/MODEL.
 // URL/LoginID/SecretKey are boot failures, but ONLY when
-// cfg.GroupBroadcastEnabled is true — same conditional-requirement idiom as
+// cfg.GroupBroadcastEnabled is true (when it is false they are still
+// populated if all three are set and valid, for AI-written status posts) — same conditional-requirement idiom as
 // loadWaxum's URL/Token (required only when WABackend == "waxum"). Must run
 // AFTER loadGroupBroadcast, which resolves cfg.GroupBroadcastEnabled.
 //
@@ -38,7 +39,21 @@ func loadAIClient(cfg *Config) error {
 	cfg.CodexCLIModel = os.Getenv("WSM_CODEX_CLI_MODEL")
 
 	if !cfg.GroupBroadcastEnabled {
-		return nil // URL/credentials only matter once group broadcast is actually enabled
+		// Not required, but not ignored: AI-written status posts
+		// (internal/statussched) use the same client. Populate only when ALL
+		// THREE are present and the URL is valid; anything less leaves them
+		// empty, which means "AI unavailable" — it must never stop a deploy
+		// that has no use for AI from booting.
+		u, login, secret := os.Getenv("WSM_CODEX_CLI_URL"), os.Getenv("WSM_CODEX_CLI_LOGIN_ID"), os.Getenv("WSM_CODEX_CLI_SECRET_KEY")
+		if u == "" || login == "" || secret == "" {
+			return nil
+		}
+		normalized, err := parseCodexCLIURL(u)
+		if err != nil {
+			return nil
+		}
+		cfg.CodexCLIURL, cfg.CodexCLILoginID, cfg.CodexCLISecretKey = normalized, login, secret
+		return nil
 	}
 
 	raw := os.Getenv("WSM_CODEX_CLI_URL")

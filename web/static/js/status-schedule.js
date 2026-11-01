@@ -4,7 +4,8 @@
 // the timezone as they change. Progressive enhancement only — the server
 // renders the same sentence (handler.statusScheduleSummary) for the initial
 // paint and for a browser with JS disabled, and validates everything itself.
-// The sentence is rewritten WITHOUT animation on purpose: it updates on every
+// With the AI switch on it ends "· AI-written", and a counter follows the
+// topic field. The sentence is rewritten WITHOUT animation on purpose: it updates on every
 // keystroke. The colour swatches and the recipients checklist are driven by
 // status.js through the same data-status-* contract /status uses.
 //
@@ -18,6 +19,10 @@
   var start = form.querySelector("[data-ss-start]");
   var end = form.querySelector("[data-ss-end]");
   var tz = form.querySelector("[data-ss-tz]");
+  // Optional: absent on a build without the AI switch.
+  var ai = form.querySelector("[data-ss-ai]");
+  var topic = form.querySelector("[data-ss-ai-topic]");
+  var count = form.querySelector("[data-ss-ai-count]");
   if (!out || !start || !end || !tz) return;
 
   // The chips are laid out Sunday-first, but the sentence lists days
@@ -35,9 +40,16 @@
       return;
     }
     out.textContent = names.join(", ") + " · once each day, at a random time between " +
-      start.value + " and " + end.value + " " + tz.value;
+      start.value + " and " + end.value + " " + tz.value + (ai && ai.checked ? " · AI-written" : "");
+  }
+
+  // Character counter for the topic: rewritten on every keystroke with no
+  // animation. Counts code points like the server's rune count.
+  function renderCount() {
+    if (!topic || !count) return;
+    count.textContent = Array.from(topic.value).length + " / " + count.getAttribute("data-max");
   }
 
   form.addEventListener("change", render);
-  form.addEventListener("input", render);
+  form.addEventListener("input", function () { render(); renderCount(); });
 })();

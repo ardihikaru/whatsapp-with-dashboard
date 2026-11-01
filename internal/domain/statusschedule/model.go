@@ -31,6 +31,12 @@ const (
 	StateStalled  = "stalled"
 )
 
+// Sources of Schedule.NextText.
+const (
+	TextSourceAI     = "ai"
+	TextSourceStatic = "static"
+)
+
 // Results of the most recent fire attempt (Schedule.LastResult).
 const (
 	ResultSent    = "sent"
@@ -80,4 +86,15 @@ type Schedule struct {
 	LastError       string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+
+	// AI wording (migrations/0014). AIEnabled: each post's text (text kind)
+	// or caption (image/video) is written by AI from AITopic; Text/Caption
+	// then serve only as the fallback. NextText is the exact wording planned
+	// for the pending slot (NextTextSource says where it came from);
+	// LastAIText feeds the next prompt so consecutive posts differ.
+	AIEnabled      bool
+	AITopic        string
+	NextText       string
+	NextTextSource string
+	LastAIText     string
 }

@@ -30,6 +30,15 @@
     </label>
 
     <div class="ss-kind-tabs">
+      {{/* The AI switch is a real checkbox placed BEFORE everything it
+           restyles, so status-schedule.css can reach the topic field and the
+           fallback labels with sibling selectors (`#ss-ai:checked ~ …`) — the
+           same no-JS technique as the kind radios below. A disabled checkbox
+           is not submitted, so an unavailable AI can never be turned on by a
+           crafted form; the server rejects that too. */}}
+      <input type="checkbox" name="ai_enabled" value="1" id="ss-ai" class="ss-ai-input" data-ss-ai
+             aria-controls="ss-ai-topic-panel"
+             {{if and .Form.AIEnabled .AIAvailable}}checked{{end}} {{if not .AIAvailable}}disabled{{end}}>
       <input type="radio" name="kind" value="text" id="ss-kind-text" class="ss-kind-input" {{if eq .Form.Kind "text"}}checked{{end}}>
       <input type="radio" name="kind" value="image" id="ss-kind-image" class="ss-kind-input" {{if eq .Form.Kind "image"}}checked{{end}}>
       <input type="radio" name="kind" value="video" id="ss-kind-video" class="ss-kind-input" {{if eq .Form.Kind "video"}}checked{{end}}>
@@ -37,6 +46,26 @@
         <label class="ss-kind-label" for="ss-kind-text">Text</label>
         <label class="ss-kind-label" for="ss-kind-image">Image</label>
         <label class="ss-kind-label" for="ss-kind-video">Video</label>
+      </div>
+
+      <div class="ss-ai-block">
+        <label class="ss-switch" for="ss-ai">
+          <span class="ss-switch-track" aria-hidden="true"><span class="ss-switch-thumb"></span></span>
+          <span class="ss-switch-text">Write each post with AI</span>
+        </label>
+        {{if .AIAvailable}}
+        <small class="muted ss-ai-help">Type only a topic; a fresh message is written for every post, ahead of time, in the topic's language. If the AI is unavailable on the day, the fallback below is posted instead (or the day is skipped when there is none).</small>
+        {{else}}
+        <small class="muted ss-ai-help" data-ss-ai-unavailable>AI writing is not available on this deployment (no AI service is configured). Posts use the text below.</small>
+        {{end}}
+        <div class="ss-ai-topic" id="ss-ai-topic-panel">
+          <label class="textfield">
+            <span class="textfield-label">Topic</span>
+            <textarea name="ai_topic" rows="3" maxlength="{{.AITopicMax}}" data-ss-ai-topic
+                      placeholder="e.g. Semangat pagi untuk pelanggan laundry">{{.Form.AITopic}}</textarea>
+          </label>
+          <small class="muted ss-ai-count" data-ss-ai-count data-max="{{.AITopicMax}}">{{.AITopicLen}} / {{.AITopicMax}}</small>
+        </div>
       </div>
 
       <div class="ss-kind-panel" data-ss-panel="text">
@@ -52,7 +81,7 @@
           <input type="hidden" name="background_argb" value="{{(index .Swatches .ActiveSwatch).ARGB}}" data-status-background-input>
         </div>
         <label class="textfield">
-          <span class="textfield-label">Status text</span>
+          <span class="textfield-label"><span class="ss-lbl-plain">Status text</span><span class="ss-lbl-ai">Fallback text (optional) — posted only if the AI fails</span></span>
           <textarea name="text" rows="4" maxlength="700" placeholder="What's on your mind?" data-status-text-input>{{.Form.Text}}</textarea>
         </label>
         <div class="status-text-preview" data-status-text-preview style="background-color: {{(index .Swatches .ActiveSwatch).Hex}}">
@@ -85,7 +114,7 @@
       </div>
 
       <label class="textfield ss-caption">
-        <span class="textfield-label">Caption (optional)</span>
+        <span class="textfield-label"><span class="ss-lbl-plain">Caption (optional)</span><span class="ss-lbl-ai">Fallback caption (optional) — posted only if the AI fails</span></span>
         <textarea name="caption" rows="3" maxlength="1024">{{.Form.Caption}}</textarea>
         <small class="muted">The file is stored when you save and re-sent fresh on every post.</small>
       </label>
