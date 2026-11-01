@@ -70,6 +70,18 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/status.html"),
 		root:  "base",
 	},
+	// status_schedules/status_schedule_form: scheduled status posts. The
+	// list has no rows partial in its fileset (same rule as "calls" above:
+	// the tbody fills itself over HTMX from partialFiles); the form is shared
+	// by GET .../new and GET .../{id}/edit (IsEdit picks the difference).
+	"status_schedules": {
+		files: append(chrome(), "templates/status_schedules.html"),
+		root:  "base",
+	},
+	"status_schedule_form": {
+		files: append(chrome(), "templates/status_schedule_form.html"),
+		root:  "base",
+	},
 	// self_convo/self_convo_templates: no rows partial in either fileset —
 	// same rule as "calls" above. self_convo_template_view has no rows
 	// partial to worry about at all; it renders one template's JSON, not a
@@ -190,6 +202,7 @@ var partialFiles = []string{
 	"templates/partials/pairing_status.html",
 	"templates/partials/send_result.html",
 	"templates/partials/status_result.html",
+	"templates/partials/status_schedule_rows.html",
 	"templates/partials/log_rows.html",
 	"templates/partials/outgoing_chat_rows.html",
 	"templates/partials/system_log_rows.html",

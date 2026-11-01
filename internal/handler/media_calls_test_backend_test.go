@@ -190,6 +190,13 @@ func (f *fakeObjectStore) Get(ctx context.Context, key string) (io.ReadCloser, e
 	return nil, wa.ErrUnsupported
 }
 
+func (f *fakeObjectStore) Delete(ctx context.Context, key string) error {
+	if f.log != nil {
+		f.log.record("delete:" + key)
+	}
+	return nil
+}
+
 var _ storage.ObjectStore = (*fakeObjectStore)(nil)
 
 // mediaTestConfig configures newMediaTestServer; zero-valued fields resolve

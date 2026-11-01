@@ -459,6 +459,39 @@ var schema = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_wa_contacts_name
 	  ON wa_contacts(name)`,
+	// 0013: scheduled WhatsApp status posts — one table, no occurrence/turn
+	// tables. See migrations/0013_status_schedules.sql's header.
+	`CREATE TABLE IF NOT EXISTS wa_status_schedules (
+	  id                 TEXT PRIMARY KEY,
+	  name               TEXT NOT NULL,
+	  session_id         TEXT NOT NULL,
+	  kind               TEXT NOT NULL,
+	  text               TEXT NOT NULL DEFAULT '',
+	  bg_argb            INTEGER NOT NULL DEFAULT 0,
+	  caption            TEXT NOT NULL DEFAULT '',
+	  media_object_key   TEXT NOT NULL DEFAULT '',
+	  media_content_type TEXT NOT NULL DEFAULT '',
+	  media_filename     TEXT NOT NULL DEFAULT '',
+	  weekdays           TEXT NOT NULL DEFAULT '',
+	  window_start       TEXT NOT NULL DEFAULT '07:00',
+	  window_end         TEXT NOT NULL DEFAULT '10:00',
+	  timezone           TEXT NOT NULL DEFAULT 'Asia/Jakarta',
+	  start_date         TEXT NOT NULL,
+	  end_date           TEXT,
+	  recipients_mode    TEXT NOT NULL DEFAULT 'all',
+	  recipients_json    TEXT NOT NULL DEFAULT '',
+	  state              TEXT NOT NULL,
+	  paused_reason      TEXT NOT NULL DEFAULT '',
+	  last_planned_date  TEXT,
+	  next_fire_at       TEXT NOT NULL DEFAULT '',
+	  last_fired_at      TEXT NOT NULL DEFAULT '',
+	  last_result        TEXT NOT NULL DEFAULT '',
+	  last_error         TEXT NOT NULL DEFAULT '',
+	  created_at         TEXT NOT NULL,
+	  updated_at         TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_wa_status_schedules_state_fire
+	  ON wa_status_schedules(state, next_fire_at)`,
 }
 
 // EnsureSchema creates the app tables and index if missing, inside one

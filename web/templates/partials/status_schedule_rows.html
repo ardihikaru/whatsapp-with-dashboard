@@ -1,0 +1,51 @@
+{{/* One <tr> per schedule. Pause/Resume swap just their own row
+     (hx-target="closest tr", outerHTML); Delete answers an empty 200 so the
+     row swaps away, and `swap:120ms` lets status-schedule.css fade it out
+     first (exits are faster than entries). */}}
+{{define "status_schedule_row"}}
+<tr class="ss-row">
+  <td><a href="{{u "/status/schedules"}}/{{.ID}}/edit">{{.Name}}</a></td>
+  <td>{{.SessionName}}</td>
+  <td>{{.KindLabel}}</td>
+  <td>{{.DaysLabel}}</td>
+  <td class="mono">{{.WindowLabel}}</td>
+  <td>{{.RecipientsLabel}}</td>
+  <td class="mono">{{.NextLabel}}</td>
+  <td>
+    <span class="mono">{{.LastLabel}}</span>
+    {{if .LastError}}<br><small class="muted" title="{{.LastError}}">{{.LastError}}</small>{{end}}
+  </td>
+  <td>
+    <span class="badge badge-{{.State}}">{{.State}}</span>
+    {{if .PausedReason}}<br><small class="muted" title="{{.PausedReason}}">{{.PausedReason}}</small>{{end}}
+  </td>
+  <td class="row-actions">
+    <a class="btn btn-outline" href="{{u "/status/schedules"}}/{{.ID}}/edit">Edit</a>
+    {{if eq .State "active"}}
+    <button class="btn btn-outline" hx-post="{{u "/status/schedules"}}/{{.ID}}/pause"
+            hx-target="closest tr" hx-swap="outerHTML">Pause</button>
+    {{else if or (eq .State "paused") (eq .State "stalled")}}
+    <button class="btn btn-outline" hx-post="{{u "/status/schedules"}}/{{.ID}}/resume"
+            hx-target="closest tr" hx-swap="outerHTML">Resume</button>
+    {{end}}
+    <button class="btn btn-outline btn-danger" hx-post="{{u "/status/schedules"}}/{{.ID}}/delete"
+            hx-target="closest tr" hx-swap="outerHTML swap:120ms"
+            hx-confirm="Delete this schedule and its stored media file? Statuses already posted stay on WhatsApp.">Delete</button>
+  </td>
+</tr>
+{{end}}
+
+{{define "status_schedule_rows"}}
+{{range .Schedules}}{{template "status_schedule_row" .}}
+{{else}}
+<tr><td colspan="10">No status schedules yet — <a href="{{u "/status/schedules/new"}}">create one</a>.</td></tr>
+{{end}}
+{{end}}
+
+{{/* Pause/Resume/Delete outcome: an alert row (when something went wrong)
+     followed by the schedule's current row. A nil Schedule means the row no
+     longer exists, so only the alert is shown. */}}
+{{define "status_schedule_row_result"}}
+{{if .Error}}<tr class="ss-row"><td colspan="10"><div class="alert alert-error">{{.Error}}</div></td></tr>{{end}}
+{{if .Schedule}}{{template "status_schedule_row" .Schedule}}{{end}}
+{{end}}

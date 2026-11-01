@@ -10,7 +10,9 @@ import (
 	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/contact"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
+	statusschedule "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/statusschedule"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo"
 )
@@ -382,5 +384,40 @@ func TestSeedConvoSchedulingWritesACorpusPackAndTwoSchedulesWithTheStatesThePage
 	}
 	if stalled.PausedReason == "" {
 		t.Error("stalled schedule has no PausedReason — schedule_view.html/convo_schedule_rows.html have nothing to render")
+	}
+}
+
+// TestSeedWritesContactsAndTwoStatusSchedulesTheBrowserSuiteAddresses pins
+// what e2e/status-schedules.spec.ts relies on: the contact book the form
+// lists, and one active + one paused (with a recorded failure) schedule under
+// fixed ids.
+func TestSeedWritesContactsAndTwoStatusSchedulesTheBrowserSuiteAddresses(t *testing.T) {
+	pool, err := db.Open(filepath.Join(t.TempDir(), "t.db"), db.SQLiteDialect)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	ctx := context.Background()
+	if err := db.EnsureSchema(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	nc, ns, err := seedStatusSchedules(ctx, pool, time.Date(2026, 8, 22, 9, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatalf("seedStatusSchedules: %v", err)
+	}
+	if cs, _ := contact.NewRepository(pool).List(ctx); len(cs) != nc || nc < 5 {
+		t.Errorf("contacts = %d (reported %d), want at least 5 so the checklist scrolls", len(cs), nc)
+	}
+	repo := statusschedule.NewRepository(pool)
+	active, err := repo.Get(ctx, "e2e-status-sched-active")
+	if err != nil || active.State != statusschedule.StateActive || active.RecipientsMode != statusschedule.ModeAll {
+		t.Errorf("active schedule = %+v, err %v", active, err)
+	}
+	paused, err := repo.Get(ctx, "e2e-status-sched-paused")
+	if err != nil || paused.State != statusschedule.StatePaused || paused.LastResult != statusschedule.ResultFailed || paused.LastError == "" {
+		t.Errorf("paused schedule = %+v, err %v", paused, err)
+	}
+	if ns != 2 {
+		t.Errorf("schedules reported = %d, want 2", ns)
 	}
 }

@@ -1,0 +1,165 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>{{if .IsEdit}}Edit Status Schedule{{else}}New Status Schedule{{end}}</h4>
+  <a class="btn btn-outline" href="{{u "/status/schedules"}}">Back to schedules</a>
+</div>
+
+{{if .Error}}<div class="alert alert-error" role="alert">{{.Error}}</div>{{end}}
+
+<div class="card form-card ss-card">
+  {{/* data-status-form lets status.js drive the colour swatches, the live
+       text preview and the recipients search / select all / select none /
+       count — the same markup contract /status uses. There is deliberately
+       no data-status-confirm panel here: saving a schedule posts nothing. */}}
+  <form action="{{if .IsEdit}}{{u "/status/schedules"}}/{{.ScheduleID}}{{else}}{{u "/status/schedules"}}{{end}}"
+        method="post" enctype="multipart/form-data" novalidate
+        class="status-form ss-form" data-status-form data-ss-form>
+
+    <label class="textfield">
+      <span class="textfield-label">Name</span>
+      <input type="text" name="name" value="{{.Form.Name}}" maxlength="120" required placeholder="Morning greeting">
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Session</span>
+      <select name="session_id" class="select" required>
+        <option value="">Choose a session…</option>
+        {{range .Sessions}}<option value="{{.ID}}" {{if eq $.Form.SessionID .ID}}selected{{end}}>{{.Label}}</option>{{end}}
+      </select>
+      <small class="muted">The post is skipped (and the skip is shown on the list) if this session is not connected when its time comes.</small>
+    </label>
+
+    <div class="ss-kind-tabs">
+      <input type="radio" name="kind" value="text" id="ss-kind-text" class="ss-kind-input" {{if eq .Form.Kind "text"}}checked{{end}}>
+      <input type="radio" name="kind" value="image" id="ss-kind-image" class="ss-kind-input" {{if eq .Form.Kind "image"}}checked{{end}}>
+      <input type="radio" name="kind" value="video" id="ss-kind-video" class="ss-kind-input" {{if eq .Form.Kind "video"}}checked{{end}}>
+      <div class="ss-kind-list" role="tablist" aria-label="Status type">
+        <label class="ss-kind-label" for="ss-kind-text">Text</label>
+        <label class="ss-kind-label" for="ss-kind-image">Image</label>
+        <label class="ss-kind-label" for="ss-kind-video">Video</label>
+      </div>
+
+      <div class="ss-kind-panel" data-ss-panel="text">
+        <div class="textfield">
+          <span class="textfield-label">Background colour</span>
+          <div class="status-swatches" data-status-swatches>
+            {{range $i, $sw := .Swatches}}
+            <button type="button" class="status-swatch{{if eq $i $.ActiveSwatch}} is-active{{end}}"
+                    style="background-color: {{$sw.Hex}}" data-status-swatch data-argb="{{$sw.ARGB}}"
+                    aria-label="{{$sw.Name}}" aria-pressed="{{if eq $i $.ActiveSwatch}}true{{else}}false{{end}}"></button>
+            {{end}}
+          </div>
+          <input type="hidden" name="background_argb" value="{{(index .Swatches .ActiveSwatch).ARGB}}" data-status-background-input>
+        </div>
+        <label class="textfield">
+          <span class="textfield-label">Status text</span>
+          <textarea name="text" rows="4" maxlength="700" placeholder="What's on your mind?" data-status-text-input>{{.Form.Text}}</textarea>
+        </label>
+        <div class="status-text-preview" data-status-text-preview style="background-color: {{(index .Swatches .ActiveSwatch).Hex}}">
+          <span data-status-text-preview-text>What's on your mind?</span>
+        </div>
+      </div>
+
+      <div class="ss-kind-panel" data-ss-panel="image">
+        {{if .ObjectsAvailable}}
+        <label class="textfield">
+          <span class="textfield-label">Image</span>
+          <input type="file" name="file_image" accept="image/jpeg,image/png,image/webp">
+          {{if and .IsEdit (eq .Form.Kind "image") .Form.MediaFilename}}<small class="muted">Current file: <span class="mono">{{.Form.MediaFilename}}</span>. Choose a file only to replace it.</small>{{end}}
+        </label>
+        {{else}}
+        <p class="ss-unavailable">Image schedules need object storage, which is not configured on this deployment.</p>
+        {{end}}
+      </div>
+
+      <div class="ss-kind-panel" data-ss-panel="video">
+        {{if .ObjectsAvailable}}
+        <label class="textfield">
+          <span class="textfield-label">Video</span>
+          <input type="file" name="file_video" accept="video/mp4,video/webm">
+          {{if and .IsEdit (eq .Form.Kind "video") .Form.MediaFilename}}<small class="muted">Current file: <span class="mono">{{.Form.MediaFilename}}</span>. Choose a file only to replace it.</small>{{end}}
+        </label>
+        {{else}}
+        <p class="ss-unavailable">Video schedules need object storage, which is not configured on this deployment.</p>
+        {{end}}
+      </div>
+
+      <label class="textfield ss-caption">
+        <span class="textfield-label">Caption (optional)</span>
+        <textarea name="caption" rows="3" maxlength="1024">{{.Form.Caption}}</textarea>
+        <small class="muted">The file is stored when you save and re-sent fresh on every post.</small>
+      </label>
+    </div>
+
+    <fieldset class="ss-fieldset">
+      <legend class="textfield-label">Days</legend>
+      <div class="ss-chips" role="group" aria-label="Weekdays">
+        {{range .Weekdays}}
+        <label class="ss-chip"><input type="checkbox" name="weekday" value="{{.Value}}" data-ss-weekday {{if .Checked}}checked{{end}}><span>{{.Label}}</span></label>
+        {{end}}
+      </div>
+    </fieldset>
+
+    <div class="ss-times">
+      <label class="textfield">
+        <span class="textfield-label">Window start</span>
+        <input type="time" name="window_start" value="{{.Form.WindowStart}}" required data-ss-start>
+      </label>
+      <label class="textfield">
+        <span class="textfield-label">Window end</span>
+        <input type="time" name="window_end" value="{{.Form.WindowEnd}}" required data-ss-end>
+      </label>
+      <label class="textfield">
+        <span class="textfield-label">Timezone</span>
+        <select name="timezone" class="select" required data-ss-tz>
+          {{range .Timezones}}<option value="{{.}}" {{if eq $.Form.Timezone .}}selected{{end}}>{{.}}</option>{{end}}
+        </select>
+      </label>
+    </div>
+
+    <p class="ss-summary" data-ss-summary aria-live="polite">{{.Summary}}</p>
+
+    <div class="ss-times">
+      <label class="textfield">
+        <span class="textfield-label">Start date</span>
+        <input type="date" name="start_date" value="{{.Form.StartDate}}" required>
+      </label>
+      <label class="textfield">
+        <span class="textfield-label">End date</span>
+        <input type="date" name="end_date" value="{{.Form.EndDate}}">
+        <small class="muted">Leave blank to run indefinitely until you pause or delete it. Every post adds a row to the message log, so an unlimited schedule keeps growing it.</small>
+      </label>
+    </div>
+
+    <div class="status-recipients" data-status-recipients>
+      <span class="textfield-label">Recipients — everyone checked sees the status</span>
+      {{if .Recipients}}
+      <input type="search" class="textfield-input status-recipients-search"
+             placeholder="Search contacts…" data-status-recipients-search aria-label="Search recipients">
+      <div class="status-recipients-actions">
+        <button type="button" class="btn btn-outline btn-sm" data-status-select-all>Select all</button>
+        <button type="button" class="btn btn-outline btn-sm" data-status-select-none>Select none</button>
+        <span class="status-recipients-count" data-status-recipients-count>0 selected</span>
+      </div>
+      <ul class="status-recipients-list" data-status-recipients-list>
+        {{range .Recipients}}
+        <li class="status-recipients-row" data-status-recipients-row data-name="{{.Name}}" data-phone="{{.Phone}}">
+          <label class="checkfield">
+            <input type="checkbox" name="recipients" value="{{.JID}}" data-status-recipient {{if .Checked}}checked{{end}}>
+            <span>{{.Name}} (+{{.Phone}})</span>
+          </label>
+        </li>
+        {{end}}
+      </ul>
+      <small class="muted">With every contact checked, the schedule posts to <strong>all contacts as they are at post time</strong> — contacts you add later are included. Untick anyone to freeze an explicit list instead.</small>
+      {{else}}
+      <p class="status-recipients-empty">No saved contacts yet. <a href="{{u "/contacts"}}">Add one</a> first — a status post needs at least one recipient.</p>
+      {{end}}
+    </div>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">{{if .IsEdit}}Save{{else}}Create{{end}}</button>
+    </div>
+  </form>
+</div>
+{{end}}

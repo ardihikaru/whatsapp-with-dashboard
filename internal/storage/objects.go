@@ -26,6 +26,9 @@ type ObjectStore interface {
 	// Get streams key's bytes back directly, for a caller that needs the
 	// content rather than a URL to hand a third party.
 	Get(ctx context.Context, key string) (io.ReadCloser, error)
+	// Delete removes key. Removing a key that does not exist is not an
+	// error (S3/MinIO semantics).
+	Delete(ctx context.Context, key string) error
 }
 
 // objectAPI is the narrow slice of *minio.Client MinioObjects needs, kept as
@@ -38,6 +41,7 @@ type objectAPI interface {
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, size int64, opts minio.PutObjectOptions) (minio.UploadInfo, error)
 	PresignedGetObject(ctx context.Context, bucketName, objectName string, expires time.Duration, reqParams url.Values) (*url.URL, error)
 	GetObject(ctx context.Context, bucketName, objectName string, opts minio.GetObjectOptions) (*minio.Object, error)
+	RemoveObject(ctx context.Context, bucketName, objectName string, opts minio.RemoveObjectOptions) error
 }
 
 // MinioObjects implements ObjectStore against a real (or, in tests, faked)
@@ -82,6 +86,13 @@ func (m *MinioObjects) Get(ctx context.Context, key string) (io.ReadCloser, erro
 		return nil, fmt.Errorf("minio: get %q: %w", key, err)
 	}
 	return obj, nil
+}
+
+func (m *MinioObjects) Delete(ctx context.Context, key string) error {
+	if err := m.client.RemoveObject(ctx, m.bucket, key, minio.RemoveObjectOptions{}); err != nil {
+		return fmt.Errorf("minio: delete %q: %w", key, err)
+	}
+	return nil
 }
 
 // ObjectKey builds the key a media send archives under:

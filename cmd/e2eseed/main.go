@@ -30,8 +30,10 @@ import (
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/apiclient"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/contact"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/convo"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
+	statusschedule "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/statusschedule"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo/corpus"
@@ -118,6 +120,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	nContacts, nStatus, err := seedStatusSchedules(ctx, pool, base)
+	if err != nil {
+		return err
+	}
+	log.Printf("seeded %d contacts, %d status schedules", nContacts, nStatus)
 	log.Printf("seeded %d sessions, %d api clients, %d messages, self-convo template + 3 runs, "+
 		"%d corpus templates, %d schedules",
 		len(seedSessionDefs), len(clientIDs), n, nTemplates, nSchedules)
@@ -554,4 +561,54 @@ func seedConvoScheduling(ctx context.Context, pool *sql.DB, base time.Time) (tem
 	}
 
 	return len(generated), 2, nil
+}
+
+// seedContactDefs: enough contacts that the schedule form's recipients
+// checklist scrolls, with one deliberately long name (truncation / wrap on a
+// phone) and one unbreakable token.
+var seedContactDefs = []struct{ Name, Phone string }{
+	{"Ria", "6281100000001"},
+	{"Budi Santoso — Koordinator Outlet Kemang Selatan dan Pondok Indah", "6281100000002"},
+	{"Sari", "6281100000003"},
+	{"Andi", "6281100000004"},
+	{"Dewi", "6281100000005"},
+	{"Pelanggan_Tetap_Dengan_Nama_Tanpa_Spasi_Sangat_Panjang_Sekali", "6281100000006"},
+}
+
+// seedStatusSchedules writes the contact book the /status/schedules form
+// lists (all pre-checked) and two schedules over the paired sessions: an
+// active text one, and a paused one carrying a recorded failure, so both
+// badge colours and the last-result column render in the browser suite.
+// IDs are fixed so e2e/status-schedules.spec.ts can address them.
+func seedStatusSchedules(ctx context.Context, pool *sql.DB, base time.Time) (contacts, schedules int, err error) {
+	cr := contact.NewRepository(pool)
+	for i, d := range seedContactDefs {
+		c := &contact.Contact{ID: fmt.Sprintf("e2e-contact-%02d", i), Name: d.Name, Phone: d.Phone,
+			CreatedAt: base.Add(-time.Duration(i) * time.Minute)}
+		if err := cr.Insert(ctx, c); err != nil {
+			return 0, 0, fmt.Errorf("insert contact %d: %w", i, err)
+		}
+	}
+	sr := statusschedule.NewRepository(pool)
+	defs := []statusschedule.Schedule{
+		{ID: "e2e-status-sched-active", Name: "Sapaan pagi — semua kontak", SessionID: seedSessionDefs[0].ID,
+			Kind: statusschedule.KindText, Text: "Selamat pagi! Outlet buka mulai pukul 08.00.", BgARGB: 4280184399,
+			Weekdays: "1,2,3,4,5", WindowStart: "07:00", WindowEnd: "10:27", Timezone: "Asia/Jakarta",
+			StartDate: "2026-08-22", RecipientsMode: statusschedule.ModeAll, State: statusschedule.StateActive,
+			NextFireAt: base.Add(24 * time.Hour), LastPlannedDate: "2026-08-22"},
+		{ID: "e2e-status-sched-paused", Name: "Promo akhir pekan", SessionID: seedSessionDefs[1].ID,
+			Kind: statusschedule.KindText, Text: "Diskon 20% setiap Sabtu dan Minggu.", BgARGB: 4291005256,
+			Weekdays: "6,7", WindowStart: "09:00", WindowEnd: "11:00", Timezone: "Asia/Jakarta",
+			StartDate: "2026-08-22", RecipientsMode: statusschedule.ModeCustom,
+			RecipientsJSON: `["6281100000001@s.whatsapp.net","6281100000003@s.whatsapp.net"]`,
+			State:          statusschedule.StatePaused, PausedReason: "paused by operator",
+			LastFiredAt: base.Add(-48 * time.Hour), LastResult: statusschedule.ResultFailed,
+			LastError: "session e2e-sess-0002: socket disconnected, waiting for reconnect"},
+	}
+	for i := range defs {
+		if err := sr.Insert(ctx, &defs[i]); err != nil {
+			return 0, 0, fmt.Errorf("insert status schedule %s: %w", defs[i].ID, err)
+		}
+	}
+	return len(seedContactDefs), len(defs), nil
 }

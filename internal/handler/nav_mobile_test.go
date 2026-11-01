@@ -16,6 +16,8 @@ var pagesWithChrome = []string{
 	"/sessions/new",
 	"/send",
 	"/status",
+	"/status/schedules",
+	"/status/schedules/new",
 	"/calls",
 	"/verify",
 	"/self-convo",
