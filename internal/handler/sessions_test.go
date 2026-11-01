@@ -161,11 +161,9 @@ func TestTheDeleteConfirmationDoesNotPromiseAnUnlinkTheWaxumBackendCannotDo(t *t
 		t.Fatal(err)
 	}
 
-	data := sessionRowsData{Sessions: []wa.Snapshot{
-		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected},
-	}}
+	data := sessionDeleteDialogData{Session: wa.Snapshot{ID: "s1", Name: "Gateway 1", State: wa.StateConnected}}
 	res := httptest.NewRecorder()
-	rend.RenderPartial(res, "session_rows", data)
+	rend.RenderPartial(res, "session_delete_dialog", data)
 	body := res.Body.String()
 
 	if strings.Contains(body, "This unlinks the device from WhatsApp") {
@@ -183,12 +181,13 @@ func TestTheDeleteConfirmationDoesNotPromiseAnUnlinkTheWaxumBackendCannotDo(t *t
 	}
 }
 
-// TestASessionRowShowsItsGroupCodeBadge is the group-code equivalent of
+// TestASessionRowShowsABadgePerGroup is the multi-group equivalent of
 // TestAMasterSessionRowShowsTheMasterBadge: proves session_rows.html
-// actually renders wa.Snapshot.GroupCode, rather than silently dropping it
-// on the floor the way a template-only change is easy to get wrong without
-// a test watching it.
-func TestASessionRowShowsItsGroupCodeBadge(t *testing.T) {
+// renders ONE badge per entry in wa.Snapshot.GroupCodes (0015's multi-group
+// model), not just the first (GroupCode), rather than silently dropping
+// the rest on the floor the way a template-only change is easy to get
+// wrong without a test watching it.
+func TestASessionRowShowsABadgePerGroup(t *testing.T) {
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
 		t.Fatal(err)
@@ -199,24 +198,26 @@ func TestASessionRowShowsItsGroupCodeBadge(t *testing.T) {
 	}
 
 	data := sessionRowsData{Sessions: []wa.Snapshot{
-		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected, GroupCode: "kemang"},
+		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected, GroupCodes: []string{"alpha", "kemang"}},
 	}}
 	res := httptest.NewRecorder()
 	rend.RenderPartial(res, "session_rows", data)
 	body := res.Body.String()
 
-	if !strings.Contains(body, `class="badge badge-group"`) {
-		t.Errorf("a grouped session's row does not carry the badge-group pill; body:\n%s", body)
+	if got := strings.Count(body, `class="badge badge-group"`); got != 2 {
+		t.Errorf("a session in 2 groups carries %d badge-group pill(s), want 2; body:\n%s", got, body)
 	}
-	if !strings.Contains(body, "kemang") {
-		t.Errorf("a grouped session's row does not say its group code anywhere; body:\n%s", body)
+	for _, code := range []string{"alpha", "kemang"} {
+		if !strings.Contains(body, code) {
+			t.Errorf("a grouped session's row does not say group code %q anywhere; body:\n%s", code, body)
+		}
 	}
 }
 
-// TestASessionRowWithNoGroupCodeShowsNoGroupBadge is the test that stops
-// TestASessionRowShowsItsGroupCodeBadge above passing against a template
-// that renders the group badge unconditionally.
-func TestASessionRowWithNoGroupCodeShowsNoGroupBadge(t *testing.T) {
+// TestASessionRowWithNoGroupsShowsNoGroupBadge is the test that stops
+// TestASessionRowShowsABadgePerGroup above passing against a template that
+// renders the group badge unconditionally.
+func TestASessionRowWithNoGroupsShowsNoGroupBadge(t *testing.T) {
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
 		t.Fatal(err)
@@ -227,7 +228,7 @@ func TestASessionRowWithNoGroupCodeShowsNoGroupBadge(t *testing.T) {
 	}
 
 	data := sessionRowsData{Sessions: []wa.Snapshot{
-		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected, GroupCode: ""},
+		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected},
 	}}
 	res := httptest.NewRecorder()
 	rend.RenderPartial(res, "session_rows", data)
@@ -235,6 +236,34 @@ func TestASessionRowWithNoGroupCodeShowsNoGroupBadge(t *testing.T) {
 
 	if strings.Contains(body, "badge-group") {
 		t.Errorf("an ungrouped session's row carries the badge-group pill; body:\n%s", body)
+	}
+}
+
+// TestASelfReminderSessionRowShowsItsBadge is the self-reminder equivalent
+// of TestAMasterSessionRowShowsTheMasterBadge.
+func TestASelfReminderSessionRowShowsItsBadge(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	data := sessionRowsData{Sessions: []wa.Snapshot{
+		{ID: "s1", Name: "Gateway 1", State: wa.StateConnected, SelfReminder: true},
+		{ID: "s2", Name: "Gateway 2", State: wa.StateConnected, SelfReminder: false},
+	}}
+	res := httptest.NewRecorder()
+	rend.RenderPartial(res, "session_rows", data)
+	body := res.Body.String()
+
+	if got := strings.Count(body, "badge-self-reminder"); got != 1 {
+		t.Errorf("badge-self-reminder appears %d time(s), want exactly 1 (one flagged session); body:\n%s", got, body)
+	}
+	if !strings.Contains(body, "Self reminder") {
+		t.Errorf("a self-reminder session's row does not say \"Self reminder\" anywhere; body:\n%s", body)
 	}
 }
 
@@ -334,14 +363,14 @@ func TestCreatingASessionWithAMalformedGroupCodeCreatesNothingAndShowsTheError(t
 	}
 }
 
-// TestTheSessionsPageCarriesAGroupEditorSlotOutsideThePolledTbody pins the
-// inline-edit design's load-bearing layout fact: #session-group-editor must
-// sit OUTSIDE #session-rows (which re-polls itself every 5s with
+// TestTheSessionsPageCarriesAnEditSlotOutsideThePolledTbody pins the
+// dialog design's load-bearing layout fact: #session-edit-slot must sit
+// OUTSIDE #session-rows (which re-polls itself every 5s with
 // hx-swap="innerHTML" and would wipe a half-typed value mid-edit — see
 // session_rows.html's own comment), and the tbody's own hx-trigger must
 // listen for the "sessions-changed" event a save fires, or the row never
-// picks up the new badge without waiting out the next poll.
-func TestTheSessionsPageCarriesAGroupEditorSlotOutsideThePolledTbody(t *testing.T) {
+// picks up the new badges without waiting out the next poll.
+func TestTheSessionsPageCarriesAnEditSlotOutsideThePolledTbody(t *testing.T) {
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
 		t.Fatal(err)
@@ -356,16 +385,16 @@ func TestTheSessionsPageCarriesAGroupEditorSlotOutsideThePolledTbody(t *testing.
 	body := rec.Body.String()
 
 	tbodyEnd := strings.Index(body, "</tbody>")
-	editorIdx := strings.Index(body, `id="session-group-editor"`)
+	slotIdx := strings.Index(body, `id="session-edit-slot"`)
 	if tbodyEnd == -1 {
 		t.Fatalf("sessions page has no </tbody> at all; body:\n%s", body)
 	}
-	if editorIdx == -1 {
-		t.Fatalf(`sessions page does not carry id="session-group-editor"; body:`+"\n%s", body)
+	if slotIdx == -1 {
+		t.Fatalf(`sessions page does not carry id="session-edit-slot"; body:`+"\n%s", body)
 	}
-	if editorIdx < tbodyEnd {
-		t.Errorf("#session-group-editor appears INSIDE the polled tbody (index %d < </tbody> index %d) — it would be wiped by the next 5s poll; body:\n%s",
-			editorIdx, tbodyEnd, body)
+	if slotIdx < tbodyEnd {
+		t.Errorf("#session-edit-slot appears INSIDE the polled tbody (index %d < </tbody> index %d) — it would be wiped by the next 5s poll; body:\n%s",
+			slotIdx, tbodyEnd, body)
 	}
 
 	tbodyStart := strings.Index(body, `id="session-rows"`)
@@ -374,16 +403,16 @@ func TestTheSessionsPageCarriesAGroupEditorSlotOutsideThePolledTbody(t *testing.
 	}
 	tbodyTag := body[tbodyStart:tbodyEnd]
 	if !strings.Contains(tbodyTag, "sessions-changed from:body") {
-		t.Errorf(`#session-rows hx-trigger does not listen for "sessions-changed from:body" — a save from the list editor would not refresh the row; tag:`+"\n%s", tbodyTag)
+		t.Errorf(`#session-rows hx-trigger does not listen for "sessions-changed from:body" — a save from the edit dialog would not refresh the row; tag:`+"\n%s", tbodyTag)
 	}
 }
 
-// TestEverySessionRowOffersEditGroupRegardlessOfMaster is the test that
-// stops a stray {{if .IsMaster}} guard from creeping onto the Edit group
-// button: group_code is deliberately uncoupled from is_master
-// (list.html's own explainer paragraph), so the button must render on both
-// a master and a non-master row alike.
-func TestEverySessionRowOffersEditGroupRegardlessOfMaster(t *testing.T) {
+// TestEverySessionRowOffersEditRegardlessOfMaster is the test that stops a
+// stray {{if .IsMaster}} guard from creeping onto the Edit button: routing
+// groups are deliberately uncoupled from is_master, so the button must
+// render on both a master and a non-master row alike, aimed at the shared
+// #session-edit-slot.
+func TestEverySessionRowOffersEditRegardlessOfMaster(t *testing.T) {
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
 		t.Fatal(err)
@@ -402,20 +431,21 @@ func TestEverySessionRowOffersEditGroupRegardlessOfMaster(t *testing.T) {
 	body := rec.Body.String()
 
 	for _, id := range []string{"master-1", "plain-1"} {
-		wantGet := `hx-get="/sessions/` + id + `/group-code/edit"`
+		wantGet := `hx-get="/sessions/` + id + `/edit"`
 		if !strings.Contains(body, wantGet) {
 			t.Errorf("row %q does not carry %s; body:\n%s", id, wantGet, body)
 		}
 	}
-	if got := strings.Count(body, `hx-target="#session-group-editor"`); got != 2 {
-		t.Errorf(`hx-target="#session-group-editor" appears %d times, want 2 (one per row); body:`+"\n%s", got, body)
+	if got := strings.Count(body, `hx-target="#session-edit-slot"`); got != 4 {
+		t.Errorf(`hx-target="#session-edit-slot" appears %d times, want 4 (Edit + Delete… per row); body:`+"\n%s", got, body)
 	}
 }
 
-// TestTheSessionsPageCarriesANameEditorSlotOutsideThePolledTbodyAndRowsOfferEditName
-// pins the rename editor's layout: the slot sits after </tbody> (a poll would
-// wipe a half-typed name) and every row has an "Edit name" button aimed at it.
-func TestTheSessionsPageCarriesANameEditorSlotOutsideThePolledTbodyAndRowsOfferEditName(t *testing.T) {
+// TestEverySessionRowOffersDeleteConfirmRegardlessOfState proves the
+// kebab menu's "Delete…" item (which loads the delete confirmation dialog,
+// replacing the old browser hx-confirm) renders for every row, whatever
+// its connection state.
+func TestEverySessionRowOffersDeleteConfirmRegardlessOfState(t *testing.T) {
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
 		t.Fatal(err)
@@ -424,25 +454,17 @@ func TestTheSessionsPageCarriesANameEditorSlotOutsideThePolledTbodyAndRowsOfferE
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := httptest.NewRecorder()
-	rend.RenderPage(rec, "sessions", sessionsPageData{})
-	body := rec.Body.String()
-	tbodyEnd, slot := strings.Index(body, "</tbody>"), strings.Index(body, `id="session-name-editor"`)
-	if slot == -1 || tbodyEnd == -1 || slot < tbodyEnd {
-		t.Errorf("#session-name-editor must exist after </tbody> (slot=%d, tbodyEnd=%d)", slot, tbodyEnd)
-	}
 
-	rec = httptest.NewRecorder()
-	rend.RenderPartial(rec, "session_rows", sessionRowsData{Sessions: []wa.Snapshot{
-		{ID: "a-1", Name: "A", State: wa.StateConnected}, {ID: "b-1", Name: "B", State: wa.StateConnected},
-	}})
-	rows := rec.Body.String()
+	data := sessionRowsData{Sessions: []wa.Snapshot{
+		{ID: "a-1", Name: "A", State: wa.StateConnected},
+		{ID: "b-1", Name: "B", State: wa.StateDisconnected},
+	}}
+	rec := httptest.NewRecorder()
+	rend.RenderPartial(rec, "session_rows", data)
+	body := rec.Body.String()
 	for _, id := range []string{"a-1", "b-1"} {
-		if want := `hx-get="/sessions/` + id + `/name/edit"`; !strings.Contains(rows, want) {
-			t.Errorf("row %q lacks %s", id, want)
+		if want := `hx-get="/sessions/` + id + `/delete-confirm"`; !strings.Contains(body, want) {
+			t.Errorf("row %q lacks %s; body:\n%s", id, want, body)
 		}
-	}
-	if got := strings.Count(rows, `hx-target="#session-name-editor"`); got != 2 {
-		t.Errorf(`hx-target="#session-name-editor" count = %d, want 2`, got)
 	}
 }

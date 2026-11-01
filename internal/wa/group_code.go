@@ -3,6 +3,7 @@ package wa
 import (
 	"errors"
 	"regexp"
+	"sort"
 	"strings"
 )
 
@@ -35,4 +36,31 @@ func NormalizeGroupCode(raw string) (string, error) {
 		return "", errors.New(`group_code may contain only lowercase letters, digits, "-" and "_"`)
 	}
 	return code, nil
+}
+
+// NormalizeGroupCodes validates and canonicalizes a whole routing-group
+// SET: each code through NormalizeGroupCode, "" entries dropped, duplicates
+// dropped, the result sorted — the exact pure logic
+// ManagedSession.SetGroupCodes applies before ever touching state or the
+// DB, exported so a caller that must validate several fields TOGETHER
+// before writing any of them (the /sessions edit dialog's PostSessionEdit,
+// internal/handler) can check this one without a side effect, mirroring
+// ValidateSessionName (session.go) for the name half of that same form.
+// Returns the first invalid code's error immediately — no partial result.
+func NormalizeGroupCodes(raw []string) ([]string, error) {
+	seen := map[string]bool{}
+	var out []string
+	for _, r := range raw {
+		code, err := NormalizeGroupCode(r)
+		if err != nil {
+			return nil, err
+		}
+		if code == "" || seen[code] {
+			continue
+		}
+		seen[code] = true
+		out = append(out, code)
+	}
+	sort.Strings(out)
+	return out, nil
 }

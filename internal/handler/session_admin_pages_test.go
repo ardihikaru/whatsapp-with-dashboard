@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -523,200 +524,243 @@ func TestEveryNewTableIsWrappedInTableScroll(t *testing.T) {
 	}
 }
 
-// TestTheGroupEditorPrefillsTheCurrentCodeAndOffersExistingOnes drives
-// GetSessionGroupCodeEditor end to end: the seeded session already carries
-// a code (set directly through wa.ManagedSession.SetGroupCode, the same
-// call PostSessionSetGroupCode itself makes), a second session is created
-// with a DIFFERENT code through the ordinary create form, and the editor
-// GET must prefill the FIRST session's own code while offering BOTH codes
-// in the datalist — plus the hidden view=list field the save handler
-// branches on.
-func TestTheGroupEditorPrefillsTheCurrentCodeAndOffersExistingOnes(t *testing.T) {
+// TestTheEditDialogRendersNameChipsMasterAndSelfReminder drives
+// GetSessionEdit end to end: the seeded session already carries a name,
+// two groups and the master flag; the dialog must prefill all of it, plus
+// offer every known group code (its own and a second session's) for the
+// chip input's datalist.
+func TestTheEditDialogRendersNameChipsMasterAndSelfReminder(t *testing.T) {
 	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
 
-	if err := s.SetGroupCode(context.Background(), "kemang"); err != nil {
+	if err := s.SetGroupCodes(context.Background(), []string{"kemang", "alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetMaster(context.Background(), true); err != nil {
 		t.Fatal(err)
 	}
 	createRes := authedPostForm(t, srv, sessions, "/sessions", url.Values{
 		"name": {"Second Gateway"}, "phone": {"+62 812-3333-4444"}, "group_code": {"ops"},
 	})
-	// PostSessionCreate redirects (303) a non-HX-Request POST — see its own
-	// doc comment — so a plain form post like this one is expected to
-	// redirect, not render a partial.
 	if createRes.Code != http.StatusSeeOther {
 		t.Fatalf("POST /sessions (second session) = %d, want 303: %s", createRes.Code, createRes.Body.String())
 	}
 
-	res := authedGet(t, srv, sessions, "/sessions/"+s.ID+"/group-code/edit")
+	res := authedGet(t, srv, sessions, "/sessions/"+s.ID+"/edit")
 	if res.Code != http.StatusOK {
-		t.Fatalf("GET /sessions/%s/group-code/edit = %d: %s", s.ID, res.Code, res.Body.String())
+		t.Fatalf("GET /sessions/%s/edit = %d: %s", s.ID, res.Code, res.Body.String())
 	}
 	body := res.Body.String()
-	if !strings.Contains(body, `value="kemang"`) {
-		t.Errorf("editor does not prefill the session's own group code (kemang); body:\n%s", body)
+	if !strings.Contains(body, `value="gw"`) {
+		t.Errorf("edit dialog does not prefill the session's own name; body:\n%s", body)
 	}
-	for _, code := range []string{"kemang", "ops"} {
+	for _, code := range []string{"alpha", "kemang", "ops"} {
 		if !strings.Contains(body, `<option value="`+code+`">`) {
-			t.Errorf("editor's datalist is missing an <option> for %q; body:\n%s", code, body)
+			t.Errorf("edit dialog's datalist is missing an <option> for %q; body:\n%s", code, body)
 		}
 	}
-	if !strings.Contains(body, `name="view" value="list"`) {
-		t.Errorf(`editor form does not carry hidden name="view" value="list"; body:`+"\n%s", body)
+	if !strings.Contains(body, "alpha,kemang") {
+		t.Errorf("edit dialog does not carry the session's own sorted group set in its hidden field; body:\n%s", body)
+	}
+	if !strings.Contains(body, `name="master"`) || !strings.Contains(body, `name="self_reminder"`) {
+		t.Errorf("edit dialog is missing the master or self_reminder toggle; body:\n%s", body)
+	}
+	if !strings.Contains(body, "checked") {
+		t.Errorf("edit dialog does not show the master toggle as checked for a master session; body:\n%s", body)
 	}
 }
 
-// TestTheGroupEditorIs404ForAnUnknownSession matches every other
+// TestTheEditDialogIs404ForAnUnknownSession matches every other
 // single-session GET handler's behaviour on a stale/unknown id.
-func TestTheGroupEditorIs404ForAnUnknownSession(t *testing.T) {
+func TestTheEditDialogIs404ForAnUnknownSession(t *testing.T) {
 	srv, sessions, _, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
-
-	res := authedGet(t, srv, sessions, "/sessions/does-not-exist/group-code/edit")
-	if res.Code != http.StatusNotFound {
-		t.Fatalf("GET /sessions/does-not-exist/group-code/edit = %d, want 404: %s", res.Code, res.Body.String())
-	}
-}
-
-// TestSavingFromTheListEditorRefreshesTheRowsViaHXTrigger drives the
-// list-editor save path end to end: view=list must render the editor
-// partial back (not the ops page's session_group_code_result), report the
-// save with "Saved" copy, and fire HX-Trigger: sessions-changed so
-// #session-rows' hx-trigger (list.html) picks up the new badge — proven
-// here by re-fetching /sessions/rows and finding the badge for real,
-// rather than trusting the header alone.
-func TestSavingFromTheListEditorRefreshesTheRowsViaHXTrigger(t *testing.T) {
-	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
-
-	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/group-code",
-		url.Values{"view": {"list"}, "group_code": {"kemang"}})
-	if res.Code != http.StatusOK {
-		t.Fatalf("POST /sessions/%s/group-code (view=list) = %d: %s", s.ID, res.Code, res.Body.String())
-	}
-	if got := res.Header().Get("HX-Trigger"); got != "sessions-changed" {
-		t.Errorf(`HX-Trigger = %q, want "sessions-changed"`, got)
-	}
-	if !strings.Contains(res.Body.String(), "Saved") {
-		t.Errorf("list-editor save response does not say \"Saved\"; body:\n%s", res.Body.String())
-	}
-	if !strings.Contains(res.Body.String(), "<form") {
-		t.Errorf("list-editor save response does not still carry the editor form; body:\n%s", res.Body.String())
-	}
-
-	rows := authedGet(t, srv, sessions, "/sessions/rows")
-	rowsBody := rows.Body.String()
-	if !strings.Contains(rowsBody, "badge-group") || !strings.Contains(rowsBody, "kemang") {
-		t.Errorf("rows do not show the saved group code after the list-editor save; body:\n%s", rowsBody)
-	}
-}
-
-// TestAMalformedCodeFromTheListEditorStaysInTheEditorWithTheError is the
-// failure-path twin of the test above: an invalid code must re-render the
-// editor (not the rows) with the operator's own typed value still in the
-// field, an inline error, and NO HX-Trigger — a bad save must not tell the
-// tbody anything changed.
-func TestAMalformedCodeFromTheListEditorStaysInTheEditorWithTheError(t *testing.T) {
-	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
-
-	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/group-code",
-		url.Values{"view": {"list"}, "group_code": {"Bad Code!"}})
-	if res.Code != http.StatusOK {
-		t.Fatalf("POST /sessions/%s/group-code (malformed, view=list) = %d: %s", s.ID, res.Code, res.Body.String())
-	}
-	if got := res.Header().Get("HX-Trigger"); got != "" {
-		t.Errorf("HX-Trigger = %q on a failed save, want empty", got)
-	}
-	body := res.Body.String()
-	if !strings.Contains(body, "alert-error") {
-		t.Errorf("malformed list-editor save does not render alert-error; body:\n%s", body)
-	}
-	if !strings.Contains(body, `value="Bad Code!"`) {
-		t.Errorf("malformed list-editor save does not keep the operator's typed value in the field; body:\n%s", body)
-	}
-	if !strings.Contains(body, "<form") {
-		t.Errorf("malformed list-editor save does not still carry the editor form; body:\n%s", body)
-	}
-
-	rows := authedGet(t, srv, sessions, "/sessions/rows")
-	if strings.Contains(rows.Body.String(), "badge-group") {
-		t.Errorf("rows show a group badge after a malformed save that should not have persisted anything; body:\n%s", rows.Body.String())
-	}
-}
-
-// TestTheOpsPageGroupSaveStillRendersItsOwnResultPartial guards the branch
-// split in PostSessionSetGroupCode: a POST with no "view" field (the ops
-// page's own form, ops.html) must keep rendering
-// session_group_code_result, unchanged, with no HX-Trigger header — proving
-// the list-editor addition did not alter the ops page's existing behaviour.
-func TestTheOpsPageGroupSaveStillRendersItsOwnResultPartial(t *testing.T) {
-	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
-
-	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/group-code",
-		url.Values{"group_code": {"kemang"}})
-	if res.Code != http.StatusOK {
-		t.Fatalf("POST /sessions/%s/group-code (ops page, no view) = %d: %s", s.ID, res.Code, res.Body.String())
-	}
-	if got := res.Header().Get("HX-Trigger"); got != "" {
-		t.Errorf("HX-Trigger = %q on the ops page's own save, want empty", got)
-	}
-	body := res.Body.String()
-	if strings.Contains(body, `id="session-group-editor"`) || strings.Contains(body, "<form") {
-		t.Errorf("ops page's save rendered the list editor instead of session_group_code_result; body:\n%s", body)
-	}
-	if !strings.Contains(body, "Saved") {
-		t.Errorf("ops page's save response does not say \"Saved\"; body:\n%s", body)
-	}
-}
-
-func TestTheNameEditorPrefillsTheCurrentName(t *testing.T) {
-	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
-	res := authedGet(t, srv, sessions, "/sessions/"+s.ID+"/name/edit")
-	if res.Code != http.StatusOK {
-		t.Fatalf("GET name/edit = %d: %s", res.Code, res.Body.String())
-	}
-	body := res.Body.String()
-	if !strings.Contains(body, `name="name" value="`+s.Snapshot().Name+`"`) {
-		t.Errorf("editor does not prefill the current name %q; body:\n%s", s.Snapshot().Name, body)
-	}
-}
-
-func TestTheNameEditorIs404ForAnUnknownSession(t *testing.T) {
-	srv, sessions, _, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
-	if res := authedGet(t, srv, sessions, "/sessions/does-not-exist/name/edit"); res.Code != http.StatusNotFound {
+	if res := authedGet(t, srv, sessions, "/sessions/does-not-exist/edit"); res.Code != http.StatusNotFound {
 		t.Fatalf("GET = %d, want 404", res.Code)
 	}
-	if res := authedPostForm(t, srv, sessions, "/sessions/does-not-exist/name", url.Values{"name": {"x"}}); res.Code != http.StatusNotFound {
+	if res := authedPostForm(t, srv, sessions, "/sessions/does-not-exist/edit", url.Values{"name": {"x"}}); res.Code != http.StatusNotFound {
 		t.Fatalf("POST = %d, want 404", res.Code)
 	}
 }
 
-func TestSavingANewNameFiresHXTriggerAndTheRowsShowIt(t *testing.T) {
+// TestSavingTheEditDialogAppliesNameGroupsAndMasterTogetherAndFiresHXTrigger
+// is the happy path for PostSessionEdit: one POST changes the name, the
+// routing-group set AND the master flag at once, fires HX-Trigger:
+// sessions-changed, and the rows reflect every change.
+func TestSavingTheEditDialogAppliesNameGroupsAndMasterTogetherAndFiresHXTrigger(t *testing.T) {
 	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
-	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/name", url.Values{"name": {"Renamed Gateway"}})
+
+	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/edit", url.Values{
+		"name": {"Renamed Gateway"}, "group_codes": {"beta,alpha"}, "master": {"true"},
+	})
 	if res.Code != http.StatusOK {
-		t.Fatalf("POST name = %d: %s", res.Code, res.Body.String())
+		t.Fatalf("POST edit = %d: %s", res.Code, res.Body.String())
 	}
 	if got := res.Header().Get("HX-Trigger"); got != "sessions-changed" {
 		t.Errorf(`HX-Trigger = %q, want "sessions-changed"`, got)
 	}
+
+	snap := s.Snapshot()
+	if snap.Name != "Renamed Gateway" {
+		t.Errorf("Name = %q, want %q", snap.Name, "Renamed Gateway")
+	}
+	if len(snap.GroupCodes) != 2 || snap.GroupCodes[0] != "alpha" || snap.GroupCodes[1] != "beta" {
+		t.Errorf("GroupCodes = %v, want [alpha beta]", snap.GroupCodes)
+	}
+	if !snap.IsMaster {
+		t.Error("IsMaster = false after master=true in the edit form")
+	}
+
 	rows := authedGet(t, srv, sessions, "/sessions/rows").Body.String()
-	if !strings.Contains(rows, "Renamed Gateway") {
-		t.Errorf("rows do not show the new name; body:\n%s", rows)
+	if !strings.Contains(rows, "Renamed Gateway") || !strings.Contains(rows, "badge-master") {
+		t.Errorf("rows do not reflect the edit; body:\n%s", rows)
 	}
 }
 
-func TestAnInvalidNameStaysInTheEditorWithTheErrorAndNoTrigger(t *testing.T) {
+// TestSavingTheEditDialogCanMoveTheSelfReminderFlag proves PostSessionEdit
+// also drives Manager.SetSelfReminder, and that the dialog's hint names the
+// session the flag will move FROM.
+func TestSavingTheEditDialogCanMoveTheSelfReminderFlag(t *testing.T) {
 	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
-	before := s.Snapshot().Name
-	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/name", url.Values{"name": {"   "}})
+	// Flag a SECOND session as self-reminder first, so the dialog's hint
+	// has someone to name.
+	createRes := authedPostForm(t, srv, sessions, "/sessions", url.Values{
+		"name": {"Holder"}, "phone": {"+62 812-5555-6666"},
+	})
+	if createRes.Code != http.StatusSeeOther {
+		t.Fatalf("POST /sessions (holder) = %d, want 303: %s", createRes.Code, createRes.Body.String())
+	}
+	rows := authedGet(t, srv, sessions, "/sessions/rows").Body.String()
+	holderID := findSessionIDByName(t, rows, "Holder")
+
+	res := authedPostForm(t, srv, sessions, "/sessions/"+holderID+"/edit", url.Values{
+		"name": {"Holder"}, "self_reminder": {"true"},
+	})
 	if res.Code != http.StatusOK {
-		t.Fatalf("POST name = %d: %s", res.Code, res.Body.String())
+		t.Fatalf("POST edit (flag holder) = %d: %s", res.Code, res.Body.String())
+	}
+
+	getRes := authedGet(t, srv, sessions, "/sessions/"+s.ID+"/edit")
+	if !strings.Contains(getRes.Body.String(), "Holder") {
+		t.Errorf("edit dialog for a non-holder session does not name the current self-reminder holder; body:\n%s", getRes.Body.String())
+	}
+
+	// Now move the flag to s.
+	moveRes := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/edit", url.Values{
+		"name": {s.Snapshot().Name}, "self_reminder": {"true"},
+	})
+	if moveRes.Code != http.StatusOK {
+		t.Fatalf("POST edit (move flag) = %d: %s", moveRes.Code, moveRes.Body.String())
+	}
+	if !s.Snapshot().SelfReminder {
+		t.Error("SelfReminder = false on s after moving the flag to it")
+	}
+}
+
+// findSessionIDByName is a small helper for tests that create a session
+// through the form (which never returns the id directly) and then need it
+// — it scans the rows partial's hx-post targets for the row carrying name.
+func findSessionIDByName(t *testing.T, rowsBody, name string) string {
+	t.Helper()
+	idx := strings.Index(rowsBody, name)
+	if idx == -1 {
+		t.Fatalf("name %q not found in rows body:\n%s", name, rowsBody)
+	}
+	// The nearest preceding hx-post="/sessions/{id}/deactivate" (every row
+	// has one activate/deactivate/pair action before its name cell's
+	// close, but more robust: search for /sessions/ immediately before idx
+	// is fragile across markup changes). Simpler and robust: re-parse via
+	// a regex for hx-post="/sessions/<id>/(activate|deactivate)" paired
+	// with the row text window around name.
+	before := rowsBody[:idx]
+	tagStart := strings.LastIndex(before, "<tr>")
+	if tagStart == -1 {
+		t.Fatalf("could not find enclosing <tr> for name %q", name)
+	}
+	rowEnd := strings.Index(rowsBody[idx:], "</tr>")
+	row := rowsBody[tagStart : idx+rowEnd]
+	m := regexp.MustCompile(`/sessions/([a-f0-9]+)/`).FindStringSubmatch(row)
+	if m == nil {
+		t.Fatalf("could not find a session id in row for name %q:\n%s", name, row)
+	}
+	return m[1]
+}
+
+// TestAnEditDialogValidationErrorLeavesEveryFieldUnchanged proves the
+// "validate everything before changing anything" contract: an invalid
+// group code must leave the name, groups, master AND self-reminder flags
+// exactly as they were, even though the form also asked to change the
+// name and set master.
+func TestAnEditDialogValidationErrorLeavesEveryFieldUnchanged(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+	before := s.Snapshot()
+
+	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/edit", url.Values{
+		"name": {"Should Not Apply"}, "group_codes": {"Bad Code!"}, "master": {"true"},
+	})
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST edit (invalid) = %d: %s", res.Code, res.Body.String())
 	}
 	if got := res.Header().Get("HX-Trigger"); got != "" {
 		t.Errorf("HX-Trigger = %q on a rejected save, want none", got)
 	}
-	if body := res.Body.String(); !strings.Contains(body, "alert-error") || !strings.Contains(body, "<form") {
-		t.Errorf("rejected save should re-render the editor with an inline error; body:\n%s", body)
+	body := res.Body.String()
+	if !strings.Contains(body, "alert-error") {
+		t.Errorf("rejected edit does not render alert-error; body:\n%s", body)
 	}
-	if got := s.Snapshot().Name; got != before {
-		t.Errorf("Name = %q after rejected save, want %q", got, before)
+
+	after := s.Snapshot()
+	if after.Name != before.Name {
+		t.Errorf("Name changed to %q despite a rejected save (was %q)", after.Name, before.Name)
+	}
+	if after.IsMaster != before.IsMaster {
+		t.Errorf("IsMaster changed despite a rejected save")
+	}
+	if len(after.GroupCodes) != len(before.GroupCodes) {
+		t.Errorf("GroupCodes changed despite a rejected save: %v -> %v", before.GroupCodes, after.GroupCodes)
+	}
+}
+
+// TestAnEmptyNameInTheEditDialogIsRejectedWithoutTouchingGroups is the
+// twin of the test above from the OTHER direction: a bad NAME must not
+// silently let a valid group-codes change through either.
+func TestAnEmptyNameInTheEditDialogIsRejectedWithoutTouchingGroups(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+
+	res := authedPostForm(t, srv, sessions, "/sessions/"+s.ID+"/edit", url.Values{
+		"name": {"   "}, "group_codes": {"alpha"},
+	})
+	if res.Code != http.StatusOK {
+		t.Fatalf("POST edit (empty name) = %d: %s", res.Code, res.Body.String())
+	}
+	if len(s.Snapshot().GroupCodes) != 0 {
+		t.Errorf("GroupCodes = %v after a rejected (empty-name) save, want untouched (empty)", s.Snapshot().GroupCodes)
+	}
+}
+
+// TestTheDeleteConfirmDialogPrefillsNameAndPhone drives
+// GetSessionDeleteConfirm end to end.
+func TestTheDeleteConfirmDialogPrefillsNameAndPhone(t *testing.T) {
+	srv, sessions, s, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+	res := authedGet(t, srv, sessions, "/sessions/"+s.ID+"/delete-confirm")
+	if res.Code != http.StatusOK {
+		t.Fatalf("GET delete-confirm = %d: %s", res.Code, res.Body.String())
+	}
+	body := res.Body.String()
+	snap := s.Snapshot()
+	if !strings.Contains(body, snap.Name) || !strings.Contains(body, snap.Phone) {
+		t.Errorf("delete confirmation does not show the session's name/phone; body:\n%s", body)
+	}
+	for _, want := range []string{"does NOT unlink", "Linked devices"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("delete confirmation does not contain %q; body:\n%s", want, body)
+		}
+	}
+}
+
+// TestTheDeleteConfirmDialogIs404ForAnUnknownSession matches every other
+// single-session GET handler's behaviour on a stale/unknown id.
+func TestTheDeleteConfirmDialogIs404ForAnUnknownSession(t *testing.T) {
+	srv, sessions, _, _ := newSessionAdminTestServer(t, whatsmeowShapedBackend(), true)
+	if res := authedGet(t, srv, sessions, "/sessions/does-not-exist/delete-confirm"); res.Code != http.StatusNotFound {
+		t.Fatalf("GET = %d, want 404", res.Code)
 	}
 }

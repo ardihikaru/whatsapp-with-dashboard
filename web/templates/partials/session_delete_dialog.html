@@ -1,0 +1,28 @@
+{{define "session_delete_dialog"}}
+<dialog id="session-delete-dialog" class="modal session-delete-modal" data-autoopen>
+  <div class="modal-head">
+    <h4>Delete session — {{.Session.Name}}</h4>
+    <button type="button" class="btn-icon" data-modal-close aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    <p>You are about to delete <strong>{{.Session.Name}}</strong> (<span class="mono">{{.Session.Phone}}</span>).</p>
+    <p class="se-delete-warning">This removes it here, but does NOT unlink the device on the waxum backend —
+       open WhatsApp on the handset, go to <strong>Linked devices</strong>, and remove it there too, or it
+       keeps occupying one of the account's linked-device slots.</p>
+
+    <div data-delete-confirm="{{.Session.Name}}">
+      <label class="textfield se-delete-confirm-input">
+        <span class="textfield-label">Type "{{.Session.Name}}" to confirm</span>
+        <input type="text" autocomplete="off" data-delete-confirm-input>
+      </label>
+      <div class="form-actions">
+        <button class="btn btn-outline btn-danger" type="button" disabled data-delete-confirm-button
+                hx-post="{{u "/sessions"}}/{{.Session.ID}}/delete" hx-target="#session-rows" hx-swap="innerHTML">
+          Delete
+        </button>
+        <button class="btn btn-outline" type="button" data-modal-close>Cancel</button>
+      </div>
+    </div>
+  </div>
+</dialog>
+{{end}}

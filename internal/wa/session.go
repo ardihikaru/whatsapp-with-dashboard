@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -382,20 +381,10 @@ func firstGroupCode(codes []string) string {
 // on. An empty/nil codes clears every group (back to the ungrouped pool).
 // Like SetMaster this never touches state, the socket, or active.
 func (s *ManagedSession) SetGroupCodes(ctx context.Context, codes []string) error {
-	seen := map[string]bool{}
-	var normalized []string
-	for _, raw := range codes {
-		code, err := NormalizeGroupCode(raw)
-		if err != nil {
-			return &ValidationError{Field: "group_codes", Msg: err.Error()}
-		}
-		if code == "" || seen[code] {
-			continue
-		}
-		seen[code] = true
-		normalized = append(normalized, code)
+	normalized, err := NormalizeGroupCodes(codes)
+	if err != nil {
+		return &ValidationError{Field: "group_codes", Msg: err.Error()}
 	}
-	sort.Strings(normalized)
 
 	s.mu.Lock()
 	s.groupCodes = normalized
@@ -428,12 +417,9 @@ func (s *ManagedSession) Name() string {
 // untouched. waxum keeps the name it was given at CreateSession: it has no
 // rename call, and WSM's name is purely cosmetic there.
 func (s *ManagedSession) SetName(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return &ValidationError{Field: "name", Msg: "name is required"}
-	}
-	if utf8.RuneCountInString(name) > maxSessionNameLen {
-		return &ValidationError{Field: "name", Msg: fmt.Sprintf("name must be at most %d characters", maxSessionNameLen)}
+	name, err := ValidateSessionName(name)
+	if err != nil {
+		return err
 	}
 	if err := s.mgr.repo.SetName(s.mgr.persistCtx, s.ID, name); err != nil {
 		return err
@@ -442,6 +428,23 @@ func (s *ManagedSession) SetName(ctx context.Context, name string) error {
 	s.name = name
 	s.nameMu.Unlock()
 	return nil
+}
+
+// ValidateSessionName is the pure check SetName applies — trimmed,
+// non-empty, at most maxSessionNameLen runes — exported so a caller that
+// must validate several fields TOGETHER before writing any of them (the
+// /sessions edit dialog's PostSessionEdit, internal/handler) can check this
+// one without a side effect, the same role NormalizeGroupCodes plays for
+// the group-code half of that same form.
+func ValidateSessionName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", &ValidationError{Field: "name", Msg: "name is required"}
+	}
+	if utf8.RuneCountInString(name) > maxSessionNameLen {
+		return "", &ValidationError{Field: "name", Msg: fmt.Sprintf("name must be at most %d characters", maxSessionNameLen)}
+	}
+	return name, nil
 }
 
 // markDeviceGone handles E8: paired row without a whatsmeow device (DB file

@@ -79,9 +79,12 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("POST "+bp+"/sessions/{id}/deactivate", page(http.HandlerFunc(h.PostSessionDeactivate)))
 	mux.Handle("POST "+bp+"/sessions/{id}/master", page(http.HandlerFunc(h.PostSessionSetMaster)))
 	mux.Handle("POST "+bp+"/sessions/{id}/group-code", page(http.HandlerFunc(h.PostSessionSetGroupCode)))
-	mux.Handle("GET "+bp+"/sessions/{id}/group-code/edit", page(http.HandlerFunc(h.GetSessionGroupCodeEditor)))
-	mux.Handle("GET "+bp+"/sessions/{id}/name/edit", page(http.HandlerFunc(h.GetSessionNameEditor)))
-	mux.Handle("POST "+bp+"/sessions/{id}/name", page(http.HandlerFunc(h.PostSessionSetName)))
+	// The single Edit session dialog (Part 3) — replaces the old separate
+	// name/group-code list editors above, which the ops page's own static
+	// card (PostSessionSetGroupCode) does not need and keeps.
+	mux.Handle("GET "+bp+"/sessions/{id}/edit", page(http.HandlerFunc(h.GetSessionEdit)))
+	mux.Handle("POST "+bp+"/sessions/{id}/edit", page(http.HandlerFunc(h.PostSessionEdit)))
+	mux.Handle("GET "+bp+"/sessions/{id}/delete-confirm", page(http.HandlerFunc(h.GetSessionDeleteConfirm)))
 	mux.Handle("POST "+bp+"/sessions/{id}/delete", page(http.HandlerFunc(h.PostSessionDelete)))
 	mux.Handle("GET "+bp+"/sessions/{id}/pair", page(http.HandlerFunc(h.GetPair)))
 	mux.Handle("POST "+bp+"/sessions/{id}/pair/start", page(http.HandlerFunc(h.PostPairStart)))

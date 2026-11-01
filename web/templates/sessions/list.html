@@ -22,7 +22,7 @@
   <div class="table-scroll">
     <table class="table table-wide">
       <thead>
-        <tr><th>Name</th><th>Phone</th><th>JID</th><th>Status</th><th>Group</th><th>Actions</th></tr>
+        <tr><th>Name</th><th>Phone</th><th>JID</th><th>Status</th><th>Groups</th><th>Actions</th></tr>
       </thead>
       <tbody id="session-rows" hx-get="{{u "/sessions/rows"}}" hx-trigger="load, every 5s, sessions-changed from:body" hx-swap="innerHTML">
         <tr><td colspan="6">Loading…</td></tr>
@@ -33,12 +33,11 @@
 
 <!-- OUTSIDE the .card/tbody above, deliberately: the tbody re-polls itself
      every 5s with hx-swap="innerHTML" (see session_rows.html's own comment),
-     which would wipe a half-typed group code out of an <input> mid-edit. The
-     "Edit group" button on each row loads session_group_editor into this
-     slot instead; on save the handler sets HX-Trigger: sessions-changed,
-     which the tbody's hx-trigger above listens for to pick up the new badge
-     without a full page reload. -->
-<div id="session-group-editor"></div>
-<!-- Same reasoning for the rename editor ("Edit name" on each row). -->
-<div id="session-name-editor"></div>
+     which would wipe a half-typed value out of a dialog's <input> mid-edit.
+     The Edit/Delete buttons on each row load one dialog at a time into this
+     slot; on a successful save the handler sets HX-Trigger:
+     sessions-changed, which the tbody's hx-trigger above picks up to
+     refresh the row AND which session-edit.js listens for to close the
+     dialog. -->
+<div id="session-edit-slot"></div>
 {{end}}

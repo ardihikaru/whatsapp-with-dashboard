@@ -1,0 +1,273 @@
+/* /sessions' Edit/Delete dialogs (Part 3 redesign) — SIXTEENTH stylesheet,
+   loaded after status-schedule.css in both base.html and login.html (see
+   base.html's load-order comment). Reuses dialog.modal (components.css)
+   and the chip/switch shapes status-schedule.css already established for
+   this codebase; only what is NEW here is added.
+
+   Colours: tokens only. Every --se-* colour is declared in :root and again
+   under [data-theme="dark"]; rules below use var(--…) and never a literal
+   colour (a raw hex in a rule breaks dark mode).
+
+   Motion (emil-design-eng rules, adapted to hand-written CSS):
+   - one custom ease-out curve, --se-ease (cubic-bezier(0.23, 1, 0.32, 1)),
+     applied via @starting-style to the dialog's own enter (opacity 0->1,
+     scale(0.96)->1, 200ms) — exit is a plain close at 150ms, faster than
+     the enter, because a close should feel instant and an open should
+     feel intentional (emil-design-eng: entering/exiting both get ease-out,
+     but exits run faster so dismissal never feels sluggish);
+   - transitions name their properties (transform / opacity / background),
+     never `all`;
+   - chips appear via @starting-style in 150ms ease-out — SMALL and
+     frequent enough (several per edit) that 150ms, not 200ms+, is right;
+   - every pressable thing (buttons, chips' own × control, the switches)
+     scales to 0.97 on :active;
+   - hover feedback only under @media (hover: hover) and (pointer: fine),
+     so a touch tap never leaves a stuck hover state;
+   - the master/self-reminder toggles reuse status-schedule.css's switch
+     recipe: the track recolours and the thumb slides in 160ms (transform +
+     background-color only);
+   - the type-to-confirm delete button has NO animation on its own
+     enabled/disabled flip — a validity check re-evaluated on every
+     keystroke must not move;
+   - prefers-reduced-motion keeps the opacity fades on dialog open/close
+     and chip entry, and drops every transform/scale. */
+
+:root {
+  --se-ease: cubic-bezier(0.23, 1, 0.32, 1);
+  --se-chip-bg: var(--primary-lighter);
+  --se-chip-ink: var(--primary-darker);
+  --se-chip-x-hover: rgba(0, 0, 0, 0.08);
+  --se-switch-off: var(--grey-400);
+  --se-switch-on: var(--primary);
+  --se-switch-thumb: #FFFFFF;
+  --se-menu-bg: var(--bg-paper);
+  --se-menu-border: rgba(145, 158, 171, 0.24);
+  --se-menu-hover: rgba(145, 158, 171, 0.08);
+  --se-badge-self-reminder: var(--warning-dark);
+  --se-badge-self-reminder-bg: rgba(255, 171, 0, 0.16);
+  --se-danger: var(--error-dark);
+}
+
+[data-theme="dark"] {
+  --se-chip-bg: rgba(142, 51, 255, 0.16);
+  --se-chip-ink: var(--secondary-light);
+  --se-chip-x-hover: rgba(255, 255, 255, 0.08);
+  --se-switch-off: var(--grey-600);
+  --se-switch-on: var(--primary);
+  --se-switch-thumb: var(--grey-900);
+  --se-menu-bg: var(--bg-paper);
+  --se-menu-border: rgba(145, 158, 171, 0.24);
+  --se-menu-hover: rgba(255, 255, 255, 0.06);
+  --se-badge-self-reminder: var(--warning-light);
+  --se-badge-self-reminder-bg: rgba(255, 171, 0, 0.16);
+  --se-danger: var(--error-light);
+}
+
+.badge-self-reminder { color: var(--se-badge-self-reminder); background: var(--se-badge-self-reminder-bg); }
+
+/* ---------- Dialog enter/exit --------------------------------------------- */
+
+.session-edit-modal,
+.session-delete-modal {
+  transition: opacity 150ms var(--se-ease), transform 150ms var(--se-ease);
+}
+
+@starting-style {
+  .session-edit-modal[open],
+  .session-delete-modal[open] {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.96);
+  }
+}
+
+.session-edit-modal[open],
+.session-delete-modal[open] {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  transition-duration: 200ms;
+}
+
+/* ---------- Row kebab menu ------------------------------------------------- */
+
+.row-menu { position: relative; display: inline-block; }
+.row-menu > summary { list-style: none; cursor: pointer; }
+.row-menu > summary::-webkit-details-marker { display: none; }
+
+.row-menu-list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 20;
+  min-width: 160px;
+  padding: 6px;
+  border: 1px solid var(--se-menu-border);
+  border-radius: var(--radius-card);
+  background: var(--se-menu-bg);
+  box-shadow: var(--shadow-card);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row-menu-item {
+  display: block;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 14px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.row-menu-item-danger { color: var(--se-danger); }
+
+@media (hover: hover) and (pointer: fine) {
+  .row-menu-item:hover { background: var(--se-menu-hover); }
+}
+
+/* ---------- Group chips ---------------------------------------------------- */
+
+.se-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-height: 40px;
+}
+
+.se-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-radius: 999px;
+  background: var(--se-chip-bg);
+  color: var(--se-chip-ink);
+  font-size: 13px;
+  font-weight: 600;
+  transition: opacity 150ms var(--se-ease), transform 150ms var(--se-ease);
+}
+
+@starting-style {
+  .se-chip { opacity: 0; transform: scale(0.9); }
+}
+
+.se-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  transition: background-color 120ms ease, transform 100ms var(--se-ease);
+}
+
+.se-chip-remove:active { transform: scale(0.9); }
+
+@media (hover: hover) and (pointer: fine) {
+  .se-chip-remove:hover { background: var(--se-chip-x-hover); }
+}
+
+.se-chip-input {
+  flex: 1 1 140px;
+  min-width: 120px;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14px;
+  padding: 6px 0;
+}
+
+.se-chips-empty { color: var(--text-secondary); font-size: 13px; }
+
+/* ---------- Master / self-reminder switches (status-schedule.css's own
+   .ss-switch recipe, renamed under this file's own tokens so the two
+   stylesheets never have to agree on a shared class name). ---------- */
+
+.se-switch-input { position: absolute; opacity: 0; pointer-events: none; }
+
+.se-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  transition: transform 160ms var(--se-ease);
+}
+
+.se-switch:active { transform: scale(0.97); }
+
+.se-switch-track {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--se-switch-off);
+  transition: background-color 160ms var(--se-ease);
+}
+
+.se-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--se-switch-thumb);
+  transition: transform 160ms var(--se-ease);
+}
+
+.se-switch-input:checked ~ .se-switch-track { background: var(--se-switch-on); }
+.se-switch-input:checked ~ .se-switch-track .se-switch-thumb { transform: translateX(20px); }
+.se-switch-input:focus-visible ~ .se-switch-track { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+@media (hover: hover) and (pointer: fine) {
+  .se-switch:hover .se-switch-track { background: var(--text-secondary); }
+  .se-switch-input:checked ~ .se-switch-track:hover { background: var(--se-switch-on); }
+}
+
+.se-switch-hint { display: block; margin: 2px 0 0 56px; max-width: 60ch; }
+
+/* ---------- Delete confirmation -------------------------------------------- */
+
+.se-delete-warning { color: var(--se-danger); }
+
+.se-delete-confirm-input { margin-top: 8px; }
+
+/* Buttons press, same recipe used throughout this codebase's own CSS
+   (status-schedule.css, charts.css) — kept here too since the dialog's own
+   Save/Delete/Cancel buttons are the ones an operator presses most on this
+   page. */
+.session-edit-modal .btn:active,
+.session-delete-modal .btn:active { transform: scale(0.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .session-edit-modal,
+  .session-delete-modal,
+  .se-chip,
+  .se-chip-remove,
+  .se-switch,
+  .se-switch-track,
+  .se-switch-thumb,
+  .session-edit-modal .btn,
+  .session-delete-modal .btn {
+    transition: opacity 120ms linear !important;
+    transform: none !important;
+  }
+}

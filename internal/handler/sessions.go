@@ -4,6 +4,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
@@ -12,10 +13,10 @@ import (
 type sessionsPageData struct {
 	PageBase
 	// GroupCodes feeds session-new's <datalist> — see GetSessionNew. Not
-	// needed on sessionRowsData: the rows table's own group-code cell stays
-	// read-only (session_rows.html) — editing happens in the
-	// session_group_editor partial, fetched on demand per row via
-	// GetSessionGroupCodeEditor, which pulls its own GroupCodes list.
+	// needed on sessionRowsData: the rows table's own group badges stay
+	// read-only (session_rows.html) — editing happens in the single Edit
+	// session dialog (GetSessionEdit/PostSessionEdit below), fetched on
+	// demand per row, which pulls its own GroupCodes list.
 	GroupCodes []string
 }
 
@@ -150,70 +151,26 @@ func (h *handlers) PostSessionSetMaster(w http.ResponseWriter, r *http.Request) 
 	h.GetSessionRows(w, r)
 }
 
-// sessionGroupEditorData feeds the session_group_editor partial — the
-// /sessions list's on-demand editor loaded into #session-group-editor
-// (list.html), OUTSIDE the polled #session-rows tbody for the same reason
-// the ops page's own card sits outside #ops-panel: a live text input would
-// get wiped by the next poll's hx-swap="innerHTML" mid-edit.
-//
-// Value carries the operator's just-submitted text on a validation error
-// (so a typo stays visible to fix) and the stored code otherwise — see
-// GetSessionGroupCodeEditor and the "view=list" branch of
-// PostSessionSetGroupCode below.
-type sessionGroupEditorData struct {
-	Session    wa.Snapshot
-	GroupCodes []string
-	Value      string
-	Error      string
-	Saved      bool
-}
-
-// GetSessionGroupCodeEditor renders the list page's on-demand routing-group
-// editor for one session (see sessionGroupEditorData's doc comment). 404s
-// like every other single-session handler on a stale/unknown id.
-func (h *handlers) GetSessionGroupCodeEditor(w http.ResponseWriter, r *http.Request) {
-	s, ok := h.Manager.Get(r.PathValue("id"))
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	snap := s.Snapshot()
-	h.Renderer.RenderPartial(w, "session_group_editor", sessionGroupEditorData{
-		Session:    snap,
-		GroupCodes: h.Manager.GroupCodes(),
-		Value:      snap.GroupCode,
-	})
-}
-
 // sessionGroupCodeResultData feeds the session_group_code_result partial —
-// the ops page's OWN small result div, not #session-rows: this route lives
-// on /sessions/{id}/ops, which has no such element, and unlike the master
-// toggle above (a row-table checkbox this page never carries) there is
-// nothing on that page to blindly re-render rows into.
+// the ops page's OWN small result div (sessions/ops.html), the only
+// remaining caller of PostSessionSetGroupCode below now that the
+// list page's editing goes entirely through the Edit session dialog.
 type sessionGroupCodeResultData struct {
 	GroupCode string
 	Error     string
 }
 
-// PostSessionSetGroupCode is the submit target for BOTH routing-group
-// editors: the ops page's own static card (ops.html) and the /sessions
-// list's on-demand editor (session_group_editor.html), distinguished by a
-// hidden "view=list" field the list editor's form carries and the ops
-// card's does not. The save logic is identical either way (SetGroupCode,
-// *wa.ValidationError → message shown inline rather than swallowed into
-// slog — the same reasoning PostSessionCreate's doc comment gives: this is
-// free text, not a checkbox, and an operator needs to see why their save
-// did nothing); only the partial rendered back — and, on the list view,
-// whether the polled tbody is told to refresh — differs.
+// PostSessionSetGroupCode is the submit target for the ops page's own
+// static routing-group card (sessions/ops.html) ONLY — the /sessions list's
+// editing now goes through PostSessionEdit below, which calls
+// SetGroupCodes directly rather than this HTTP route.
 func (h *handlers) PostSessionSetGroupCode(w http.ResponseWriter, r *http.Request) {
 	s, ok := h.Manager.Get(r.PathValue("id"))
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	code := r.FormValue("group_code")
-	fromList := r.FormValue("view") == "list"
-	if err := s.SetGroupCode(r.Context(), code); err != nil {
+	if err := s.SetGroupCode(r.Context(), r.FormValue("group_code")); err != nil {
 		var verr *wa.ValidationError
 		msg := "could not save routing group"
 		if errors.As(err, &verr) {
@@ -221,78 +178,169 @@ func (h *handlers) PostSessionSetGroupCode(w http.ResponseWriter, r *http.Reques
 		} else {
 			slog.Warn("set group code", "session", s.ID, "err", err)
 		}
-		if fromList {
-			h.Renderer.RenderPartial(w, "session_group_editor", sessionGroupEditorData{
-				Session: s.Snapshot(), GroupCodes: h.Manager.GroupCodes(), Value: code, Error: msg,
-			})
-			return
-		}
 		h.Renderer.RenderPartial(w, "session_group_code_result", sessionGroupCodeResultData{Error: msg})
 		return
 	}
-	snap := s.Snapshot()
-	if fromList {
-		// The polled #session-rows tbody (list.html) listens for this via
-		// hx-trigger="…, sessions-changed from:body" so the badge in the
-		// row updates without waiting out the 5s poll.
-		w.Header().Set("HX-Trigger", "sessions-changed")
-		h.Renderer.RenderPartial(w, "session_group_editor", sessionGroupEditorData{
-			Session: snap, GroupCodes: h.Manager.GroupCodes(), Value: snap.GroupCode, Saved: true,
-		})
-		return
-	}
-	h.Renderer.RenderPartial(w, "session_group_code_result", sessionGroupCodeResultData{GroupCode: snap.GroupCode})
+	h.Renderer.RenderPartial(w, "session_group_code_result", sessionGroupCodeResultData{GroupCode: s.Snapshot().GroupCode})
 }
 
-// sessionNameEditorData feeds the session_name_editor partial, loaded into
-// #session-name-editor (list.html) outside the polled tbody for the same
-// reason as the group editor. Value carries the operator's typed text on a
-// validation error, the stored name otherwise.
-type sessionNameEditorData struct {
+// sessionEditDialogData feeds the session_edit_dialog partial — the single
+// <dialog> loaded into #session-edit-slot (sessions/list.html), OUTSIDE the
+// polled #session-rows tbody for the same reason the old two inline cards
+// sat outside it: the 5s poll's hx-swap="innerHTML" would wipe a half-typed
+// value mid-edit. Replaces the old separate name/group-code editors with
+// one form covering name, routing groups, the master toggle and the
+// self-reminder toggle, saved by ONE POST (PostSessionEdit) that validates
+// everything before changing anything.
+type sessionEditDialogData struct {
 	Session wa.Snapshot
-	Value   string
-	Error   string
-	Saved   bool
+	// Name/GroupCodesCSV/Master/SelfReminder carry the operator's
+	// just-submitted values on a validation error (so a typo stays visible
+	// to fix) and the stored values otherwise.
+	Name          string
+	GroupCodesCSV string
+	Master        bool
+	SelfReminder  bool
+	GroupCodes    []string // every known group, for the chip input's datalist
+	Error         string
+	// CurrentHolderName names whichever OTHER session currently carries
+	// the self-reminder flag, so the toggle's hint can read "will move
+	// from <name>" — "" when no other session holds it (or this session
+	// already does).
+	CurrentHolderName string
 }
 
-// GetSessionNameEditor renders the on-demand rename editor; 404 on unknown id.
-func (h *handlers) GetSessionNameEditor(w http.ResponseWriter, r *http.Request) {
+// groupCodesToCSV/csvToGroupCodes round-trip the chip input's hidden field
+// (session-edit.js keeps it comma-separated) — kept as named conversions
+// rather than inline strings.Join/Split calls so both directions stay next
+// to each other and a future delimiter change touches one place.
+func groupCodesToCSV(codes []string) string { return strings.Join(codes, ",") }
+
+func csvToGroupCodes(csv string) []string {
+	var out []string
+	for _, part := range strings.Split(csv, ",") {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+
+// selfReminderHolderName returns the display name of whichever OTHER
+// session currently carries the self-reminder flag, or "" when none does
+// (or only exceptID does) — see sessionEditDialogData.CurrentHolderName's
+// doc comment.
+func (h *handlers) selfReminderHolderName(exceptID string) string {
+	for _, snap := range h.Manager.Snapshots() {
+		if snap.SelfReminder && snap.ID != exceptID {
+			return snap.Name
+		}
+	}
+	return ""
+}
+
+// GetSessionEdit renders the Edit session dialog, prefilled with this
+// session's current values. 404s like every other single-session GET on a
+// stale/unknown id.
+func (h *handlers) GetSessionEdit(w http.ResponseWriter, r *http.Request) {
 	s, ok := h.Manager.Get(r.PathValue("id"))
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	snap := s.Snapshot()
-	h.Renderer.RenderPartial(w, "session_name_editor", sessionNameEditorData{Session: snap, Value: snap.Name})
+	h.Renderer.RenderPartial(w, "session_edit_dialog", sessionEditDialogData{
+		Session: snap, Name: snap.Name, GroupCodesCSV: groupCodesToCSV(snap.GroupCodes),
+		Master: snap.IsMaster, SelfReminder: snap.SelfReminder,
+		GroupCodes:        h.Manager.GroupCodes(),
+		CurrentHolderName: h.selfReminderHolderName(snap.ID),
+	})
 }
 
-// PostSessionSetName saves a new display name. A *wa.ValidationError is shown
-// inline with the typed value kept; success fires HX-Trigger: sessions-changed
-// so the polled rows pick up the new name immediately. The name is cosmetic on
-// waxum, which has no rename call and keeps the name given at CreateSession.
-func (h *handlers) PostSessionSetName(w http.ResponseWriter, r *http.Request) {
+// PostSessionEdit validates name, routing groups, the master flag and the
+// self-reminder flag TOGETHER before applying ANY of them — a bad group
+// code or an empty name must leave every field (including master/
+// self-reminder) exactly as they were, not half-saved. On success it fires
+// HX-Trigger: sessions-changed (picked up by both the polled tbody and
+// session-edit.js, which closes the dialog) and re-renders the dialog's
+// body with a "Saved" state; a validation error re-renders in place with
+// the operator's own typed values kept.
+func (h *handlers) PostSessionEdit(w http.ResponseWriter, r *http.Request) {
 	s, ok := h.Manager.Get(r.PathValue("id"))
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
 	name := r.FormValue("name")
-	if err := s.SetName(r.Context(), name); err != nil {
-		var verr *wa.ValidationError
-		msg := "could not save name"
-		if errors.As(err, &verr) {
-			msg = verr.Msg
-		} else {
-			slog.Warn("set session name", "session", s.ID, "err", err)
-		}
-		h.Renderer.RenderPartial(w, "session_name_editor", sessionNameEditorData{
-			Session: s.Snapshot(), Value: name, Error: msg,
+	groupCodes := csvToGroupCodes(r.FormValue("group_codes"))
+	master := parseFormBool(r.FormValue("master"))
+	selfReminder := parseFormBool(r.FormValue("self_reminder"))
+
+	fail := func(msg string) {
+		h.Renderer.RenderPartial(w, "session_edit_dialog", sessionEditDialogData{
+			Session: s.Snapshot(), Name: name, GroupCodesCSV: groupCodesToCSV(groupCodes),
+			Master: master, SelfReminder: selfReminder, GroupCodes: h.Manager.GroupCodes(),
+			CurrentHolderName: h.selfReminderHolderName(s.ID), Error: msg,
 		})
+	}
+
+	// Validate everything BEFORE writing anything — wa.ValidateSessionName
+	// and wa.NormalizeGroupCodes are the same pure checks
+	// SetName/SetGroupCodes apply internally, called here first so a bad
+	// name does not leave the groups half-saved and vice versa.
+	if _, err := wa.ValidateSessionName(name); err != nil {
+		fail(err.Error())
 		return
 	}
+	if _, err := wa.NormalizeGroupCodes(groupCodes); err != nil {
+		fail(err.Error())
+		return
+	}
+
+	if err := s.SetName(r.Context(), name); err != nil {
+		slog.Error("edit session: set name", "session", s.ID, "err", err)
+		fail("could not save the session")
+		return
+	}
+	if err := s.SetGroupCodes(r.Context(), groupCodes); err != nil {
+		slog.Error("edit session: set group codes", "session", s.ID, "err", err)
+		fail("could not save the session")
+		return
+	}
+	if err := s.SetMaster(r.Context(), master); err != nil {
+		slog.Error("edit session: set master", "session", s.ID, "err", err)
+	}
+	if err := h.Manager.SetSelfReminder(r.Context(), s.ID, selfReminder); err != nil {
+		slog.Error("edit session: set self-reminder", "session", s.ID, "err", err)
+	}
+
 	snap := s.Snapshot()
 	w.Header().Set("HX-Trigger", "sessions-changed")
-	h.Renderer.RenderPartial(w, "session_name_editor", sessionNameEditorData{Session: snap, Value: snap.Name, Saved: true})
+	h.Renderer.RenderPartial(w, "session_edit_dialog", sessionEditDialogData{
+		Session: snap, Name: snap.Name, GroupCodesCSV: groupCodesToCSV(snap.GroupCodes),
+		Master: snap.IsMaster, SelfReminder: snap.SelfReminder, GroupCodes: h.Manager.GroupCodes(),
+		CurrentHolderName: h.selfReminderHolderName(snap.ID),
+	})
+}
+
+// sessionDeleteDialogData feeds the session_delete_dialog partial — the
+// confirmation dialog that replaces the browser's native hx-confirm. Keeps
+// the "does NOT unlink the device on the waxum backend / Linked devices"
+// warning (see TestTheDeleteConfirmationDoesNotPromiseAnUnlinkTheWaxumBackendCannotDo).
+type sessionDeleteDialogData struct {
+	Session wa.Snapshot
+}
+
+// GetSessionDeleteConfirm renders the delete confirmation dialog for one
+// session. 404s like every other single-session GET on a stale/unknown id.
+func (h *handlers) GetSessionDeleteConfirm(w http.ResponseWriter, r *http.Request) {
+	s, ok := h.Manager.Get(r.PathValue("id"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	h.Renderer.RenderPartial(w, "session_delete_dialog", sessionDeleteDialogData{Session: s.Snapshot()})
 }
 
 // PostSessionDeactivate drops the socket, keeps credentials.
@@ -305,8 +353,13 @@ func (h *handlers) PostSessionDeactivate(w http.ResponseWriter, r *http.Request)
 	h.GetSessionRows(w, r)
 }
 
-// PostSessionDelete unlinks the device (phone-side too) and purges the row;
-// the button carries hx-confirm so this is always operator-confirmed.
+// PostSessionDelete purges the WSM row and calls the backend's own Logout —
+// on the default waxum backend this does NOT unlink the device from the
+// handset (waxum has no unlink API; see session_delete_dialog.html's own
+// warning and CLAUDE.md's "Deleting a session does NOT unlink the device"
+// hazard). Reached only through the delete confirmation dialog
+// (GetSessionDeleteConfirm), which types-to-confirm before this route is
+// ever called — unchanged by the Part 3 dialog redesign.
 func (h *handlers) PostSessionDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.Manager.Delete(r.Context(), r.PathValue("id")); err != nil && !errors.Is(err, wa.ErrNotFound) {
 		slog.Warn("delete session", "err", err)

@@ -44,9 +44,18 @@
        status-schedule.css's own header comment. Also linked in login.html
        (the same keep-in-step rule status.css follows). -->
   <link rel="stylesheet" href="{{u "/static/css/status-schedule.css"}}">
+  <!-- SIXTEENTH, after status-schedule.css — /sessions' Edit/Delete dialogs
+       (Part 3 redesign: chips, switches, kebab menu). Also linked in
+       login.html; see session-edit.css's own header comment. -->
+  <link rel="stylesheet" href="{{u "/static/css/session-edit.css"}}">
   <script src="{{u "/static/js/htmx.min.js"}}" defer></script>
   <script src="{{u "/static/js/nav-drawer.js"}}" defer></script>
   <script src="{{u "/static/js/modal.js"}}" defer></script>
+  <!-- NOT duplicated into login.html: session-edit.js only wires up
+       /sessions' Edit/Delete dialogs, which login.html never renders —
+       same "page never renders this" exception status.js/
+       status-schedule.js document below. -->
+  <script src="{{u "/static/js/session-edit.js"}}" defer></script>
   <script src="{{u "/static/js/media-upload.js"}}" defer></script>
   <script src="{{u "/static/js/phone-chips.js"}}" defer></script>
   <script src="{{u "/static/js/self-convo.js"}}" defer></script>
