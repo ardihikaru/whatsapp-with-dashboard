@@ -209,7 +209,7 @@ func noGroupRouteMessage(snaps []wa.Snapshot, rt wa.Route) string {
 
 	var groupHasSnapshot, groupHasConnectedNonMaster, groupHasConnectedMaster, outsideGroupConnected bool
 	for _, snap := range snaps {
-		if snap.GroupCode == rt.GroupCode {
+		if snap.InGroupScope(rt.GroupCode) {
 			groupHasSnapshot = true
 			if snap.Connected {
 				if snap.IsMaster {

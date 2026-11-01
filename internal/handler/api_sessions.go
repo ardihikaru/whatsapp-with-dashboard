@@ -22,10 +22,16 @@ type apiSession struct {
 	// connection intent. Carried here so PUT .../master can report back
 	// the value it just set, and GET .../sessions can show it.
 	IsMaster bool `json:"is_master"`
-	// GroupCode mirrors wa.Snapshot.GroupCode — the routing scope, "" when
-	// ungrouped. Carried here so PUT .../group-code can report back the
-	// value it just set, and GET .../sessions can show it.
+	// GroupCode mirrors wa.Snapshot.GroupCode — the FIRST routing group,
+	// "" when ungrouped. Kept for every caller that predates multi-group
+	// support (0015); GroupCodes below is the full set.
 	GroupCode string `json:"group_code"`
+	// GroupCodes mirrors wa.Snapshot.GroupCodes — the full routing-group
+	// set. Always present, nil/empty when ungrouped.
+	GroupCodes []string `json:"group_codes"`
+	// IsSelfReminder mirrors wa.Snapshot.SelfReminder — see that field's
+	// doc comment (internal/wa/session.go).
+	IsSelfReminder bool `json:"is_self_reminder"`
 }
 
 type apiEvent struct {
@@ -36,7 +42,8 @@ type apiEvent struct {
 func apiFromSnapshot(s wa.Snapshot) apiSession {
 	return apiSession{ID: s.ID, Name: s.Name, Phone: s.Phone, JID: s.JID,
 		State: string(s.State), Connected: s.Connected, QueueLen: s.QueueLen,
-		IsMaster: s.IsMaster, GroupCode: s.GroupCode}
+		IsMaster: s.IsMaster, GroupCode: s.GroupCode, GroupCodes: s.GroupCodes,
+		IsSelfReminder: s.SelfReminder}
 }
 
 // GetAPISessions lists all sessions as live snapshots.
@@ -62,6 +69,10 @@ func (h *handlers) PostAPISessions(w http.ResponseWriter, r *http.Request) {
 		Phone     string `json:"phone"`
 		IsMaster  bool   `json:"is_master"`
 		GroupCode string `json:"group_code"`
+		// GroupCodes, when non-empty, wins over GroupCode — the same
+		// "explicit multi-value field wins" convention
+		// PutAPISessionGroupCode below follows.
+		GroupCodes []string `json:"group_codes"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, maxBodyBytes)).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid JSON body")
@@ -93,7 +104,12 @@ func (h *handlers) PostAPISessions(w http.ResponseWriter, r *http.Request) {
 	// so the caller learns immediately their session was created but the
 	// group_code they asked for was rejected, rather than discovering it
 	// silently ungrouped later.
-	if req.GroupCode != "" {
+	if len(req.GroupCodes) > 0 {
+		if err := s.SetGroupCodes(r.Context(), req.GroupCodes); err != nil {
+			writeWAError(w, err)
+			return
+		}
+	} else if req.GroupCode != "" {
 		if err := s.SetGroupCode(r.Context(), req.GroupCode); err != nil {
 			writeWAError(w, err)
 			return
@@ -191,11 +207,26 @@ func (h *handlers) PutAPISessionGroupCode(w http.ResponseWriter, r *http.Request
 	}
 	var req struct {
 		GroupCode string `json:"group_code"`
+		// GroupCodes, when present as a non-null JSON value, wins over
+		// GroupCode and replaces the full set. A RawMessage so an EXPLICIT
+		// "group_codes": [] (clear every group) is distinguishable from
+		// the field being absent entirely (fall back to GroupCode).
+		GroupCodes json.RawMessage `json:"group_codes"`
 	}
 	if !decodeOpsBody(w, r, &req) {
 		return
 	}
-	if err := s.SetGroupCode(r.Context(), req.GroupCode); err != nil {
+	if len(req.GroupCodes) > 0 {
+		var codes []string
+		if err := json.Unmarshal(req.GroupCodes, &codes); err != nil {
+			writeError(w, http.StatusBadRequest, "group_codes must be a JSON array of strings")
+			return
+		}
+		if err := s.SetGroupCodes(r.Context(), codes); err != nil {
+			writeWAError(w, err)
+			return
+		}
+	} else if err := s.SetGroupCode(r.Context(), req.GroupCode); err != nil {
 		writeWAError(w, err)
 		return
 	}

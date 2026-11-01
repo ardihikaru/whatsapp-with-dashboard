@@ -136,31 +136,45 @@ func run() error {
 // IsMaster: without a seeded master row, the master badge (session_rows.html)
 // and the "— master" picker suffix (send.html/calls.html/verify.html) render
 // nowhere in the browser suite or any evidence screenshot — see CLAUDE.md's
-// "an e2e run against empty tables proves very little". Same reasoning
-// applies to GroupCode: e2e-sess-0002 carries "kemang" so the group badge
-// (session_rows.html), the ops-page editor's pre-filled value, and the
-// /send group picker's option all render somewhere in the browser suite too.
+// "an e2e run against empty tables proves very little". e2e-sess-0002 carries
+// TWO groups ("kemang","selatan") so the multi-badge row (session_rows.html),
+// the chip editor's pre-filled chips, and the /send group picker's options
+// all render somewhere in the browser suite; e2e-sess-0003 stays ungrouped so
+// the "no group" empty state renders too. e2e-sess-0001 also carries the
+// self-reminder flag, so its badge renders and the settings page has a real
+// default sender to show.
 var seedSessionDefs = []struct {
-	ID, Name, Phone, JID, Status, GroupCode string
-	Active, IsMaster                        bool
+	ID, Name, Phone, JID, Status string
+	GroupCodes                   []string
+	Active, IsMaster, SelfRemind bool
 }{
 	{"e2e-sess-0001", "Nomor Utama Kasir Kemang Selatan", "6285190679041",
-		"6285190679041:12@s.whatsapp.net", "connected", "", true, true},
+		"6285190679041:12@s.whatsapp.net", "connected", nil, true, true, true},
 	{"e2e-sess-0002", "Cadangan Outlet Pondok Indah", "6281234567890",
-		"6281234567890:3@s.whatsapp.net", "disconnected", "kemang", true, false},
-	{"e2e-sess-0003", "Sesi Uji Coba", "6289900112233", "", "new", "", false, false},
+		"6281234567890:3@s.whatsapp.net", "disconnected", []string{"kemang", "selatan"}, true, false, false},
+	{"e2e-sess-0003", "Sesi Uji Coba", "6289900112233", "", "new", nil, false, false, false},
 }
 
 func seedSessions(ctx context.Context, repo *wasession.SQLRepository, base time.Time) error {
 	for i, d := range seedSessionDefs {
 		s := &wasession.Session{
 			ID: d.ID, Name: d.Name, Phone: d.Phone, JID: d.JID,
-			Active: d.Active, IsMaster: d.IsMaster, GroupCode: d.GroupCode, LastStatus: d.Status,
+			Active: d.Active, IsMaster: d.IsMaster, LastStatus: d.Status,
 			CreatedAt: base.Add(-time.Duration(i+1) * 24 * time.Hour),
 			UpdatedAt: base,
 		}
 		if err := repo.Insert(ctx, s); err != nil {
 			return fmt.Errorf("insert session %s: %w", d.ID, err)
+		}
+		if len(d.GroupCodes) > 0 {
+			if err := repo.SetGroupCodes(ctx, d.ID, d.GroupCodes); err != nil {
+				return fmt.Errorf("set group codes for %s: %w", d.ID, err)
+			}
+		}
+		if d.SelfRemind {
+			if err := repo.SetSelfReminder(ctx, d.ID, true); err != nil {
+				return fmt.Errorf("set self-reminder for %s: %w", d.ID, err)
+			}
 		}
 	}
 	return nil

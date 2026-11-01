@@ -66,6 +66,14 @@ const (
 	// caller-supplied field, and NormalizeCategory clamps it from an
 	// untrusted caller the same way.
 	CategoryGroupBroadcast = "group_broadcast"
+	// CategorySessionAlert marks a send that belongs to internal/
+	// sessionalert — a logged-out alert or the daily non-connected report,
+	// posted into an operator-configured WhatsApp group. Same reasoning as
+	// CategorySelfConvo/CategoryGroupBroadcast above: stamped only by that
+	// package's gateway adapter, never taken from a caller-supplied field,
+	// and NormalizeCategory clamps "session_alert" from an untrusted
+	// caller the same way.
+	CategorySessionAlert = "session_alert"
 )
 
 // Attribution is the caller-supplied slice of a send's provenance, threaded from the

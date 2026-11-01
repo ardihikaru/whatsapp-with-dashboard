@@ -202,7 +202,7 @@ func TestStartAllHydratesTheMasterFlagFromTheStoredRow(t *testing.T) {
 // routing pool on every restart, not just widens one session's eligibility.
 func TestStartAllHydratesTheGroupCodeFromTheStoredRow(t *testing.T) {
 	repo := newStubSessions(
-		wasession.Session{ID: "g", Name: "g", Phone: "62899", JID: "", LastStatus: "new", GroupCode: "alpha"},
+		wasession.Session{ID: "g", Name: "g", Phone: "62899", JID: "", LastStatus: "new", GroupCode: "alpha", GroupCodes: []string{"alpha"}},
 	)
 	m := newTestManager(repo, newStubMsgs())
 	if err := m.StartAll(context.Background()); err != nil {

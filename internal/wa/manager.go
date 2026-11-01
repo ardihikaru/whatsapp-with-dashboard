@@ -6,6 +6,7 @@ package wa
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -272,8 +273,8 @@ func (m *Manager) Snapshots() []Snapshot {
 func (m *Manager) GroupCodes() []string {
 	seen := map[string]bool{}
 	for _, snap := range m.Snapshots() {
-		if snap.GroupCode != "" {
-			seen[snap.GroupCode] = true
+		for _, code := range snap.GroupCodes {
+			seen[code] = true
 		}
 	}
 	out := make([]string, 0, len(seen))
@@ -282,6 +283,49 @@ func (m *Manager) GroupCodes() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// SetSelfReminder moves the self-reminder flag (see ManagedSession.
+// isSelfReminder's doc comment) to id, clearing it from every other
+// session, or just clears it when on is false. Exclusivity is enforced
+// here, in the app, rather than by a DB index (see
+// migrations/0015_session_groups_self_reminder.sql's header): the
+// persisted write is a SINGLE statement
+// (wasession.Repository.SetSelfReminder's CASE WHEN), and the in-memory
+// mirror on every live ManagedSession is updated under m.mu so a
+// concurrent Snapshot can never observe two sessions both flagged at once.
+// Unknown id with on=true still clears every other row (the DB statement
+// runs regardless) — this mirrors SetMaster/SetGroupCode's existing
+// "unknown id persists as a repo call with no matching in-memory session"
+// shape, which handlers already guard against with their own Get check.
+func (m *Manager) SetSelfReminder(ctx context.Context, id string, on bool) error {
+	if err := m.repo.SetSelfReminder(m.persistCtx, id, on); err != nil {
+		return err
+	}
+	m.mu.RLock()
+	all := make([]*ManagedSession, 0, len(m.sessions))
+	for _, s := range m.sessions {
+		all = append(all, s)
+	}
+	m.mu.RUnlock()
+	for _, s := range all {
+		s.mu.Lock()
+		if s.ID == id {
+			s.isSelfReminder = on
+		} else if on {
+			s.isSelfReminder = false
+		}
+		s.mu.Unlock()
+	}
+	if target, ok := m.Get(id); ok {
+		if on {
+			target.ring("flagged as the self-reminder session — default sender for session alerts")
+		} else {
+			target.ring("unflagged as the self-reminder session")
+		}
+	}
+	m.RecordEvent("info", fmt.Sprintf("self-reminder session set to %q (on=%v)", id, on))
+	return nil
 }
 
 // Counts returns (total, connected) for the health endpoint and the real

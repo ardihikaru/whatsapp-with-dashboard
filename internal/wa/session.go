@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -89,15 +90,29 @@ type ManagedSession struct {
 	// socket, or active.
 	isMaster bool
 
-	// groupCode mirrors wa_sessions.group_code: a ROUTING SCOPE parallel to
-	// isMaster above, not a second exclusion flag. "" is the ungrouped
-	// default pool; a non-empty code removes this session from default
-	// automatic selection (load_balance.go's EligibleForRoute) entirely —
-	// including a global master_only pick — and it becomes reachable only
-	// by a Route naming this same code. Set by SetGroupCode below, which
-	// touches only this field and its persisted column — never state, the
-	// socket, or active — exactly like SetMaster.
-	groupCode string
+	// groupCodes mirrors wa_session_groups (0015) — the FULL routing-scope
+	// set, parallel to isMaster above and not a second exclusion flag.
+	// nil/empty is the ungrouped default pool; a non-empty set removes this
+	// session from default automatic selection (load_balance.go's
+	// EligibleForRoute) entirely — including a global master_only pick —
+	// and it becomes reachable by a Route naming ANY of these codes, not
+	// just the first. Always kept sorted and de-duplicated by
+	// SetGroupCodes, so Snapshot's "first code" projection (see
+	// Snapshot.GroupCode) is deterministic. Set by SetGroupCode/
+	// SetGroupCodes below, which touch only this field and its persisted
+	// column(s) — never state, the socket, or active — exactly like
+	// SetMaster.
+	groupCodes []string
+
+	// isSelfReminder mirrors wa_sessions.is_self_reminder (0015): the one
+	// session, per host, every alert this app sends (internal/
+	// sessionalert) defaults to posting FROM. Exclusivity across every
+	// ManagedSession is enforced by Manager.SetSelfReminder, which is the
+	// ONLY writer of this field — never set directly here, the same
+	// division of labour isMaster has with SetMaster, except the "clear
+	// every OTHER row" step requires the manager's map, not just this
+	// session.
+	isSelfReminder bool
 
 	// stalled/stalledReason mark "needs operator attention" — the
 	// reconnect supervisor (reconnect.go) has called Backend.Connect
@@ -149,10 +164,18 @@ type Snapshot struct {
 	// comment. Read by load_balance.go's exclusion predicate.
 	IsMaster bool
 
-	// GroupCode mirrors ManagedSession.groupCode — see that field's doc
-	// comment. Read by load_balance.go's EligibleForRoute as the scope
-	// match.
+	// GroupCode is the FIRST (lexically) code in GroupCodes below, or "" —
+	// kept for every existing template/API consumer that reads a single
+	// code (session_rows.html, apiSession.GroupCode). Prefer GroupCodes for
+	// anything that must see the whole set.
 	GroupCode string
+	// GroupCodes mirrors ManagedSession.groupCodes — see that field's doc
+	// comment. Read by load_balance.go's EligibleForRoute as the scope
+	// match (membership, not equality).
+	GroupCodes []string
+	// SelfReminder mirrors ManagedSession.isSelfReminder — see that
+	// field's doc comment.
+	SelfReminder bool
 }
 
 // Snapshot copies the live status. Connected asks the backend's Live (a
@@ -170,7 +193,9 @@ func (s *ManagedSession) Snapshot() Snapshot {
 		Stalled:        s.stalled,
 		StalledReason:  s.stalledReason,
 		IsMaster:       s.isMaster,
-		GroupCode:      s.groupCode,
+		GroupCode:      firstGroupCode(s.groupCodes),
+		GroupCodes:     append([]string(nil), s.groupCodes...),
+		SelfReminder:   s.isSelfReminder,
 	}
 	if !s.jid.IsEmpty() {
 		snap.JID = s.jid.String()
@@ -328,27 +353,60 @@ func (s *ManagedSession) SetMaster(ctx context.Context, master bool) error {
 	return nil
 }
 
-// SetGroupCode assigns or clears this session's routing scope (see
-// groupCode's doc comment). Normalization happens FIRST, before any state or
-// DB write — an invalid code returns a *ValidationError and leaves the
-// session exactly as it was, the same contract manager_crud.go's session
-// creation already relies on for phone/name validation. Like SetMaster this
-// never touches state, the socket, or active.
+// SetGroupCode assigns or clears this session's routing scope to a SINGLE
+// code — a thin wrapper over SetGroupCodes kept for every existing caller
+// that only ever dealt with one (PostSessionSetGroupCode's list/ops
+// editors, PutAPISessionGroupCode, PostAPISessions). "" clears every group.
 func (s *ManagedSession) SetGroupCode(ctx context.Context, code string) error {
-	normalized, err := NormalizeGroupCode(code)
-	if err != nil {
-		return &ValidationError{Field: "group_code", Msg: err.Error()}
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return s.SetGroupCodes(ctx, nil)
 	}
+	return s.SetGroupCodes(ctx, []string{code})
+}
+
+// firstGroupCode returns codes[0], or "" for an empty set — codes is
+// assumed already sorted (SetGroupCodes' contract), so this is also the
+// lexically-first code, matching Snapshot.GroupCode's doc comment.
+func firstGroupCode(codes []string) string {
+	if len(codes) == 0 {
+		return ""
+	}
+	return codes[0]
+}
+
+// SetGroupCodes assigns or clears this session's FULL routing-scope set
+// (see groupCodes' doc comment). Every code is normalized and de-duplicated
+// FIRST, before any state or DB write — the same "validate everything, then
+// change nothing on failure" contract SetGroupCode's callers already rely
+// on. An empty/nil codes clears every group (back to the ungrouped pool).
+// Like SetMaster this never touches state, the socket, or active.
+func (s *ManagedSession) SetGroupCodes(ctx context.Context, codes []string) error {
+	seen := map[string]bool{}
+	var normalized []string
+	for _, raw := range codes {
+		code, err := NormalizeGroupCode(raw)
+		if err != nil {
+			return &ValidationError{Field: "group_codes", Msg: err.Error()}
+		}
+		if code == "" || seen[code] {
+			continue
+		}
+		seen[code] = true
+		normalized = append(normalized, code)
+	}
+	sort.Strings(normalized)
+
 	s.mu.Lock()
-	s.groupCode = normalized
+	s.groupCodes = normalized
 	s.mu.Unlock()
-	if err := s.mgr.repo.SetGroupCode(s.mgr.persistCtx, s.ID, normalized); err != nil {
+	if err := s.mgr.repo.SetGroupCodes(s.mgr.persistCtx, s.ID, normalized); err != nil {
 		return err
 	}
-	if normalized != "" {
-		s.ring(fmt.Sprintf("assigned to routing group %q — excluded from ungrouped automatic routing", normalized))
+	if len(normalized) > 0 {
+		s.ring(fmt.Sprintf("routing groups set to %s — excluded from ungrouped automatic routing", strings.Join(normalized, ", ")))
 	} else {
-		s.ring("routing group cleared — back in the ungrouped automatic routing pool")
+		s.ring("routing groups cleared — back in the ungrouped automatic routing pool")
 	}
 	return nil
 }
