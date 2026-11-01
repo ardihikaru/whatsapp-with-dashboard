@@ -39,6 +39,11 @@
   <!-- FOURTEENTH, after host-chip.css — /status's kind-switch/confirm-panel
        motion and colour swatches. See status.css's own header comment. -->
   <link rel="stylesheet" href="{{u "/static/css/status.css"}}">
+  <!-- FIFTEENTH, after status.css — /status/schedules' weekday chips, kind
+       panels and list-row motion. Reuses status.css's classes; see
+       status-schedule.css's own header comment. Also linked in login.html
+       (the same keep-in-step rule status.css follows). -->
+  <link rel="stylesheet" href="{{u "/static/css/status-schedule.css"}}">
   <script src="{{u "/static/js/htmx.min.js"}}" defer></script>
   <script src="{{u "/static/js/nav-drawer.js"}}" defer></script>
   <script src="{{u "/static/js/modal.js"}}" defer></script>
@@ -49,6 +54,8 @@
        login.html's own self-contained markup — same exception
        host-chip.css documents above. -->
   <script src="{{u "/static/js/status.js"}}" defer></script>
+  <!-- NOT duplicated into login.html, for the same reason as status.js. -->
+  <script src="{{u "/static/js/status-schedule.js"}}" defer></script>
   <!-- NOT duplicated into login.html: known-groups.js only wires up
        /groups' picker partial, which login.html never renders — same
        "page never renders this" exception host-chip.css documents above. -->

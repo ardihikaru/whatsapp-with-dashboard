@@ -15,6 +15,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/knowngroup"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/statusschedule"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/groupbroadcast"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo"
@@ -105,6 +106,12 @@ type Deps struct {
 	// so those refusals live in one place; plain schedule CRUD and listing
 	// go through Convo directly and need no Planner at all.
 	Planner *selfconvo.Planner
+
+	// StatusSchedules is the scheduled-status persistence seam
+	// (internal/domain/statusschedule) behind /status/schedules. nil is legal
+	// (older test servers) and renders an empty list / refuses saves. There
+	// is deliberately no enabling flag: the feature is always on.
+	StatusSchedules *statusschedule.Repository
 
 	// KnownGroups is the per-session known-WhatsApp-groups CRUD seam
 	// (internal/domain/knowngroup) backing the /groups page. nil is legal

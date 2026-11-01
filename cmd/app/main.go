@@ -7,8 +7,9 @@
 // newBackend's doc comment for why that matters) → app store (MySQL/SQLite)
 // → repos → wa.Manager + boot reconciliation → self-convo runner AND planner
 // (both nil unless WSM_SELF_CONVO_ENABLED=true; startSelfConvo, selfconvo.go)
-// → HTTP. Shutdown order is a hard requirement: server.Shutdown →
-// planner.Stop (if non-nil) → runner.Stop (if non-nil) → manager.Close
+// → status-schedules scheduler (always on; startStatusSchedules,
+// statussched.go) → HTTP. Shutdown order is a hard requirement:
+// server.Shutdown → statusScheduler.Stop → planner.Stop (if non-nil) → runner.Stop (if non-nil) → manager.Close
 // (which now also closes the backend) → the WA backend's own store, if it
 // opened one → pool.Close. The planner stops FIRST, before the runner,
 // because the planner's only effect is calling the runner's own
@@ -43,6 +44,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/knowngroup"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
+	statusschedule "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/statusschedule"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/handler"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
@@ -180,6 +182,7 @@ func run() error {
 	knownGroupRepo := knowngroup.NewRepository(appDB)
 	contactRepo := contact.NewRepository(appDB)
 	groupBroadcastRepo := gb.NewRepository(appDB)
+	statusScheduleRepo := statusschedule.NewRepository(appDB)
 	// inboundRepo is nil-able on Manager (see Manager.inbound's doc
 	// comment) but always real in production — WSM_INBOUND_ENABLED only
 	// gates whether internal/wa's pump actually polls waxum for it, not
@@ -208,6 +211,10 @@ func run() error {
 	// WSM_GROUP_BROADCAST_ENABLED is off (the default) — see
 	// startGroupBroadcast's doc comment (cmd/app/groupbroadcast.go).
 	gbRunner, gbPlanner := startGroupBroadcast(ctx, cfg, groupBroadcastRepo, manager)
+
+	// Scheduled WhatsApp status posts: always on, no env flag. Started after
+	// the manager (it posts through it) and stopped before manager.Close.
+	statusScheduler := startStatusSchedules(ctx, statusScheduleRepo, manager, contactRepo, objectStore)
 
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
@@ -253,6 +260,7 @@ func run() error {
 			KnownGroups:            knownGroupRepo,
 			Contacts:               contactRepo,
 			GroupBroadcast:         groupBroadcastRepo,
+			StatusSchedules:        statusScheduleRepo,
 			GroupBroadcastRunner:   gbRunner,
 			GroupBroadcastEnabled:  cfg.GroupBroadcastEnabled,
 			GroupBroadcastPlanner:  gbPlanner,
@@ -295,6 +303,7 @@ func run() error {
 
 	select {
 	case err := <-errCh:
+		statusScheduler.Stop()
 		if gbPlanner != nil {
 			gbPlanner.Stop()
 		}
@@ -315,6 +324,7 @@ func run() error {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 	err = server.Shutdown(shutdownCtx) // 1) stop accepting / drain HTTP
+	statusScheduler.Stop()             // 1b) join the status-schedule loop; an in-flight post finishes first
 	if gbPlanner != nil {
 		gbPlanner.Stop() // 2) join the group-broadcast planner loop, same ordering as the self-convo planner below
 	}

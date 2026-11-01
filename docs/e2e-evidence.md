@@ -2181,3 +2181,28 @@ No secret was written into this file or the repository.
   `match_score:95`, `matched_field:name`, `chat_jid` Ria's JID.
 - `GET /contacts` on wa / wa-minipc / wa-laptop → 303 to `/login` (unknown path → 404); public `GET /api/v1/contacts` → 404 (not on the edge allowlist, as intended).
 - NOT verified: logged-in render of `/contacts` in a browser; no Playwright run.
+
+## 2026-11-02 — Scheduled status posts (`/status/schedules`)
+
+Run: `./scripts/e2e-run.sh e2e/status-schedules.spec.ts` against a fresh throwaway
+SQLite state dir (seeded by `cmd/e2eseed`: 6 contacts, 2 status schedules), with a
+throwaway admin password file (`_data/paswd` does not exist on this host).
+
+- Result: **28 passed** across mobile-portrait (390), mobile-small (360) and desktop (1280).
+- Covers: all 6 contacts rendered checked by default + select none/all counts; summary
+  line follows chips/window ("Mon, Wed · once each day, at a random time between 07:00
+  and 10:27 Asia/Jakarta"); Text/Image panel switch + caption reveal; create all-checked
+  schedule -> list shows "All contacts"/active, delete via UI; pause/resume swap one row;
+  no horizontal overflow on list/new/edit measured against `page.viewportSize()` after
+  `waitForRows`.
+- The overflow test was RED first: an unbroken seeded contact name pushed a `span` to
+  right=527 at 360/390px; fixed with `overflow-wrap: anywhere` in `status-schedule.css`.
+- The first run also exposed that `cmd/app/main.go` had not wired `Deps.StatusSchedules`
+  (list rendered empty); fixed.
+- Screenshots (light/dark, phone/desktop) were produced under `test-results/` and viewed
+  (phone dark, desktop light); not committed.
+- Environment notes: Playwright wanted chromium build 1234 but 1237 was installed; worked
+  around with symlinks in `~/.cache/ms-playwright` (outside the repo).
+- NOT verified: a real status send (no paired handset; waxum status endpoints have never
+  been exercised live), and image/video upload through the form in a browser (unit tests
+  use a fake object store; the e2e run did not upload).

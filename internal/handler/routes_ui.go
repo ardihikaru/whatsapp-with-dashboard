@@ -106,6 +106,21 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("POST "+bp+"/status/image", page(http.HandlerFunc(h.PostStatusImage)))
 	mux.Handle("POST "+bp+"/status/video", page(http.HandlerFunc(h.PostStatusVideo)))
 
+	// Scheduled status posts — UI-only (no /api/v1 route, so no wsm-mcp
+	// tool). Literal segments (rows, new) sit beside the {id} patterns the
+	// same way the self-convo schedule block below does; none of them
+	// collide with /status/text|image|video above (different method or
+	// segment count).
+	mux.Handle("GET "+bp+"/status/schedules", page(http.HandlerFunc(h.GetStatusSchedules)))
+	mux.Handle("GET "+bp+"/status/schedules/rows", page(http.HandlerFunc(h.GetStatusScheduleRows)))
+	mux.Handle("GET "+bp+"/status/schedules/new", page(http.HandlerFunc(h.GetStatusScheduleNew)))
+	mux.Handle("POST "+bp+"/status/schedules", page(http.HandlerFunc(h.PostStatusScheduleCreate)))
+	mux.Handle("GET "+bp+"/status/schedules/{id}/edit", page(http.HandlerFunc(h.GetStatusScheduleEdit)))
+	mux.Handle("POST "+bp+"/status/schedules/{id}", page(http.HandlerFunc(h.PostStatusScheduleUpdate)))
+	mux.Handle("POST "+bp+"/status/schedules/{id}/pause", page(http.HandlerFunc(h.PostStatusSchedulePause)))
+	mux.Handle("POST "+bp+"/status/schedules/{id}/resume", page(http.HandlerFunc(h.PostStatusScheduleResume)))
+	mux.Handle("POST "+bp+"/status/schedules/{id}/delete", page(http.HandlerFunc(h.PostStatusScheduleDelete)))
+
 	// Self Convo — simulated two-party conversations between two of this
 	// deployment's own paired sessions. GET /self-convo/templates/example
 	// MUST be registered BEFORE GET /self-convo/templates/{id}: Go 1.22's

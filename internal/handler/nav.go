@@ -108,6 +108,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 			{Title: "Sessions", Path: "/sessions", Icon: iconSessions},
 			{Title: "Send Message", Path: "/send", Icon: iconSend},
 			{Title: "Post Status", Path: "/status", Icon: iconStatus},
+			{Title: "Status Schedules", Path: "/status/schedules", Icon: iconSchedules},
 			{Title: "Voice Calls", Path: "/calls", Icon: iconCalls},
 			{Title: "Verify Number", Path: "/verify", Icon: iconVerify},
 			{Title: "Contacts", Path: "/contacts", Icon: iconContacts},

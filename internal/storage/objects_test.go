@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,6 +33,10 @@ type fakeObjectAPI struct {
 	presignErr                error
 
 	getErr error
+
+	// removeBucket/removeKey record RemoveObject's most recent call.
+	removeBucket, removeKey string
+	removeErr               error
 }
 
 func (f *fakeObjectAPI) PutObject(_ context.Context, bucketName, objectName string, reader io.Reader, size int64, opts minio.PutObjectOptions) (minio.UploadInfo, error) {
@@ -54,6 +59,11 @@ func (f *fakeObjectAPI) PresignedGetObject(_ context.Context, bucketName, object
 
 func (f *fakeObjectAPI) GetObject(_ context.Context, _, _ string, _ minio.GetObjectOptions) (*minio.Object, error) {
 	return nil, f.getErr
+}
+
+func (f *fakeObjectAPI) RemoveObject(_ context.Context, bucketName, objectName string, _ minio.RemoveObjectOptions) error {
+	f.removeBucket, f.removeKey = bucketName, objectName
+	return f.removeErr
 }
 
 func testObjectsCfg() *config.Config {
@@ -155,5 +165,26 @@ func TestObjectKeyLayoutMatchesTheDocumentedShape(t *testing.T) {
 	want := "media/sess-1/2026/03/msg-42.jpg"
 	if got != want {
 		t.Fatalf("ObjectKey = %q, want %q", got, want)
+	}
+}
+
+// TestDeleteRemovesTheKeyFromTheConfiguredBucket pins Delete's wiring: the
+// scheduled-status feature deletes a schedule's stored media with it, and a
+// Delete that targeted the wrong bucket/key would orphan the file silently.
+func TestDeleteRemovesTheKeyFromTheConfiguredBucket(t *testing.T) {
+	f := &fakeObjectAPI{}
+	objs := NewObjects(f, testObjectsCfg())
+	if err := objs.Delete(context.Background(), "media/s/2026/11/x.png"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if f.removeBucket != "whatsapp-ardi" || f.removeKey != "media/s/2026/11/x.png" {
+		t.Errorf("RemoveObject(%q, %q), want the configured bucket and the key", f.removeBucket, f.removeKey)
+	}
+}
+
+func TestDeleteWrapsTheClientError(t *testing.T) {
+	objs := NewObjects(&fakeObjectAPI{removeErr: io.ErrUnexpectedEOF}, testObjectsCfg())
+	if err := objs.Delete(context.Background(), "k"); err == nil || !strings.Contains(err.Error(), "k") {
+		t.Errorf("Delete error = %v, want a wrapped error naming the key", err)
 	}
 }

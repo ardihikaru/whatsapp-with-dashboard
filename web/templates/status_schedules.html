@@ -1,0 +1,29 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Status Schedules</h4>
+  <div class="row-actions">
+    <a class="btn btn-outline" href="{{u "/status"}}">Post now</a>
+    <a class="btn btn-primary" href="{{u "/status/schedules/new"}}">New schedule</a>
+  </div>
+</div>
+
+<p class="ss-intro">Each schedule posts one fixed status, once on every selected weekday, at a random time inside
+  its window. A failed post is shown here and never retried (a status that did go out cannot be unsent), and a
+  time that has already passed is skipped, never back-filled.</p>
+
+<div class="card">
+  <div class="table-scroll">
+    <table class="table table-wide">
+      <thead>
+        <tr>
+          <th>Name</th><th>Session</th><th>Type</th><th>Days</th><th>Window</th>
+          <th>Recipients</th><th>Next post</th><th>Last result</th><th>State</th><th>Actions</th>
+        </tr>
+      </thead>
+      <tbody id="status-schedule-rows" class="ss-rows" hx-get="{{u "/status/schedules/rows"}}" hx-trigger="load" hx-swap="innerHTML">
+        <tr><td colspan="10">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{{end}}
