@@ -18,6 +18,15 @@
 // file the server is guaranteed to reject wastes the operator's upload time
 // for nothing, so there is no "warn but still allow" middle ground here.
 //
+// Image/PDF affordances (all progressive enhancement; the server stays the
+// authority): the file picker's accept list follows the Kind select (from the
+// option's data-accept, which Go derives from its own sniff allowlist), a
+// file that does not fit the Kind either switches the Kind (when exactly one
+// kind fits, or it is a PDF) or blocks with a message, an image shows a
+// thumbnail and anything else a type badge, a file can be dropped on the
+// dropzone or removed again, caption / voice-note fields show only for the
+// kinds they apply to, and the form is cleared after a successful send.
+//
 // No library. Plain IIFE, following nav-drawer.js's shape: early return
 // when its elements are absent, so the no-JS path stays the default.
 (function () {
@@ -33,6 +42,142 @@
   var kindSelect = form ? form.querySelector('select[name="kind"]') : null;
   var limitEls = document.querySelectorAll("[data-media-limit]");
   var submitButton = form ? form.querySelector("button[type=submit]") : null;
+  var preview = document.getElementById("media-preview");
+  var previewImg = document.getElementById("media-preview-img");
+  var previewBadge = document.getElementById("media-preview-badge");
+  var clearButton = document.getElementById("media-clear");
+  var dropHint = document.getElementById("media-drop-hint");
+  var kindNotice = document.getElementById("media-kind-notice");
+  var captionField = form ? form.querySelector("[data-media-caption]") : null;
+  var pttField = form ? form.querySelector("[data-media-ptt]") : null;
+  var objectUrl = null;
+
+  function selectedKind() {
+    return kindSelect ? kindSelect.value : "";
+  }
+
+  // option.data-accept for a kind, as an array ([] = any file).
+  function acceptFor(kind) {
+    if (!kindSelect) return [];
+    for (var i = 0; i < kindSelect.options.length; i++) {
+      if (kindSelect.options[i].value === kind) {
+        return (kindSelect.options[i].getAttribute("data-accept") || "")
+          .split(",").map(function (t) { return t.trim(); }).filter(Boolean);
+      }
+    }
+    return [];
+  }
+
+  function isPdf(file) {
+    return file.type === "application/pdf" || /\.pdf$/i.test(file.name);
+  }
+
+  // Does this file fit the kind? An empty list (document) fits anything; a
+  // file with no browser-reported type is not judged here — the server
+  // sniffs the bytes and answers either way.
+  function fits(file, kind) {
+    var list = acceptFor(kind);
+    if (!list.length || !file.type) return true;
+    return list.indexOf(file.type) !== -1;
+  }
+
+  // The one kind to switch to, or "" when it is ambiguous / nothing fits.
+  // PDFs are documents; otherwise exactly one non-document kind must list
+  // the file's type.
+  function kindForFile(file) {
+    if (isPdf(file)) return "document";
+    if (!file.type || !kindSelect) return "";
+    var found = [];
+    for (var i = 0; i < kindSelect.options.length; i++) {
+      var k = kindSelect.options[i].value;
+      if (k !== "document" && acceptFor(k).indexOf(file.type) !== -1) found.push(k);
+    }
+    return found.length === 1 ? found[0] : "";
+  }
+
+  function kindLabel(kind) {
+    var opt = kindSelect && kindSelect.querySelector('option[value="' + kind + '"]');
+    return opt ? opt.textContent : kind;
+  }
+
+  function setNotice(msg) {
+    if (!kindNotice) return;
+    kindNotice.hidden = !msg;
+    kindNotice.textContent = msg || "";
+  }
+
+  function revokePreview() {
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+      objectUrl = null;
+    }
+  }
+
+  function renderPreview(file) {
+    if (!preview) return;
+    revokePreview();
+    if (!file) {
+      preview.hidden = true;
+      if (previewImg) { previewImg.hidden = true; previewImg.removeAttribute("src"); }
+      if (previewBadge) previewBadge.hidden = true;
+      if (dropHint) dropHint.hidden = false;
+      return;
+    }
+    preview.hidden = false;
+    if (dropHint) dropHint.hidden = true;
+    var isImage = /^image\/(jpeg|png|webp|gif)$/.test(file.type);
+    if (previewImg) {
+      previewImg.hidden = !isImage;
+      if (isImage) {
+        objectUrl = URL.createObjectURL(file);
+        previewImg.src = objectUrl;
+      } else {
+        previewImg.removeAttribute("src");
+      }
+    }
+    if (previewBadge) {
+      previewBadge.hidden = isImage;
+      if (!isImage) {
+        var ext = (file.name.match(/\.([A-Za-z0-9]{1,5})$/) || [])[1];
+        previewBadge.textContent = isPdf(file) ? "PDF" : (ext ? ext.toUpperCase() : "FILE");
+        previewBadge.setAttribute("data-file-type", isPdf(file) ? "pdf" : "other");
+      }
+    }
+  }
+
+  // Caption applies to image/video/document, voice note to audio only. A
+  // hidden field is also disabled so a stale value is never submitted.
+  function syncFieldsForKind() {
+    var kind = selectedKind();
+    if (captionField) {
+      var showCaption = kind !== "audio";
+      captionField.hidden = !showCaption;
+      var ta = captionField.querySelector("textarea");
+      if (ta) ta.disabled = !showCaption;
+    }
+    if (pttField) {
+      var showPtt = kind === "audio";
+      pttField.hidden = !showPtt;
+      var cb = pttField.querySelector("input");
+      if (cb) {
+        cb.disabled = !showPtt;
+        if (!showPtt) cb.checked = false;
+      }
+    }
+  }
+
+  function resetProgress() {
+    var wrap = document.getElementById("media-progress");
+    var bar = document.getElementById("media-progress-bar");
+    if (wrap) wrap.hidden = true;
+    if (bar) bar.style.width = "0%";
+  }
+
+  function clearFile() {
+    fileInput.value = "";
+    setNotice("");
+    checkFile();
+  }
 
   function currentMaxBytes() {
     return parseInt(dropzone.getAttribute("data-max-bytes"), 10) || 0;
@@ -70,6 +215,7 @@
   function checkFile() {
     var file = fileInput.files && fileInput.files[0];
     clearError();
+    renderPreview(file);
     if (!file) {
       if (chip) chip.hidden = true;
       return;
@@ -77,6 +223,15 @@
     if (chip) {
       chip.hidden = false;
       chip.textContent = file.name + " (" + formatBytes(file.size) + ")";
+    }
+    if (!fits(file, selectedKind())) {
+      var hint = kindForFile(file);
+      showError(
+        "This file (" + (file.type || "unknown type") + ") cannot be sent as " +
+        kindLabel(selectedKind()) + "." +
+        (hint ? " Switch Kind to " + kindLabel(hint) + "." : " Pick a Kind that fits it, or Document.")
+      );
+      return;
     }
     var maxBytes = currentMaxBytes();
     if (maxBytes > 0 && file.size > maxBytes) {
@@ -88,7 +243,54 @@
     }
   }
 
-  fileInput.addEventListener("change", checkFile);
+  // A newly chosen file that does not fit the current Kind switches the
+  // Kind when that is unambiguous (and says so); otherwise checkFile blocks
+  // with a message. Switching on KIND change is deliberately NOT done: the
+  // operator just chose that kind, so they get the warning, not a reversal.
+  function onFileChosen() {
+    var file = fileInput.files && fileInput.files[0];
+    setNotice("");
+    if (file && kindSelect && !fits(file, selectedKind())) {
+      var target = kindForFile(file);
+      if (target && target !== selectedKind()) {
+        kindSelect.value = target;
+        setNotice("Kind switched to " + kindLabel(target) + " to fit this file.");
+        syncKind();
+        return;
+      }
+    }
+    checkFile();
+  }
+  fileInput.addEventListener("change", onFileChosen);
+  if (clearButton) clearButton.addEventListener("click", clearFile);
+
+  // Drag and drop onto the dropzone. Assigning DataTransfer.files to the
+  // input keeps the file in the real multipart submit; one file only.
+  ["dragenter", "dragover"].forEach(function (name) {
+    dropzone.addEventListener(name, function (evt) {
+      evt.preventDefault();
+      dropzone.classList.add("is-dragover");
+    });
+  });
+  ["dragleave", "dragend"].forEach(function (name) {
+    dropzone.addEventListener(name, function () {
+      dropzone.classList.remove("is-dragover");
+    });
+  });
+  dropzone.addEventListener("drop", function (evt) {
+    evt.preventDefault();
+    dropzone.classList.remove("is-dragover");
+    var files = evt.dataTransfer && evt.dataTransfer.files;
+    if (!files || !files.length) return;
+    try {
+      var dt = new DataTransfer();
+      dt.items.add(files[0]);
+      fileInput.files = dt.files;
+    } catch (e) {
+      return;
+    }
+    onFileChosen();
+  });
 
   // Reflect the selected kind: the dropzone's data-max-bytes tracks
   // whichever <option> is selected (each carries its own per-kind
@@ -101,14 +303,21 @@
       var opt = kindSelect.options[kindSelect.selectedIndex];
       var maxBytes = opt ? opt.getAttribute("data-max-bytes") : null;
       if (maxBytes) dropzone.setAttribute("data-max-bytes", maxBytes);
-      var selectedKind = opt ? opt.value : "";
+      var activeKind = opt ? opt.value : "";
       limitEls.forEach(function (el) {
-        el.classList.toggle("is-active", el.getAttribute("data-media-limit") === selectedKind);
+        el.classList.toggle("is-active", el.getAttribute("data-media-limit") === activeKind);
       });
+      var accept = opt ? opt.getAttribute("data-accept") : "";
+      if (accept) fileInput.setAttribute("accept", accept);
+      else fileInput.removeAttribute("accept");
     }
+    syncFieldsForKind();
     checkFile();
   }
-  if (kindSelect) kindSelect.addEventListener("change", syncKind);
+  if (kindSelect) kindSelect.addEventListener("change", function () {
+    setNotice("");
+    syncKind();
+  });
   syncKind(); // initial sync on load — matches the select's default (first) option
 
   // Belt-and-suspenders: block a real submit outright if the size error is
@@ -143,6 +352,32 @@
           progressWrap.hidden = true;
           progressBar.style.width = "0%";
         }, 400);
+      }
+    });
+  }
+
+  // A failed or aborted request never reaches 100%, so without this the bar
+  // would stay frozen mid-way until the next send.
+  if (form) {
+    ["htmx:responseError", "htmx:sendError", "htmx:sendAbort", "htmx:timeout", "htmx:xhr:abort"].forEach(function (name) {
+      form.addEventListener(name, resetProgress);
+    });
+
+    // POST /send/media answers 200 for BOTH outcomes (the failure is an
+    // alert-error partial), so success is read from the response body, not
+    // the status. After a success the file, caption and voice-note are
+    // cleared so the same attachment is not re-sent by a second click;
+    // recipient, routing and kind are kept for sending several in a row.
+    form.addEventListener("htmx:afterRequest", function (evt) {
+      var xhr = evt.detail && evt.detail.xhr;
+      if (!xhr || evt.detail.elt !== form) return;
+      resetProgress();
+      if (evt.detail.successful && /alert-success/.test(xhr.responseText || "")) {
+        clearFile();
+        var ta = captionField && captionField.querySelector("textarea");
+        if (ta) ta.value = "";
+        var cb = pttField && pttField.querySelector("input");
+        if (cb) cb.checked = false;
       }
     });
   }
