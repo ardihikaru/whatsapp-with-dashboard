@@ -99,6 +99,19 @@ func (m *Manager) WebhookAdmin() (WebhookAdmin, error) {
 	return wh, nil
 }
 
+// StatusPoster returns the backend's status/story-posting operations, if it
+// has any.
+func (m *Manager) StatusPoster() (StatusPoster, error) {
+	if m.backend == nil {
+		return nil, ErrUnsupported
+	}
+	sp, ok := m.backend.(StatusPoster)
+	if !ok {
+		return nil, ErrUnsupported
+	}
+	return sp, nil
+}
+
 // MessageHistory returns the backend's customer-reply-reading operations,
 // if it has any. inbound.go's pump calls this once per tick, per session,
 // to check whether the current backend supports ingest at all before

@@ -1,0 +1,7 @@
+{{define "status_result"}}
+{{if .WAMessageID}}
+<div class="alert alert-success">Posted{{if .Kind}} {{.Kind}} status{{else}} status{{end}}{{if .SessionName}} via {{.SessionName}}{{end}} - visible to {{.RecipientCount}} recipient(s) - WhatsApp message ID <span class="mono">{{.WAMessageID}}</span></div>
+{{else}}
+<div class="alert alert-error">{{.Error}}</div>
+{{end}}
+{{end}}

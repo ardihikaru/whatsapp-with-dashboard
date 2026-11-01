@@ -245,3 +245,35 @@ type MessageHistory interface {
 	RecentMessages(ctx context.Context, sessionID string, after *int64, limit int) (MessagePage, error)
 	ResolvePhone(ctx context.Context, sessionID, jid string) (string, error)
 }
+
+// StatusPoster is the "post a WhatsApp status/story" capability
+// (/tmp/waxum-status-api.md, waxum image ardihikaru/waxum:0.12.2-status-post)
+// — whatsmeow has no analogue exposed anywhere in this codebase, so
+// meowBackend implements none of it, the same as every other interface in
+// this file (TestTheWhatsmeowBackendSatisfiesNoCapabilityInterface).
+//
+// This is a capability, not a core Backend method, for the same reason
+// MediaStore/ContactDirectory are: it is reached from a dedicated HTTP
+// handler keyed off the URL path session id, bypasses the send queue
+// entirely (sender.go's job type has no "status" case and none is added —
+// see backend.go's ErrUnsupported doc comment for the rationale this
+// mirrors), and adding a Backend method would force all 4 Backend fakes to
+// grow a method they can never serve.
+//
+// recipients is the caller-supplied JID list, passed straight down to
+// waxum verbatim — waxum does not fetch contacts itself and rejects an
+// empty list with 400 (the spec's own "recipients (wajib)" section); this
+// interface does not second-guess that, it is the handler's job to decide
+// what "recipients" means (e.g. wa_contacts) before calling in.
+// backgroundARGB of 0 asks for waxum's own documented default colour, the
+// same omission rule PostStatusText (internal/waxum/status.go) follows.
+//
+// Image/video go through the SAME upload-then-describe path media sends
+// already use (waxum's SSRF guard blocks a bare URL — see SendMedia's doc
+// comment) — d is a MediaDescriptor previously returned by
+// MediaStore.UploadMedia, not raw bytes or a URL.
+type StatusPoster interface {
+	PostStatusText(ctx context.Context, sessionID, text string, backgroundARGB uint32, recipients []string) (messageID string, err error)
+	PostStatusImage(ctx context.Context, sessionID string, d MediaDescriptor, caption string, recipients []string) (messageID string, err error)
+	PostStatusVideo(ctx context.Context, sessionID string, d MediaDescriptor, caption string, recipients []string) (messageID string, err error)
+}

@@ -36,12 +36,19 @@
        chip lives in the "header" template, which login.html never renders.
        See host-chip.css's own header comment. -->
   <link rel="stylesheet" href="{{u "/static/css/host-chip.css"}}">
+  <!-- FOURTEENTH, after host-chip.css — /status's kind-switch/confirm-panel
+       motion and colour swatches. See status.css's own header comment. -->
+  <link rel="stylesheet" href="{{u "/static/css/status.css"}}">
   <script src="{{u "/static/js/htmx.min.js"}}" defer></script>
   <script src="{{u "/static/js/nav-drawer.js"}}" defer></script>
   <script src="{{u "/static/js/modal.js"}}" defer></script>
   <script src="{{u "/static/js/media-upload.js"}}" defer></script>
   <script src="{{u "/static/js/phone-chips.js"}}" defer></script>
   <script src="{{u "/static/js/self-convo.js"}}" defer></script>
+  <!-- NOT duplicated into login.html: /status is never reachable from
+       login.html's own self-contained markup — same exception
+       host-chip.css documents above. -->
+  <script src="{{u "/static/js/status.js"}}" defer></script>
   <!-- NOT duplicated into login.html: known-groups.js only wires up
        /groups' picker partial, which login.html never renders — same
        "page never renders this" exception host-chip.css documents above. -->

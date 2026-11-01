@@ -71,6 +71,10 @@ const (
 	// page is the owner's own name/phone book, verifiable on WhatsApp,
 	// global rather than per-session.
 	iconContacts template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12 12a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9zm0 2c-4.4 0-8 2.2-8 5v1h16v-1c0-2.8-3.6-5-8-5z"/></svg>`
+	// a ring/circle with a plus — "post something new, visible to a set of
+	// people for a while", distinct from iconSend's paper-plane (one direct
+	// message to one destination): a WhatsApp status/story is neither.
+	iconStatus template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3h2v5h-2V7zm0 7h2v2h-2v-2z"/></svg>`
 )
 
 // platformLink is the sidebar footer's way back out to the platform backoffice.
@@ -103,6 +107,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 		{Subheader: "WhatsApp", Items: []NavItem{
 			{Title: "Sessions", Path: "/sessions", Icon: iconSessions},
 			{Title: "Send Message", Path: "/send", Icon: iconSend},
+			{Title: "Post Status", Path: "/status", Icon: iconStatus},
 			{Title: "Voice Calls", Path: "/calls", Icon: iconCalls},
 			{Title: "Verify Number", Path: "/verify", Icon: iconVerify},
 			{Title: "Contacts", Path: "/contacts", Icon: iconContacts},

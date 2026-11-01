@@ -163,6 +163,14 @@ func (h *handlers) mountAPI(mux *http.ServeMux) {
 	// contact book. {contactID} is deliberately NOT named "{id}" — see
 	// api_contacts_crud.go's doc comment on why wsm-mcp's generic
 	// session-id resolution must not fire for these routes.
+	// Status/story posting (internal/wa's StatusPoster capability) — 501 on
+	// a whatsmeow backend, same as every other optional-capability route.
+	// Not published at the edge (see this file's header comment); recipients
+	// are REQUIRED on all three — waxum does not fetch contacts itself.
+	mux.Handle("POST /api/v1/sessions/{id}/status/text", api(http.HandlerFunc(h.PostAPISessionStatusText)))
+	mux.Handle("POST /api/v1/sessions/{id}/status/image", api(http.HandlerFunc(h.PostAPISessionStatusImage)))
+	mux.Handle("POST /api/v1/sessions/{id}/status/video", api(http.HandlerFunc(h.PostAPISessionStatusVideo)))
+
 	mux.Handle("GET /api/v1/contacts", api(http.HandlerFunc(h.GetAPIContacts)))
 	mux.Handle("POST /api/v1/contacts", api(http.HandlerFunc(h.PostAPIContacts)))
 	mux.Handle("DELETE /api/v1/contacts/{contactID}", api(http.HandlerFunc(h.DeleteAPIContact)))

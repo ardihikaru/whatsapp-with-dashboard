@@ -97,6 +97,15 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("GET "+bp+"/verify", page(http.HandlerFunc(h.GetVerify)))
 	mux.Handle("POST "+bp+"/verify", page(http.HandlerFunc(h.PostVerify)))
 
+	// Status/story posting page — own sidebar entry, own status.css/
+	// status.js (nav.go, base.html). Each panel posts to its own route,
+	// mirroring the three /api/v1/sessions/{id}/status/* JSON routes
+	// 1:1 (api_status.go).
+	mux.Handle("GET "+bp+"/status", page(http.HandlerFunc(h.GetStatus)))
+	mux.Handle("POST "+bp+"/status/text", page(http.HandlerFunc(h.PostStatusText)))
+	mux.Handle("POST "+bp+"/status/image", page(http.HandlerFunc(h.PostStatusImage)))
+	mux.Handle("POST "+bp+"/status/video", page(http.HandlerFunc(h.PostStatusVideo)))
+
 	// Self Convo — simulated two-party conversations between two of this
 	// deployment's own paired sessions. GET /self-convo/templates/example
 	// MUST be registered BEFORE GET /self-convo/templates/{id}: Go 1.22's
