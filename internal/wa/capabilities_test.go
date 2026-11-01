@@ -83,6 +83,9 @@ func TestTheWaxumBackendSatisfiesEveryCapabilityInterface(t *testing.T) {
 	if _, ok := backend.(WebhookAdmin); !ok {
 		t.Error("waxumBackend does not satisfy WebhookAdmin")
 	}
+	if _, ok := backend.(StatusPoster); !ok {
+		t.Error("waxumBackend does not satisfy StatusPoster")
+	}
 }
 
 // TestIsPausedReadsTheStatusEndpointWithoutMutatingAnything proves IsPaused
@@ -131,6 +134,9 @@ func TestTheWhatsmeowBackendSatisfiesNoCapabilityInterface(t *testing.T) {
 	}
 	if _, ok := backend.(MessageHistory); ok {
 		t.Error("meowBackend unexpectedly satisfies MessageHistory")
+	}
+	if _, ok := backend.(StatusPoster); ok {
+		t.Error("meowBackend unexpectedly satisfies StatusPoster")
 	}
 }
 

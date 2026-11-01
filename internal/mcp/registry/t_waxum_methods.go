@@ -228,6 +228,37 @@ func waxumMethodTools() []Tool {
 				}
 				return []any{waxum.MediaKind(a.Str("kind")), a.Str("to"), d, a.Str("caption"), a.Str("filename"), a.Bool("ptt")}, nil
 			}},
+		{name: "waxum_post_status_text", method: "PostStatusText", desc: "DANGER: post a WhatsApp text status/story directly through waxum, bypassing WSM's own send queue and audit log (prefer the WSM-side status routes once the dashboard /status page exists). Visible to every JID in recipients — waxum does not fetch contacts itself, so recipients is required and non-empty. Never tried against a real send until verified by hand (/tmp/waxum-status-api.md).", sessionScoped: true, danger: true,
+			extraParams: []Param{
+				{Name: "text", Type: "string", Desc: "Status text.", Required: true},
+				{Name: "background_argb", Type: "integer", Desc: "Decimal 0xAARRGGBB; 0 (the default) uses waxum's own default background."},
+				{Name: "recipients", Type: "array", Desc: "JIDs allowed to see this status. Required, non-empty.", Required: true},
+			},
+			build: func(a Args) ([]any, error) {
+				return []any{a.Str("text"), uint32(a.Int("background_argb", 0)), a.StrSlice("recipients")}, nil
+			}},
+		{name: "waxum_post_status_image", method: "PostStatusImage", desc: "DANGER: post a WhatsApp image status/story directly through waxum, using a MediaDescriptor already uploaded via waxum_upload_media. Sent WITHOUT a thumbnail. recipients is required and non-empty.", sessionScoped: true, danger: true,
+			extraParams: append(statusMediaDescriptorParams(),
+				Param{Name: "caption", Type: "string", Desc: "Optional caption."},
+				Param{Name: "recipients", Type: "array", Desc: "JIDs allowed to see this status. Required, non-empty.", Required: true}),
+			build: func(a Args) ([]any, error) {
+				d, err := statusMediaDescriptorFromArgs(a)
+				if err != nil {
+					return nil, err
+				}
+				return []any{d, a.Str("caption"), a.StrSlice("recipients")}, nil
+			}},
+		{name: "waxum_post_status_video", method: "PostStatusVideo", desc: "DANGER: post a WhatsApp video status/story directly through waxum, using a MediaDescriptor already uploaded via waxum_upload_media. Sent WITHOUT a thumbnail. recipients is required and non-empty.", sessionScoped: true, danger: true,
+			extraParams: append(statusMediaDescriptorParams(),
+				Param{Name: "caption", Type: "string", Desc: "Optional caption."},
+				Param{Name: "recipients", Type: "array", Desc: "JIDs allowed to see this status. Required, non-empty.", Required: true}),
+			build: func(a Args) ([]any, error) {
+				d, err := statusMediaDescriptorFromArgs(a)
+				if err != nil {
+					return nil, err
+				}
+				return []any{d, a.Str("caption"), a.StrSlice("recipients")}, nil
+			}},
 		{name: "waxum_session_messages", method: "SessionMessages", desc: "Paginate a session's inbound message log directly from waxum, newest first. Omit \"after\" for the newest page.", sessionScoped: true, readOnly: true, idempotent: true,
 			extraParams: []Param{{Name: "after", Type: "integer", Desc: "waxum's own keyset cursor (its \"id\" column). Pages OLDER, not newer: pass the previous page's last row id to get the NEXT (older) page. Omit entirely (0 means \"omit\" here, not \"from the start\") to get the newest page."}, {Name: "limit", Type: "integer", Desc: "Max rows to return."}},
 			build: func(a Args) ([]any, error) {
@@ -323,4 +354,33 @@ func mediaDescriptorFromArgs(a Args) (waxum.MediaDescriptor, error) {
 		FileSHA256: a.Str("file_sha256"), FileEncSHA256: a.Str("file_enc_sha256"),
 		FileLength: int64(a.Int("file_length", 0)),
 	}, nil
+}
+
+// statusMediaDescriptorParams/statusMediaDescriptorFromArgs are
+// mediaDescriptorParams/mediaDescriptorFromArgs' siblings for
+// PostStatusImage/PostStatusVideo: no "kind" param (the tool name already
+// says which — waxum_post_status_image vs waxum_post_status_video, unlike
+// waxum_download_media/waxum_send_uploaded which are kind-generic), plus
+// "mimetype" — PostStatusImage/Video forward the descriptor's Mimetype
+// field to waxum, so omitting it here (the way mediaDescriptorFromArgs
+// does for its own callers) would silently drop it.
+func statusMediaDescriptorParams() []Param {
+	return []Param{
+		{Name: "url", Type: "string", Desc: "Descriptor's url field (from a prior waxum_upload_media call)."},
+		{Name: "direct_path", Type: "string", Desc: "Descriptor's direct_path field."},
+		{Name: "media_key", Type: "string", Desc: "Descriptor's media_key field."},
+		{Name: "file_sha256", Type: "string", Desc: "Descriptor's file_sha256 field."},
+		{Name: "file_enc_sha256", Type: "string", Desc: "Descriptor's file_enc_sha256 field."},
+		{Name: "file_length", Type: "integer", Desc: "Descriptor's file_length field."},
+		{Name: "mimetype", Type: "string", Desc: "Descriptor's mimetype field."},
+	}
+}
+
+func statusMediaDescriptorFromArgs(a Args) (waxum.MediaDescriptor, error) {
+	d, err := mediaDescriptorFromArgs(a)
+	if err != nil {
+		return waxum.MediaDescriptor{}, err
+	}
+	d.Mimetype = a.Str("mimetype")
+	return d, nil
 }

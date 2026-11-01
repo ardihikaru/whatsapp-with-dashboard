@@ -66,6 +66,10 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/verify.html"),
 		root:  "base",
 	},
+	"status": {
+		files: append(chrome(), "templates/status.html"),
+		root:  "base",
+	},
 	// self_convo/self_convo_templates: no rows partial in either fileset —
 	// same rule as "calls" above. self_convo_template_view has no rows
 	// partial to worry about at all; it renders one template's JSON, not a
@@ -185,6 +189,7 @@ var partialFiles = []string{
 	"templates/partials/reconcile_banner.html",
 	"templates/partials/pairing_status.html",
 	"templates/partials/send_result.html",
+	"templates/partials/status_result.html",
 	"templates/partials/log_rows.html",
 	"templates/partials/outgoing_chat_rows.html",
 	"templates/partials/system_log_rows.html",

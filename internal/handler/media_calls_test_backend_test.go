@@ -40,6 +40,10 @@ type fakeGatewayBackend struct {
 	termFn          func(peer wa.JID, callID, reason string) error
 	checkContactsFn func(ctx context.Context, sessionID string, phones []string) ([]wa.ContactCheck, error)
 	groupsFn        func(ctx context.Context) ([]wa.GroupInfo, error)
+
+	statusTextFn  func(ctx context.Context, sessionID, text string, backgroundARGB uint32, recipients []string) (string, error)
+	statusImageFn func(ctx context.Context, sessionID string, d wa.MediaDescriptor, caption string, recipients []string) (string, error)
+	statusVideoFn func(ctx context.Context, sessionID string, d wa.MediaDescriptor, caption string, recipients []string) (string, error)
 }
 
 func (f *fakeGatewayBackend) Name() string { return f.name }
@@ -115,6 +119,31 @@ func (f *fakeGatewayBackend) CheckContacts(ctx context.Context, sessionID string
 }
 
 var _ wa.ContactDirectory = (*fakeGatewayBackend)(nil)
+
+// PostStatusText/Image/Video give fakeGatewayBackend wa.StatusPoster's
+// method set unconditionally — nil-hook-means-ErrUnsupported, the same
+// convention every other hook on this fake follows (see UploadMedia's doc
+// comment).
+func (f *fakeGatewayBackend) PostStatusText(ctx context.Context, sessionID, text string, backgroundARGB uint32, recipients []string) (string, error) {
+	if f.statusTextFn != nil {
+		return f.statusTextFn(ctx, sessionID, text, backgroundARGB, recipients)
+	}
+	return "", wa.ErrUnsupported
+}
+func (f *fakeGatewayBackend) PostStatusImage(ctx context.Context, sessionID string, d wa.MediaDescriptor, caption string, recipients []string) (string, error) {
+	if f.statusImageFn != nil {
+		return f.statusImageFn(ctx, sessionID, d, caption, recipients)
+	}
+	return "", wa.ErrUnsupported
+}
+func (f *fakeGatewayBackend) PostStatusVideo(ctx context.Context, sessionID string, d wa.MediaDescriptor, caption string, recipients []string) (string, error) {
+	if f.statusVideoFn != nil {
+		return f.statusVideoFn(ctx, sessionID, d, caption, recipients)
+	}
+	return "", wa.ErrUnsupported
+}
+
+var _ wa.StatusPoster = (*fakeGatewayBackend)(nil)
 
 // callLog is a small mutex-protected call-order recorder, shared between a
 // fakeObjectStore and a fakeGatewayBackend so

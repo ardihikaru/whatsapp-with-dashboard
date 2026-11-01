@@ -1740,6 +1740,178 @@ paths:
           content:
             application/json:
               schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/status/text:
+    post:
+      summary: Post a WhatsApp text status/story through this session
+      description: >
+        Never tried against a real send until verified by hand (see
+        /tmp/waxum-status-api.md's own first line, mirrored here). Visible
+        to every JID in recipients — waxum does not fetch contacts itself,
+        so recipients is required and non-empty. Logs exactly one
+        wa_messages row (to_phone "status@broadcast", category manual) per
+        call, success or failure.
+      operationId: postSessionStatusText
+      tags: [status]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text, recipients]
+              properties:
+                text: {type: string, description: 'Status text'}
+                background_argb: {type: integer, format: int64, description: 'Decimal 0xAARRGGBB; omitted/0 uses waxum''s own default background'}
+                recipients:
+                  type: array
+                  items: {type: string}
+                  description: 'JIDs allowed to see this status, e.g. 559999999999@s.whatsapp.net. Required, non-empty.'
+      responses:
+        '200':
+          description: Posted; message_id is waxum's own status message id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusPostResponse'}
+        '400':
+          description: Missing text, empty/invalid recipients, or malformed JSON.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Session not connected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Active backend has no StatusPoster support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/status/image:
+    post:
+      summary: Post a WhatsApp image status/story through this session
+      description: >
+        Same upload-then-describe path ordinary media sends use — waxum's
+        SSRF guard blocks a bare URL. Sent WITHOUT a thumbnail; see
+        /tmp/waxum-status-api.md's own note on this.
+      operationId: postSessionStatusImage
+      tags: [status]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, recipients]
+              properties:
+                file: {type: string, format: binary}
+                caption: {type: string}
+                recipients: {type: string, description: 'A JSON array of JID strings, e.g. ["559999999999@s.whatsapp.net"]. Required, non-empty.'}
+      responses:
+        '200':
+          description: Posted; message_id is waxum's own status message id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusPostResponse'}
+        '400':
+          description: Missing file, missing/malformed/empty recipients.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Session not connected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '413':
+          description: Upload exceeds the configured size limit.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '415':
+          description: Uploaded bytes do not sniff as an image.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Active backend has no StatusPoster support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+  /api/v1/sessions/{id}/status/video:
+    post:
+      summary: Post a WhatsApp video status/story through this session
+      description: >
+        Same upload-then-describe path ordinary media sends use. Sent
+        WITHOUT a thumbnail; see /tmp/waxum-status-api.md's own note.
+      operationId: postSessionStatusVideo
+      tags: [status]
+      security: [{bearerAuth: []}, {basicAuth: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file, recipients]
+              properties:
+                file: {type: string, format: binary}
+                caption: {type: string}
+                recipients: {type: string, description: 'A JSON array of JID strings. Required, non-empty.'}
+      responses:
+        '200':
+          description: Posted; message_id is waxum's own status message id.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/StatusPostResponse'}
+        '400':
+          description: Missing file, missing/malformed/empty recipients.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '404':
+          description: Unknown session.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '409':
+          description: Session not connected.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '413':
+          description: Upload exceeds the configured size limit.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '415':
+          description: Uploaded bytes do not sniff as a video.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
+        '501':
+          description: Active backend has no StatusPoster support (e.g. whatsmeow).
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Error'}
   /api/v1/contacts:
     get:
       summary: List or rank-search the owner-managed contact book
@@ -1969,6 +2141,12 @@ components:
         routing: {type: string, enum: [auto, master_only, group, group_master_only, explicit], description: 'Which routing decision produced this session.'}
         kind: {type: string, enum: [image, video, audio, document]}
         filename: {type: string}
+    StatusPostResponse:
+      type: object
+      properties:
+        message_id: {type: string, description: 'waxum''s own status message id'}
+        session_id: {type: string}
+        recipient_count: {type: integer}
     MediaDescriptor:
       type: object
       required: [kind]

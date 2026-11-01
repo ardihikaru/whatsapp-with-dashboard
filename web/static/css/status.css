@@ -1,0 +1,201 @@
+/* /status — posting a WhatsApp status/story. FOURTEENTH stylesheet, loaded
+   after host-chip.css in both base.html and login.html (see base.html's
+   load-order comment) so it can override by cascade without touching the
+   eight files that must stay byte-for-byte identical to the old
+   minimal.css. Tokens only — every colour below is a :root variable
+   already declared in base.css, with a [data-theme="dark"] counterpart
+   wherever the light value is not already theme-neutral. media.css is the
+   model copied here, not forms.css/base.css (both still carry legacy raw
+   hex).
+
+   Motion: every transition here animates ONLY transform/opacity (never
+   layout-affecting properties) except the text-status preview's
+   background-color swap, which is deliberately exempt — it previews the
+   actual WhatsApp background colour an operator picked, so it must track
+   that colour itself, and a plain colour swap has no layout cost. Timings
+   are 150-200ms on ease-out-shaped-rather-than-ease-in curves
+   (cubic-bezier(0.23,1,0.32,1), matching emil-design-eng's guidance), and
+   every transform-based transition is skipped entirely under
+   prefers-reduced-motion. */
+
+/* ---------- CSS-only kind tabs (radio + label, no JS) ---------------------
+   Same technique media.css's .send-tab-* rules use for send.html, with
+   three radios instead of two. Works with JS disabled — see CLAUDE.md's
+   "no-JS path stays the default" rule. */
+.status-kind-input { position: absolute; opacity: 0; pointer-events: none; }
+
+.status-kind-list { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid rgba(145, 158, 171, 0.2); }
+
+.status-kind-label {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 150ms cubic-bezier(0.23, 1, 0.32, 1), border-color 150ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .status-kind-label:hover { color: var(--text-primary); }
+}
+
+.status-kind-panel {
+  display: none;
+  opacity: 0;
+  transform: translateY(4px);
+}
+
+#status-kind-text:checked ~ .status-kind-list label[for="status-kind-text"],
+#status-kind-image:checked ~ .status-kind-list label[for="status-kind-image"],
+#status-kind-video:checked ~ .status-kind-list label[for="status-kind-video"] {
+  color: var(--primary);
+  border-bottom-color: var(--primary);
+}
+
+#status-kind-text:checked ~ [data-status-panel="text"],
+#status-kind-image:checked ~ [data-status-panel="image"],
+#status-kind-video:checked ~ [data-status-panel="video"] {
+  display: block;
+  opacity: 1;
+  transform: translateY(0);
+  animation: status-panel-in 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+@keyframes status-panel-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-kind-panel, #status-kind-text:checked ~ [data-status-panel="text"],
+  #status-kind-image:checked ~ [data-status-panel="image"],
+  #status-kind-video:checked ~ [data-status-panel="video"] {
+    animation: none;
+    transform: none;
+  }
+}
+
+/* ---------- colour swatches (text status background) ---------------------
+   Plain <button>s carrying the real colour as an inline style (the swatch
+   IS the colour, there is no separate token for "whatever an operator
+   picked"); .is-active marks the one status.js has selected. */
+.status-swatches { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+
+.status-swatch {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  cursor: pointer;
+  padding: 0;
+  transition: transform 150ms cubic-bezier(0.23, 1, 0.32, 1), border-color 150ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.status-swatch.is-active { border-color: var(--text-primary); }
+
+.status-swatch:active { transform: scale(0.97); }
+
+@media (hover: hover) and (pointer: fine) {
+  .status-swatch:hover { transform: scale(1.08); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-swatch, .status-swatch:active, .status-swatch:hover { transform: none; }
+}
+
+/* ---------- live text-status preview --------------------------------------
+   background-color is the one property this file transitions outside the
+   transform/opacity rule above — see this file's header comment for why. */
+.status-text-preview {
+  border-radius: var(--radius-card);
+  padding: 32px 20px;
+  margin-bottom: 20px;
+  min-height: 96px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: #fff;
+  font-weight: 700;
+  font-size: 18px;
+  transition: background-color 150ms ease;
+}
+
+/* ---------- recipients checklist ------------------------------------------
+   Visible to everyone checked — the checklist IS the consent surface, so
+   its own count must never lag: see this file's header comment on why
+   count updates are instant (no transition at all), unlike the kind-switch/
+   confirm-panel motion above. */
+.status-recipients { margin: 4px 0 16px; }
+
+.status-recipients-search { margin: 6px 0 10px; }
+
+.status-recipients-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.status-recipients-count {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.status-recipients-list {
+  list-style: none;
+  margin: 0;
+  padding: 4px 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid rgba(145, 158, 171, 0.24);
+  border-radius: var(--radius-btn);
+}
+
+.status-recipients-row { padding: 4px 0; }
+
+.status-recipients-row[hidden] { display: none; }
+
+.status-recipients-empty { color: var(--text-secondary); font-size: 14px; }
+
+/* ---------- confirm panel ("visible to N contacts") ------------------------
+   Hidden by default (status.js toggles the attribute); opacity+transform
+   only, 180ms, no scale(0) and no ease-in — per the plan's motion
+   guidance. */
+.status-confirm {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: var(--radius-card);
+  background: rgba(255, 171, 0, 0.12);
+  opacity: 0;
+  transform: translateY(6px);
+}
+
+.status-confirm:not([hidden]) {
+  animation: status-confirm-in 180ms cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+@keyframes status-confirm-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .status-confirm, .status-confirm:not([hidden]) { animation: none; opacity: 1; transform: none; }
+}
+
+.status-confirm p { margin: 0 0 10px; color: var(--text-primary); }
+
+.status-media-hint { color: var(--text-secondary); font-size: 13px; margin: -6px 0 12px; }
+
+/* Pressable buttons throughout this page: :active feedback gated the same
+   way hover is, per CLAUDE.md's design guidance — scale(0.97), never
+   scale(0), never affecting layout. */
+.status-card .btn:active { transform: scale(0.97); }
+
+@media (prefers-reduced-motion: reduce) {
+  .status-card .btn:active { transform: none; }
+}

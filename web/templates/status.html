@@ -1,0 +1,184 @@
+{{/* recipients/confirm fields are duplicated in all three panels below —
+     the same convention send.html's text/media panels already use for
+     routing/session; adding a field to one and forgetting the other two
+     is the single most likely mistake in this file. Defined here, at the
+     top level of the file, because html/template rejects a {{define}}
+     nested inside an {{if}}/{{range}} block. */}}
+{{define "status_recipients"}}
+<div class="status-recipients" data-status-recipients>
+  <span class="textfield-label">Recipients — visible to everyone checked</span>
+  {{if .Recipients}}
+  <input type="search" class="textfield-input status-recipients-search"
+         placeholder="Search contacts…" data-status-recipients-search aria-label="Search recipients">
+  <div class="status-recipients-actions">
+    <button type="button" class="btn btn-outline btn-sm" data-status-select-all>Select all</button>
+    <button type="button" class="btn btn-outline btn-sm" data-status-select-none>Select none</button>
+    <span class="status-recipients-count" data-status-recipients-count>0 selected</span>
+  </div>
+  <ul class="status-recipients-list" data-status-recipients-list>
+    {{range .Recipients}}
+    <li class="status-recipients-row" data-status-recipients-row data-name="{{.Name}}" data-phone="{{.Phone}}">
+      <label class="checkfield">
+        <input type="checkbox" name="recipients" value="{{.JID}}" data-status-recipient>
+        <span>{{.Name}} (+{{.Phone}})</span>
+      </label>
+    </li>
+    {{end}}
+  </ul>
+  {{else}}
+  <p class="status-recipients-empty">No saved contacts yet. <a href="{{u "/contacts"}}">Add one</a> first — a status post needs at least one recipient JID.</p>
+  {{end}}
+</div>
+{{end}}
+
+{{define "status_confirm"}}
+<!-- Hidden by default; status.js intercepts the form's submit, shows this
+     with the live recipient count, and only lets the form through once the
+     operator confirms here. No-JS fallback: the form submits straight
+     through (the server still enforces non-empty recipients), so nothing
+     is BLOCKED without JS, only the extra confirmation step. -->
+<div class="status-confirm" data-status-confirm hidden>
+  <p data-status-confirm-text>Visible to <strong data-status-confirm-count>0</strong> contact(s). This cannot be unsent.</p>
+  <div class="form-actions">
+    <button type="button" class="btn btn-outline" data-status-confirm-cancel>Cancel</button>
+    <button type="button" class="btn btn-primary" data-status-confirm-go>Yes, post</button>
+  </div>
+</div>
+{{end}}
+
+{{define "content"}}
+<div class="page-heading">
+  <h4>Post Status</h4>
+</div>
+<div class="card form-card status-card">
+  <div id="status-result"></div>
+  {{if .Connected}}
+  <!-- CSS-only tabs (radio + label, no JS required), same technique
+       send.html uses for its Text/Media panels — see status.css's
+       ".status-kind-tabs" rules. -->
+  <div class="status-kind-tabs">
+    <input type="radio" name="status-kind" id="status-kind-text" class="status-kind-input" checked>
+    <input type="radio" name="status-kind" id="status-kind-image" class="status-kind-input">
+    <input type="radio" name="status-kind" id="status-kind-video" class="status-kind-input">
+    <div class="status-kind-list" role="tablist">
+      <label class="status-kind-label" for="status-kind-text">Text</label>
+      <label class="status-kind-label" for="status-kind-image">Image</label>
+      <label class="status-kind-label" for="status-kind-video">Video</label>
+    </div>
+
+    <div class="status-kind-panel" data-status-panel="text">
+      <form hx-post="{{u "/status/text"}}" hx-target="#status-result" hx-swap="innerHTML"
+            hx-sync="this:drop" hx-disabled-elt="find button"
+            action="{{u "/status/text"}}" method="post" novalidate
+            class="status-form" data-status-form data-status-kind="text">
+        <label class="textfield">
+          <span class="textfield-label">Session</span>
+          <select name="session_id" class="select" required>
+            {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}}){{if .IsMaster}} — master{{end}}</option>{{end}}
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Background colour</span>
+          <div class="status-swatches" data-status-swatches>
+            {{range $i, $sw := .Swatches}}
+            <button type="button" class="status-swatch{{if eq $i 0}} is-active{{end}}"
+                    style="background-color: {{$sw.Hex}}" data-status-swatch data-argb="{{$sw.ARGB}}"
+                    aria-label="{{$sw.Name}}" aria-pressed="{{if eq $i 0}}true{{else}}false{{end}}"></button>
+            {{end}}
+          </div>
+          <input type="hidden" name="background_argb" value="{{(index .Swatches 0).ARGB}}" data-status-background-input>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Status text</span>
+          <textarea name="text" rows="4" maxlength="700" required
+                    placeholder="What's on your mind?" data-status-text-input></textarea>
+        </label>
+        <!-- Live preview — background-color transitions 150ms ease on swatch
+             change, per the plan's motion guidance; text content mirrors
+             the textarea via status.js. -->
+        <div class="status-text-preview" data-status-text-preview style="background-color: {{(index .Swatches 0).Hex}}">
+          <span data-status-text-preview-text>What's on your mind?</span>
+        </div>
+        {{template "status_recipients" .}}
+        {{template "status_confirm" .}}
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-label">Post</span>
+            <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+            <span class="htmx-indicator">Posting...</span>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="status-kind-panel" data-status-panel="image">
+      <form hx-post="{{u "/status/image"}}" hx-encoding="multipart/form-data"
+            hx-target="#status-result" hx-swap="innerHTML"
+            hx-sync="this:drop" hx-disabled-elt="find button"
+            action="{{u "/status/image"}}" method="post" enctype="multipart/form-data" novalidate
+            class="status-form" data-status-form data-status-kind="image">
+        <label class="textfield">
+          <span class="textfield-label">Session</span>
+          <select name="session_id" class="select" required>
+            {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}}){{if .IsMaster}} — master{{end}}</option>{{end}}
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Image</span>
+          <input type="file" name="file" accept="image/jpeg,image/png,image/webp" required>
+        </label>
+        <p class="status-media-hint">Sent WITHOUT a thumbnail — not yet confirmed how every client renders this (/tmp/waxum-status-api.md).</p>
+        <label class="textfield">
+          <span class="textfield-label">Caption (optional)</span>
+          <textarea name="caption" rows="3" maxlength="1024"></textarea>
+        </label>
+        {{template "status_recipients" .}}
+        {{template "status_confirm" .}}
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-label">Post</span>
+            <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+            <span class="htmx-indicator">Posting...</span>
+          </button>
+        </div>
+      </form>
+    </div>
+
+    <div class="status-kind-panel" data-status-panel="video">
+      <form hx-post="{{u "/status/video"}}" hx-encoding="multipart/form-data"
+            hx-target="#status-result" hx-swap="innerHTML"
+            hx-sync="this:drop" hx-disabled-elt="find button"
+            action="{{u "/status/video"}}" method="post" enctype="multipart/form-data" novalidate
+            class="status-form" data-status-form data-status-kind="video">
+        <label class="textfield">
+          <span class="textfield-label">Session</span>
+          <select name="session_id" class="select" required>
+            {{range .Connected}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}}){{if .IsMaster}} — master{{end}}</option>{{end}}
+          </select>
+        </label>
+        <label class="textfield">
+          <span class="textfield-label">Video</span>
+          <input type="file" name="file" accept="video/mp4,video/webm" required>
+        </label>
+        <p class="status-media-hint">Sent WITHOUT a thumbnail — not yet confirmed how every client renders this (/tmp/waxum-status-api.md).</p>
+        <label class="textfield">
+          <span class="textfield-label">Caption (optional)</span>
+          <textarea name="caption" rows="3" maxlength="1024"></textarea>
+        </label>
+        {{template "status_recipients" .}}
+        {{template "status_confirm" .}}
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">
+            <span class="btn-label">Post</span>
+            <span class="htmx-indicator send-spinner" aria-hidden="true"></span>
+            <span class="htmx-indicator">Posting...</span>
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+  {{else}}
+  <p>No connected sessions. <a href="{{u "/sessions"}}">Pair or activate a session</a> first.</p>
+  {{end}}
+</div>
+{{end}}

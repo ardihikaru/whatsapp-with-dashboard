@@ -216,6 +216,8 @@ func wsmRouteTools() []Tool {
 		{name: "wsm_gateway_health", desc: "Authenticated gateway health (unlike wsm_health/GET /api/v1/health, which needs no credential).", method: "GET", route: "/api/v1/gateway/health", readOnly: true, idempotent: true},
 		{name: "wsm_inbound", desc: "Read inbound customer replies (wa_inbound_messages) for a polling consumer. query: {since?, limit?}. Use this to check 'did anyone reply since T'.", method: "GET", route: "/api/v1/inbound", readOnly: true, hasQuery: true},
 
+		{name: "wsm_session_status_text", desc: "Post a WhatsApp text status/story through this session. body: {text, background_argb?, recipients: [string]}. recipients is required and non-empty — waxum does not fetch contacts itself. Never tried against a real send until verified by hand (/tmp/waxum-status-api.md). Not Danger-gated: goes through WSM's own auth/log like an ordinary send. 501 on a backend with no StatusPoster support (e.g. whatsmeow).", method: "POST", route: "/api/v1/sessions/{id}/status/text", hasBody: true},
+
 		{name: "wsm_contacts_check_auto", desc: "Check whether one or more phone numbers are registered on WhatsApp, using automatic session routing. body: {phones: [string], group_code?, allow_master?}. 501 on a backend with no ContactDirectory support (e.g. whatsmeow).", method: "POST", route: "/api/v1/contacts/check", hasBody: true},
 		{name: "wsm_session_contacts_check", desc: "Check whether one or more phone numbers are registered on WhatsApp, through one explicit session. body: {phones: [string]}.", method: "POST", route: "/api/v1/sessions/{id}/contacts/check", hasBody: true},
 
@@ -237,5 +239,6 @@ func wsmRouteTools() []Tool {
 		out = append(out, s.tool())
 	}
 	out = append(out, mediaSendTools()...)
+	out = append(out, statusMediaTools()...)
 	return out
 }
