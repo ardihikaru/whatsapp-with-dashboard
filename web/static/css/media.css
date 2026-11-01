@@ -143,3 +143,91 @@
 
 /* ---------- webhook / DLQ tables (sessions/webhooks.html) ------------------ */
 .webhook-rows .badge + .badge { margin-left: 4px; }
+
+/* ---------- image / PDF affordances (media-upload.js) ----------------------
+   Drop target, preview (image thumbnail or file-type badge) and the remove
+   button. Motion is transform/opacity/border-color only and short (150ms,
+   ease-out: it answers a user action); the whole block is switched off under
+   prefers-reduced-motion. Colours are tokens; the badge tints have explicit
+   [data-theme="dark"] counterparts because the error/primary lighter tokens
+   are not redefined for dark. [hidden] is re-asserted for the elements whose
+   display is set below, which would otherwise beat the attribute. */
+.media-dropzone {
+  padding: 12px;
+  border: 1px dashed rgba(145, 158, 171, 0.4);
+  border-radius: 12px;
+  transition: border-color 150ms ease-out, background-color 150ms ease-out;
+}
+
+.media-dropzone.is-dragover {
+  border-color: var(--primary);
+  background: var(--primary-lighter);
+}
+
+.media-dropzone .textfield { margin-bottom: 8px; }
+
+.media-drop-hint { margin: 0; font-size: 13px; color: var(--text-secondary); }
+
+.media-preview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.media-preview[hidden],
+.media-preview-img[hidden],
+.media-badge[hidden],
+.media-drop-hint[hidden],
+.media-kind-notice[hidden],
+[data-media-caption][hidden],
+[data-media-ptt][hidden] { display: none; }
+
+.media-preview-img {
+  width: 72px;
+  height: 72px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid rgba(145, 158, 171, 0.3);
+  background: rgba(145, 158, 171, 0.12);
+}
+
+.media-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 72px;
+  height: 72px;
+  padding: 0 8px;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: var(--primary-dark);
+  background: var(--primary-lighter);
+}
+
+.media-badge[data-file-type="pdf"] { color: var(--error-dark); background: var(--error-lighter); }
+
+[data-theme="dark"] .media-badge { color: var(--primary-darker); }
+[data-theme="dark"] .media-badge[data-file-type="pdf"] {
+  color: var(--error-light);
+  background: rgba(255, 86, 48, 0.16);
+}
+
+.media-preview .media-file-chip { margin: 0; overflow-wrap: anywhere; }
+
+.media-clear { height: 36px; padding: 0 12px; font-size: 13px; }
+
+.media-kind-notice { margin: 8px 0 0; font-size: 13px; color: var(--text-secondary); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .media-preview:not([hidden]) { animation: media-preview-in 150ms ease-out; }
+  .media-clear:active { transform: scale(0.97); }
+}
+
+@keyframes media-preview-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: none; }
+}

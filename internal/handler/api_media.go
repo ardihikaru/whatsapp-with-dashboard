@@ -11,6 +11,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -111,6 +112,39 @@ type mediaKindDisplay struct {
 	Label string // "Image"
 	Bytes int64
 	Human string // "5.0 MB" — formatMediaBytes(Bytes)
+	// Accept is the comma-separated <input accept> list for this kind —
+	// see mediaKindAccept. "" means "any file" (document).
+	Accept string
+}
+
+// mediaAudioContentTypes and mediaVideoExtraContentTypes name the types
+// sniffAndValidate accepts through its own magic-number checks rather than
+// through mediaAllowedContentTypes (audio bypasses the map entirely; video
+// adds 3GPP and QuickTime on top of it). They exist so mediaKindAccept can
+// offer exactly what the server takes; keep them in step with the cases in
+// sniffAndValidate.
+var (
+	mediaAudioContentTypes      = []string{"audio/ogg", "audio/mpeg", "audio/mp4"}
+	mediaVideoExtraContentTypes = []string{"video/3gpp", "video/quicktime"}
+)
+
+// mediaKindAccept builds the <input accept> list for a kind from the
+// server's own allowlist, so the browser picker and sniffAndValidate cannot
+// drift. Document returns "": the server accepts any document, and an
+// accept list would hide files it takes.
+func mediaKindAccept(kind wa.MediaKind) string {
+	var types []string
+	for ct := range mediaAllowedContentTypes[kind] {
+		types = append(types, ct)
+	}
+	sort.Strings(types)
+	switch kind {
+	case wa.MediaVideo:
+		types = append(types, mediaVideoExtraContentTypes...)
+	case wa.MediaAudio:
+		types = append(types, mediaAudioContentTypes...)
+	}
+	return strings.Join(types, ",")
 }
 
 // mediaKindDisplays builds send.html's MediaLimits straight from
@@ -127,6 +161,7 @@ func (h *handlers) mediaKindDisplays() []mediaKindDisplay {
 		limit := h.mediaKindLimit(k.kind)
 		out = append(out, mediaKindDisplay{
 			Kind: string(k.kind), Label: k.label, Bytes: limit, Human: formatMediaBytes(limit),
+			Accept: mediaKindAccept(k.kind),
 		})
 	}
 	return out

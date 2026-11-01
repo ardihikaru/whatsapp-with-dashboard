@@ -92,7 +92,7 @@
                why these come from .MediaLimits (server config) rather than
                being hardcoded here. -->
           <select name="kind" id="media-kind-select" class="select" required>
-            {{range .MediaLimits}}<option value="{{.Kind}}" data-max-bytes="{{.Bytes}}">{{.Label}}</option>{{end}}
+            {{range .MediaLimits}}<option value="{{.Kind}}" data-max-bytes="{{.Bytes}}" data-accept="{{.Accept}}">{{.Label}}</option>{{end}}
           </select>
         </label>
         <!-- Visible before a file is chosen, per the operator's own request:
@@ -142,22 +142,34 @@
              select's OWN selected option (each carries its per-kind
              data-max-bytes, above) as soon as it runs, and again on every
              "kind" change — see media-upload.js's syncKind. -->
+        <!-- data-media-dropzone is also the drag-and-drop target. The
+             <input accept> is set by media-upload.js from the selected
+             option's data-accept (server allowlist, see mediaKindAccept in
+             api_media.go); with JS off it stays unrestricted and the server
+             remains the authority. -->
         <div class="media-dropzone" data-media-dropzone data-max-bytes="{{.MediaMaxBytes}}">
           <label class="textfield">
             <span class="textfield-label">File</span>
             <input type="file" name="file" id="media-file-input" required>
           </label>
-          <p class="media-file-chip" id="media-file-chip" hidden></p>
+          <p class="media-drop-hint" id="media-drop-hint">or drop a file here</p>
+          <div class="media-preview" id="media-preview" hidden>
+            <img class="media-preview-img" id="media-preview-img" alt="Preview of the selected image" hidden>
+            <span class="media-badge" id="media-preview-badge" hidden></span>
+            <p class="media-file-chip" id="media-file-chip" hidden></p>
+            <button type="button" class="btn btn-outline media-clear" id="media-clear">Remove file</button>
+          </div>
+          <p class="media-kind-notice" id="media-kind-notice" role="status" hidden></p>
           <div class="alert alert-error media-size-error" id="media-size-error" hidden></div>
           <div class="media-progress" id="media-progress" hidden>
             <div class="media-progress-bar" id="media-progress-bar"></div>
           </div>
         </div>
-        <label class="textfield">
+        <label class="textfield" data-media-caption>
           <span class="textfield-label">Caption (image, video, document)</span>
           <textarea name="caption" rows="3" maxlength="1024"></textarea>
         </label>
-        <label class="checkfield">
+        <label class="checkfield" data-media-ptt>
           <input type="checkbox" name="ptt" value="true">
           <span>Send as voice note (audio only)</span>
         </label>

@@ -168,13 +168,13 @@ func TestSendPageDataMaxBytesMatchesTheSelectedKind(t *testing.T) {
 	rend.RenderPage(rec, "send", data)
 	body := rec.Body.String()
 
-	if !strings.Contains(body, `<option value="image" data-max-bytes="5242880">`) {
+	if !strings.Contains(body, `<option value="image" data-max-bytes="5242880"`) {
 		t.Errorf("the image option does not carry data-max-bytes=5242880; body:\n%s", body)
 	}
-	if !strings.Contains(body, `<option value="video" data-max-bytes="16777216">`) {
+	if !strings.Contains(body, `<option value="video" data-max-bytes="16777216"`) {
 		t.Errorf("the video option does not carry data-max-bytes=16777216; body:\n%s", body)
 	}
-	if !strings.Contains(body, `<option value="document" data-max-bytes="104857600">`) {
+	if !strings.Contains(body, `<option value="document" data-max-bytes="104857600"`) {
 		t.Errorf("the document option does not carry data-max-bytes=104857600; body:\n%s", body)
 	}
 }
@@ -206,6 +206,87 @@ func TestPostSendMediaRendersThePerKindSizeErrorIntoSendResult(t *testing.T) {
 	for _, want := range []string{"image", formatMediaBytes(2049), formatMediaBytes(2048)} {
 		if !strings.Contains(resBody, want) {
 			t.Errorf("send_result does not contain %q; body:\n%s", want, resBody)
+		}
+	}
+}
+
+// acceptSet splits a comma-separated accept list into a set.
+func acceptSet(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out[p] = true
+		}
+	}
+	return out
+}
+
+// TestMediaKindDisplaysAcceptListsAreTheServerAllowlist pins that the
+// per-kind <input accept> the browser is given is DERIVED from
+// mediaAllowedContentTypes (the table sniffAndValidate enforces), not a
+// second hand-written list that can drift: every server-allowed image/video
+// type is offered, and the image list offers nothing else.
+func TestMediaKindDisplaysAcceptListsAreTheServerAllowlist(t *testing.T) {
+	h := &handlers{Deps: Deps{MediaMaxBytes: 1 << 20}}
+	by := map[string]mediaKindDisplay{}
+	for _, d := range h.mediaKindDisplays() {
+		by[d.Kind] = d
+	}
+
+	img := acceptSet(by["image"].Accept)
+	if len(img) != len(mediaAllowedContentTypes[wa.MediaImage]) {
+		t.Errorf("image accept = %q, want exactly the %d allowlisted types", by["image"].Accept, len(mediaAllowedContentTypes[wa.MediaImage]))
+	}
+	for ct := range mediaAllowedContentTypes[wa.MediaImage] {
+		if !img[ct] {
+			t.Errorf("image accept %q is missing server-allowed type %s", by["image"].Accept, ct)
+		}
+	}
+	vid := acceptSet(by["video"].Accept)
+	for ct := range mediaAllowedContentTypes[wa.MediaVideo] {
+		if !vid[ct] {
+			t.Errorf("video accept %q is missing server-allowed type %s", by["video"].Accept, ct)
+		}
+	}
+	for _, want := range []string{"audio/ogg", "audio/mpeg", "audio/mp4"} {
+		if !acceptSet(by["audio"].Accept)[want] {
+			t.Errorf("audio accept %q is missing %s (sniffAndValidate accepts it)", by["audio"].Accept, want)
+		}
+	}
+	// The server accepts ANY document, so an accept list would only hide
+	// files it takes; it must stay empty ("all files").
+	if by["document"].Accept != "" {
+		t.Errorf("document accept = %q, want empty: sniffAndValidate allows any document", by["document"].Accept)
+	}
+}
+
+// TestSendPageRendersTheMediaTabsImageAndPdfAffordances pins the markup
+// media-upload.js depends on: a per-kind data-accept on every option, a
+// preview slot, a remove button, and the caption / voice-note hooks that
+// are shown per kind. A template tweak that drops one silently disables
+// the matching behaviour.
+func TestSendPageRendersTheMediaTabsImageAndPdfAffordances(t *testing.T) {
+	rend := sendTestRenderer(t)
+	h := &handlers{Deps: Deps{MediaMaxBytes: 1 << 20}}
+	rec := httptest.NewRecorder()
+	rend.RenderPage(rec, "send", sendPageData{
+		Connected:   []wa.Snapshot{{ID: "sess-1", Name: "Gateway 1", Phone: "628000"}},
+		MediaLimits: h.mediaKindDisplays(),
+	})
+	body := rec.Body.String()
+
+	for _, d := range h.mediaKindDisplays() {
+		want := `data-accept="` + d.Accept + `"`
+		if !strings.Contains(body, want) {
+			t.Errorf("the %s option does not carry %s", d.Kind, want)
+		}
+	}
+	for _, want := range []string{
+		`id="media-preview"`, `id="media-preview-img"`, `id="media-preview-badge"`,
+		`id="media-clear"`, `data-media-caption`, `data-media-ptt`,
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("send page is missing %s", want)
 		}
 	}
 }
