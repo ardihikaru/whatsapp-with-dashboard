@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand/v2"
+	"strings"
 	"sync"
 	"time"
 
@@ -77,6 +78,12 @@ type Options struct {
 	Rand         *rand.Rand
 	PollInterval time.Duration
 	Logger       *slog.Logger
+	// AI writes the wording of schedules with AIEnabled. nil is legal and
+	// means "AI is not configured": such schedules then use their static
+	// fallback or skip the day (see planText). Never call it at fire time.
+	AI TextGenerator
+	// AIDeadline bounds one generation (default DefaultAIDeadline).
+	AIDeadline time.Duration
 }
 
 // Scheduler is the planner+runner.
@@ -88,6 +95,9 @@ type Scheduler struct {
 	poll time.Duration
 	log  *slog.Logger
 
+	ai         TextGenerator
+	aiDeadline time.Duration
+
 	mu     sync.Mutex
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -95,7 +105,8 @@ type Scheduler struct {
 
 // New builds a Scheduler.
 func New(repo *sched.Repository, gw Gateway, opt Options) *Scheduler {
-	s := &Scheduler{repo: repo, gw: gw, now: opt.Now, rng: opt.Rand, poll: opt.PollInterval, log: opt.Logger}
+	s := &Scheduler{repo: repo, gw: gw, now: opt.Now, rng: opt.Rand, poll: opt.PollInterval, log: opt.Logger,
+		ai: opt.AI, aiDeadline: opt.AIDeadline}
 	if s.now == nil {
 		s.now = func() time.Time { return time.Now().UTC() }
 	}
@@ -108,6 +119,9 @@ func New(repo *sched.Repository, gw Gateway, opt Options) *Scheduler {
 	if s.log == nil {
 		s.log = slog.Default()
 	}
+	if s.aiDeadline <= 0 {
+		s.aiDeadline = DefaultAIDeadline
+	}
 	return s
 }
 
@@ -118,14 +132,35 @@ func (s *Scheduler) Tick(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("list active: %w", err)
 	}
-	for _, sc := range active {
-		if ctx.Err() != nil {
-			return ctx.Err()
+	// Plain schedules are planned first and due posts fired BEFORE any AI
+	// schedule is planned: a generation can take up to aiDeadline each, and
+	// it must never delay a post that is already due (MaxLateness is only
+	// 10 minutes). An AI schedule planned late in this tick fires on a
+	// following one.
+	for _, ai := range []bool{false, true} {
+		if ai {
+			if err := s.fireDue(ctx, now); err != nil {
+				return err
+			}
+			now = s.now() // generations are slow; plan from the real present
 		}
-		if err := s.plan(ctx, sc, now); err != nil {
-			s.log.Error("statussched: plan", "schedule", sc.ID, "err", err)
+		for _, sc := range active {
+			if sc.AIEnabled != ai {
+				continue
+			}
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err := s.plan(ctx, sc, now); err != nil {
+				s.log.Error("statussched: plan", "schedule", sc.ID, "err", err)
+			}
 		}
 	}
+	return nil
+}
+
+// fireDue fires every post whose planned instant has arrived.
+func (s *Scheduler) fireDue(ctx context.Context, now time.Time) error {
 	due, err := s.repo.Due(ctx, now)
 	if err != nil {
 		return fmt.Errorf("list due: %w", err)
@@ -171,9 +206,39 @@ func (s *Scheduler) plan(ctx context.Context, sc sched.Schedule, now time.Time) 
 		// Window already over today: skipped, not back-filled.
 		return s.repo.MarkPlanned(ctx, sc.ID, today, time.Time{})
 	}
+	var text, source string
+	if sc.AIEnabled {
+		// Generate BEFORE drawing, then re-read the clock: the call may have
+		// taken up to aiDeadline, and the instant must not land in the past.
+		var terr error
+		text, source, terr = s.planText(ctx, sc)
+		if ctx.Err() != nil {
+			return ctx.Err() // shutting down: leave the day unplanned
+		}
+		if terr != nil {
+			// Nothing postable: skip today, say why, never post empty text.
+			if err := s.repo.MarkPlanned(ctx, sc.ID, today, time.Time{}); err != nil {
+				return err
+			}
+			return s.repo.RecordResult(ctx, sc.ID, now, sched.ResultSkipped, terr.Error())
+		}
+		if later := s.now(); later.After(now) {
+			now = later
+			if now.After(lo) {
+				lo = now
+			}
+			if !now.Before(hi) {
+				return s.repo.MarkPlanned(ctx, sc.ID, today, time.Time{}) // window ended while generating
+			}
+		}
+	}
 	at := schedclock.Draw(s.rng, lo, hi).UTC()
-	s.log.Info("statussched: planned", "schedule", sc.ID, "at", at.Format(time.RFC3339))
-	return s.repo.MarkPlanned(ctx, sc.ID, today, at)
+	s.log.Info("statussched: planned", "schedule", sc.ID, "at", at.Format(time.RFC3339), "text_source", source)
+	lastAI := ""
+	if source == sched.TextSourceAI {
+		lastAI = text
+	}
+	return s.repo.MarkPlannedWithText(ctx, sc.ID, today, at, text, source, lastAI)
 }
 
 // fire posts sc once. It never retries.
@@ -206,6 +271,20 @@ func (s *Scheduler) fire(ctx context.Context, sc sched.Schedule, now time.Time) 
 	if err != nil {
 		record(sched.ResultFailed, err.Error())
 		return
+	}
+	if sc.AIEnabled {
+		// Post exactly what planning stored; no AI call happens here. An
+		// empty plan (row planned by an older binary, or hand-edited) is a
+		// skip, never an empty status.
+		if strings.TrimSpace(sc.NextText) == "" {
+			record(sched.ResultSkipped, "skipped: no wording was planned for this post")
+			return
+		}
+		if sc.Kind == sched.KindText {
+			sc.Text = sc.NextText
+		} else {
+			sc.Caption = sc.NextText
+		}
 	}
 	postCtx, cancel := context.WithTimeout(finish, postTimeout)
 	defer cancel()

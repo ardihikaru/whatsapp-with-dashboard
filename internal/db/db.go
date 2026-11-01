@@ -565,6 +565,20 @@ func EnsureSchema(ctx context.Context, pool *sql.DB) error {
 			return err
 		}
 	}
+	// 0014 AI-written status wording, same reason as every ensureColumn call
+	// here (a SQLite dev/e2e database created before the migration must gain
+	// them). TEXT columns are nullable, mirroring the MySQL side.
+	for _, col := range []struct{ name, typ string }{
+		{"ai_enabled", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_topic", "TEXT NOT NULL DEFAULT ''"},
+		{"next_text", "TEXT"},
+		{"next_text_source", "TEXT NOT NULL DEFAULT ''"},
+		{"last_ai_text", "TEXT"},
+	} {
+		if err := ensureColumn(ctx, pool, "wa_status_schedules", col.name, col.typ); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

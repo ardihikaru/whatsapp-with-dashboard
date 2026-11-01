@@ -19,7 +19,14 @@
      leaves FASTER (120ms) — htmx adds .htmx-swapping for the swap delay;
    - hover feedback only behind (hover: hover) and (pointer: fine), so a
      touch tap never leaves a stuck hover state;
-   - the live summary line has NO animation: it rewrites on every keystroke
+   - the AI switch is a real checkbox: the track recolours and the thumb
+     slides in 160ms (transform + background-color only), the whole control
+     presses to scale(0.97), and the topic field reveals with the kind-panel
+     recipe (opacity + 4px translate, 180ms). Hidden = display:none, so the
+     topic field is out of the tab order and the accessibility tree without
+     any animated height. Under prefers-reduced-motion the thumb jumps and the
+     reveal keeps only the opacity fade;
+   - the live summary line and the topic character counter have NO animation: it rewrites on every keystroke
      and a high-frequency update must not move;
    - prefers-reduced-motion keeps the opacity fades and drops every
      transform. */
@@ -34,6 +41,11 @@
   --ss-summary-bg: var(--primary-lighter);
   --ss-summary-ink: var(--primary-darker);
   --ss-tab-rule: var(--grey-300);
+  --ss-switch-off: var(--grey-400);
+  --ss-switch-on: var(--primary);
+  --ss-switch-thumb: #FFFFFF;
+  --ss-source-bg: var(--primary-lighter);
+  --ss-source-ink: var(--primary-darker);
 }
 
 [data-theme="dark"] {
@@ -45,6 +57,11 @@
   --ss-summary-bg: var(--primary-lighter);
   --ss-summary-ink: var(--primary-darker);
   --ss-tab-rule: rgba(145, 158, 171, 0.2);
+  --ss-switch-off: var(--grey-600);
+  --ss-switch-on: var(--primary);
+  --ss-switch-thumb: var(--grey-900);
+  --ss-source-bg: var(--primary-lighter);
+  --ss-source-ink: var(--primary-darker);
 }
 
 .ss-intro { color: var(--text-secondary); font-size: 14px; margin: 0 0 16px; max-width: 72ch; }
@@ -98,10 +115,105 @@
   animation: ss-panel-in 180ms var(--ss-ease);
 }
 
+@keyframes ss-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
 @keyframes ss-panel-in {
   from { opacity: 0; transform: translateY(4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+
+/* ---------- AI-written posts ---------------------------------------------------
+   #ss-ai (a real, visually hidden checkbox) is the FIRST child of
+   .ss-kind-tabs, so `#ss-ai:checked ~ …` reaches the topic field and the
+   fallback labels with no JS, exactly like the kind radios above. */
+.ss-ai-input { position: absolute; opacity: 0; pointer-events: none; }
+
+.ss-ai-block { margin: 0 0 20px; }
+
+.ss-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 40px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+  transition: transform 160ms var(--ss-ease);
+}
+
+.ss-switch:active { transform: scale(0.97); }
+
+.ss-switch-track {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 24px;
+  border-radius: 12px;
+  background: var(--ss-switch-off);
+  transition: background-color 160ms var(--ss-ease);
+}
+
+.ss-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--ss-switch-thumb);
+  transition: transform 160ms var(--ss-ease);
+}
+
+.ss-ai-input:checked ~ .ss-ai-block .ss-switch-track { background: var(--ss-switch-on); }
+.ss-ai-input:checked ~ .ss-ai-block .ss-switch-thumb { transform: translateX(20px); }
+.ss-ai-input:focus-visible ~ .ss-ai-block .ss-switch-track { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.ss-ai-input:disabled ~ .ss-ai-block .ss-switch { opacity: 0.5; cursor: not-allowed; }
+.ss-ai-input:disabled ~ .ss-ai-block .ss-switch:active { transform: none; }
+
+@media (hover: hover) and (pointer: fine) {
+  .ss-ai-input:not(:checked):not(:disabled) ~ .ss-ai-block .ss-switch:hover .ss-switch-track { background: var(--text-secondary); }
+}
+
+.ss-ai-help { display: block; margin: 4px 0 0; max-width: 72ch; }
+
+/* Hidden = display:none: not focusable, not announced, no height to animate. */
+.ss-ai-topic { display: none; margin-top: 12px; }
+
+.ss-ai-input:checked ~ .ss-ai-block .ss-ai-topic {
+  display: block;
+  animation: ss-panel-in 180ms var(--ss-ease);
+}
+
+.ss-ai-count { display: block; text-align: right; margin-top: -8px; }
+
+/* With AI on the static text / caption is only a fallback, and says so. */
+.ss-lbl-ai { display: none; }
+
+.ss-ai-input:checked ~ [data-ss-panel="text"] .ss-lbl-plain,
+.ss-ai-input:checked ~ .ss-caption .ss-lbl-plain { display: none; }
+
+.ss-ai-input:checked ~ [data-ss-panel="text"] .ss-lbl-ai,
+.ss-ai-input:checked ~ .ss-caption .ss-lbl-ai { display: inline; }
+
+/* Source chip on list rows ("AI" / "static"). */
+.ss-source {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: var(--radius-btn);
+  background: var(--ss-source-bg);
+  color: var(--ss-source-ink);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 18px;
+}
+
+.ss-next-text { display: inline-block; max-width: 28ch; overflow-wrap: anywhere; }
 
 .ss-unavailable { color: var(--text-secondary); font-size: 14px; margin: 0 0 16px; }
 
@@ -197,7 +309,10 @@
 @media (prefers-reduced-motion: reduce) {
   .ss-kind-label, .ss-kind-label:active,
   .ss-chip span, .ss-chip:active span,
-  .ss-card .btn:active, .ss-rows .btn:active { transform: none; }
+  .ss-card .btn:active, .ss-rows .btn:active,
+  .ss-switch:active { transform: none; }
+  .ss-switch-thumb { transition: none; }
+  .ss-ai-input:checked ~ .ss-ai-block .ss-ai-topic { animation: ss-fade-in 120ms linear; }
   #ss-kind-text:checked ~ [data-ss-panel="text"],
   #ss-kind-image:checked ~ [data-ss-panel="image"],
   #ss-kind-video:checked ~ [data-ss-panel="video"],

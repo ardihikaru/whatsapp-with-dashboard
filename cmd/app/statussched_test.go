@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/config"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/db"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
 	sched "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/statusschedule"
@@ -43,7 +44,7 @@ func TestStartStatusSchedulesReturnsARunningSchedulerWithNoEnablingFlag(t *testi
 	mgr := wa.NewManager(ctx, nil, wasession.NewRepository(pool), message.NewRepository(pool), nil,
 		wa.Config{SendRate: 1, SendBurst: 1, ReconcilePar: 1})
 
-	s := startStatusSchedules(ctx, repo, mgr, nil, nil)
+	s := startStatusSchedules(ctx, repo, mgr, nil, nil, nil, 0)
 	if s == nil {
 		t.Fatal("startStatusSchedules returned nil")
 	}
@@ -61,4 +62,22 @@ func TestStartStatusSchedulesReturnsARunningSchedulerWithNoEnablingFlag(t *testi
 		time.Sleep(20 * time.Millisecond)
 	}
 	t.Fatal("the scheduler loop never ticked: LastResult is still empty after 3s")
+}
+
+// TestTheStatusAIClientIsNilWithoutAURLAndNeverATypedNilInAnInterface: the
+// scheduler treats a nil TextGenerator as "AI not configured". Handing it a
+// nil *aiclient.Client wrapped in an interface would look configured and
+// panic on first use.
+func TestTheStatusAIClientIsNilWithoutAURLAndNeverATypedNilInAnInterface(t *testing.T) {
+	if got := buildAIClient(&config.Config{}); got != nil {
+		t.Fatalf("buildAIClient with no URL = %v, want nil", got)
+	}
+	if gen := statusTextGenerator(nil, ""); gen != nil {
+		t.Errorf("statusTextGenerator(nil) = %#v, want a nil interface", gen)
+	}
+	cfg := &config.Config{CodexCLIURL: "http://127.0.0.1:9", CodexCLILoginID: "l", CodexCLISecretKey: "s", CodexCLITimeout: time.Second}
+	c := buildAIClient(cfg)
+	if c == nil || statusTextGenerator(c, "") == nil {
+		t.Error("a configured URL must yield a client and a generator")
+	}
 }

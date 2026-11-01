@@ -135,3 +135,54 @@ func TestStatusScheduleMotionFollowsTheHouseRules(t *testing.T) {
 		t.Error("a :hover rule sits outside @media (hover: hover) and (pointer: fine)")
 	}
 }
+
+// TestStatusScheduleAISwitchFollowsTheMotionAndAccessibilityRules pins the
+// AI switch / topic reveal: 160ms press + slide, the 180ms kind-panel reveal
+// recipe, a hidden topic that is display:none (out of the tab order, no
+// height to animate), an opacity-only reveal under reduced motion, hover
+// behind the real-hover query, and a counter that never animates.
+func TestStatusScheduleAISwitchFollowsTheMotionAndAccessibilityRules(t *testing.T) {
+	css := statusScheduleCSS(t)
+	for _, c := range []struct{ name, needle string }{
+		{"switch press feedback", ".ss-switch:active { transform: scale(0.97); }"},
+		{"switch 160ms press", ".ss-switch {"},
+		{"thumb slides with transform in 160ms", "transform 160ms var(--ss-ease)"},
+		{"track recolours in 160ms", "background-color 160ms var(--ss-ease)"},
+		{"topic hidden state is display:none", ".ss-ai-topic { display: none;"},
+		{"topic reveals with the 180ms panel recipe", "animation: ss-panel-in 180ms var(--ss-ease)"},
+		{"reduced motion keeps an opacity-only reveal", "animation: ss-fade-in 120ms linear"},
+		{"reduced motion stops the thumb sliding", ".ss-switch-thumb { transition: none; }"},
+		{"fallback labels swap by sibling selector", ".ss-ai-input:checked ~ [data-ss-panel=\"text\"] .ss-lbl-ai"},
+		{"switch hover is gated", ".ss-switch:hover .ss-switch-track"},
+	} {
+		if !strings.Contains(css, c.needle) {
+			t.Errorf("status-schedule.css lacks %s (%q)", c.name, c.needle)
+		}
+	}
+	// ss-fade-in must really be opacity only.
+	if m := regexp.MustCompile(`(?s)@keyframes ss-fade-in\s*\{(.*?)\n\}`).FindStringSubmatch(css); m == nil || strings.Contains(m[1], "transform") {
+		t.Errorf("ss-fade-in keyframes missing or moving: %v", m)
+	}
+	// Never animate height or layout for the reveal, and the counter is static.
+	for _, banned := range []string{"transition: height", "animation: ss-grow", "max-height"} {
+		if strings.Contains(css, banned) {
+			t.Errorf("status-schedule.css uses %q; the topic reveal must not animate height", banned)
+		}
+	}
+	if m := regexp.MustCompile(`\.ss-ai-count[^{]*\{[^}]*(transition|animation)`).FindString(css); m != "" {
+		t.Errorf("the topic counter must not animate: %q", m)
+	}
+}
+
+func TestStatusScheduleScriptMentionsAIWrittenAndCountsTheTopic(t *testing.T) {
+	b, err := fs.ReadFile(wsm.FS, "web/static/js/status-schedule.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	src := string(b)
+	for _, want := range []string{"AI-written", "data-ss-ai-count", "data-ss-ai-topic", "data-ss-ai"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("status-schedule.js lacks %q", want)
+		}
+	}
+}

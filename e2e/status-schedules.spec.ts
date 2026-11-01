@@ -128,3 +128,78 @@ test("light and dark screenshots of the form", async ({ page }, info) => {
   await page.evaluate(() => document.documentElement.setAttribute("data-theme", "dark"));
   await page.screenshot({ path: info.outputPath("form-dark.png"), fullPage: true });
 });
+
+// ---- AI-written posts -------------------------------------------------------
+// scripts/e2e-env.sh wires dummy WSM_CODEX_CLI_* so the switch is enabled. The
+// URL refuses connections, so nothing here ever reaches a real AI service.
+
+test("the AI switch reveals the topic field, relabels the text as a fallback and updates the summary", async ({ page }) => {
+  await page.goto("/status/schedules/new");
+  const topic = page.locator('textarea[name="ai_topic"]');
+  const sw = page.locator("label.ss-switch");
+  await expect(page.locator("#ss-ai")).toBeEnabled();
+  await expect(topic).toBeHidden();
+  await expect(page.locator('[data-ss-panel="text"] .ss-lbl-plain')).toBeVisible();
+
+  await sw.click();
+  await expect(page.locator("#ss-ai")).toBeChecked();
+  await expect(topic).toBeVisible();
+  await expect(page.locator('[data-ss-panel="text"] .ss-lbl-ai')).toBeVisible();
+  await expect(page.locator('[data-ss-panel="text"] .ss-lbl-plain')).toBeHidden();
+  await expect(page.locator("[data-ss-summary]")).toContainText("AI-written");
+
+  const count = page.locator("[data-ss-ai-count]");
+  await expect(count).toHaveText("0 / 500");
+  await topic.fill("Semangat pagi");
+  await expect(count).toHaveText("13 / 500");
+
+  await sw.click();
+  await expect(topic).toBeHidden();
+  await expect(page.locator("[data-ss-summary]")).not.toContainText("AI-written");
+});
+
+test("a hidden topic field cannot be reached with the keyboard", async ({ page }) => {
+  await page.goto("/status/schedules/new");
+  await page.locator('textarea[name="text"]').focus();
+  await page.keyboard.press("Tab");
+  // Off: Tab leaves the text field and never lands on the (display:none) topic.
+  expect(await page.evaluate(() => document.activeElement?.getAttribute("name"))).not.toBe("ai_topic");
+});
+
+test("an AI schedule needs a topic, saves without static text, and round-trips on edit", async ({ page }) => {
+  await page.goto("/status/schedules/new");
+  const name = `E2E AI ${Date.now()}`;
+  await page.locator('input[name="name"]').fill(name);
+  await page.locator('select[name="session_id"]').selectOption(SESSION_ID);
+  await page.locator("label.ss-switch").click();
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.locator(".alert-error")).toContainText("topic is required");
+
+  await page.locator('textarea[name="ai_topic"]').fill("Tips menjaga baju putih");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page).toHaveURL(/\/status\/schedules$/);
+  await waitForRows(page);
+  const row = page.locator("#status-schedule-rows tr", { hasText: name });
+  await expect(row).toContainText("AI");
+
+  await row.getByRole("link", { name: "Edit" }).click();
+  await expect(page.locator("#ss-ai")).toBeChecked();
+  await expect(page.locator('textarea[name="ai_topic"]')).toHaveValue("Tips menjaga baju putih");
+  await expect(page.locator("[data-ss-summary]")).toContainText("AI-written");
+
+  await page.goto("/status/schedules");
+  await waitForRows(page);
+  page.once("dialog", (d) => d.accept());
+  await page.locator("#status-schedule-rows tr", { hasText: name }).getByRole("button", { name: "Delete" }).click();
+  await expect(page.locator("#status-schedule-rows tr", { hasText: name })).toHaveCount(0);
+});
+
+test("the form with the AI switch ON does not scroll sideways", async ({ page }) => {
+  await page.goto("/status/schedules/new");
+  await page.waitForLoadState("networkidle");
+  await page.locator("label.ss-switch").click();
+  await page.locator('textarea[name="ai_topic"]').fill("x ".repeat(240));
+  await expect(page.locator('textarea[name="ai_topic"]')).toBeVisible();
+  expect(await overflowOffenders(page)).toEqual([]);
+  await page.screenshot({ path: test.info().outputPath("form-ai-on.png"), fullPage: true });
+});

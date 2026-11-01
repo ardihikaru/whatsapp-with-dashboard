@@ -45,7 +45,7 @@ func newStatusScheduleTestServer(t *testing.T, withObjects bool) *scheduleHarnes
 	return newStatusScheduleTestServerWith(t, &fakeObjectStore{log: log}, log)
 }
 
-func newStatusScheduleTestServerWith(t *testing.T, objects storage.ObjectStore, log *callLog) *scheduleHarness {
+func newStatusScheduleTestServerWith(t *testing.T, objects storage.ObjectStore, log *callLog, opts ...func(*Deps)) *scheduleHarness {
 	t.Helper()
 	ctx := context.Background()
 	pool, err := db.Open(filepath.Join(t.TempDir(), "test.db"), db.SQLiteDialect)
@@ -86,6 +86,9 @@ func newStatusScheduleTestServerWith(t *testing.T, objects storage.ObjectStore, 
 		SessionTTL: time.Hour, AssetsFS: wsm.FS,
 	}
 	d.Objects = objects
+	for _, o := range opts {
+		o(&d)
+	}
 	return &scheduleHarness{srv: New(d), sessions: sessions, session: s, repo: repo, log: log}
 }
 
@@ -370,11 +373,11 @@ func TestStatusSchedulePagesRequireTheAdminCookie(t *testing.T) {
 }
 
 func TestTheSummarySentenceNamesTheDaysWindowAndZone(t *testing.T) {
-	got := statusScheduleSummary([]string{"3", "1"}, "07:00", "10:27", "Asia/Jakarta")
+	got := statusScheduleSummary([]string{"3", "1"}, "07:00", "10:27", "Asia/Jakarta", false)
 	if got != "Mon, Wed · once each day, at a random time between 07:00 and 10:27 Asia/Jakarta" {
 		t.Errorf("summary = %q", got)
 	}
-	if got := statusScheduleSummary(nil, "07:00", "10:27", "UTC"); !strings.Contains(got, "at least one weekday") {
+	if got := statusScheduleSummary(nil, "07:00", "10:27", "UTC", false); !strings.Contains(got, "at least one weekday") {
 		t.Errorf("empty selection summary = %q", got)
 	}
 }

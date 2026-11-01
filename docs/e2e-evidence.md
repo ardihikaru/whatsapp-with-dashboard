@@ -2206,3 +2206,22 @@ throwaway admin password file (`_data/paswd` does not exist on this host).
 - NOT verified: a real status send (no paired handset; waxum status endpoints have never
   been exercised live), and image/video upload through the form in a browser (unit tests
   use a fake object store; the e2e run did not upload).
+
+## 2026-11-02 — AI-written scheduled status posts (migration 0014)
+
+Run: `./scripts/e2e-run.sh e2e/status-schedules.spec.ts` against a fresh throwaway
+SQLite state dir and a throwaway admin password file. `scripts/e2e-env.sh` now forces
+dummy `WSM_CODEX_CLI_*` (URL `http://127.0.0.1:9`, connection refused) so the AI switch
+is enabled in the browser run without any possibility of reaching a real AI service.
+
+- Result: **40 passed** (28 existing + 4 new tests x mobile-portrait 390, mobile-small 360, desktop 1280).
+- New coverage: the switch reveals the topic field, swaps the text label to "Fallback text
+  (optional)", appends "· AI-written" to the summary and the counter follows typing
+  ("13 / 500"); a hidden topic is not reachable by Tab; an AI schedule is rejected without a
+  topic, saves with no static text, shows an AI badge in the list and round-trips on edit
+  (switch checked, topic restored); the form with the switch ON and a 480-character topic
+  does not overflow, measured against `page.viewportSize()`.
+- Screenshot (360px, AI on, light) was produced under `test-results/` and viewed; not committed.
+- NOT verified: a real generation against the live ai-codex-cli (the dummy URL refuses
+  connections; unit tests use a fake generator); a real status post; the dark-theme look
+  of the switch (token counterparts are asserted by a unit test, not by eye).

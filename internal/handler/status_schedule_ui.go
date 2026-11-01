@@ -39,6 +39,8 @@ const (
 	statusTextMaxChars      = 700
 	statusCaptionMaxChars   = 1024
 	statusScheduleNameMax   = 120
+	statusAITopicMaxChars   = 500
+	statusNextTextShowChars = 80
 	statusScheduleBasePath  = "/status/schedules"
 	noObjectsMessage        = "Image and video schedules need object storage, which is not configured on this deployment. Use a text status instead."
 )
@@ -65,12 +67,16 @@ func statusWeekdayOptions(selected []string) []weekdayOption {
 // statusScheduleSummary is the one-line plain-English description of the
 // plan. status-schedule.js mirrors this string live as the operator types;
 // this server copy is the no-JS fallback and the initial paint.
-func statusScheduleSummary(weekdays []string, start, end, tz string) string {
+func statusScheduleSummary(weekdays []string, start, end, tz string, aiWritten bool) string {
 	days := weekdayShortList(strings.Join(validWeekdays(weekdays), ","))
 	if days == "—" {
 		return "Pick at least one weekday."
 	}
-	return fmt.Sprintf("%s · once each day, at a random time between %s and %s %s", days, start, end, tz)
+	out := fmt.Sprintf("%s · once each day, at a random time between %s and %s %s", days, start, end, tz)
+	if aiWritten {
+		out += " · AI-written"
+	}
+	return out
 }
 
 // statusScheduleForm is the raw form, kept as strings so a rejected
@@ -90,6 +96,9 @@ type statusScheduleForm struct {
 	// Existing media on an edit (shown as "current file", kept when no new
 	// file is uploaded and the kind is unchanged).
 	MediaFilename string
+	// AIEnabled / AITopic: "Write each post with AI" and what to write about.
+	AIEnabled bool
+	AITopic   string
 }
 
 func newStatusScheduleForm(now time.Time) statusScheduleForm {
@@ -106,6 +115,7 @@ func statusScheduleFormFromSchedule(sc sched.Schedule) statusScheduleForm {
 		BgARGB: strconv.FormatUint(uint64(sc.BgARGB), 10), Caption: sc.Caption,
 		Weekdays: strings.Split(sc.Weekdays, ","), WindowStart: sc.WindowStart, WindowEnd: sc.WindowEnd,
 		Timezone: sc.Timezone, StartDate: sc.StartDate, EndDate: sc.EndDate, MediaFilename: sc.MediaFilename,
+		AIEnabled: sc.AIEnabled, AITopic: sc.AITopic,
 	}
 	if sc.RecipientsMode == sched.ModeAll {
 		f.AllRecipients = true
@@ -124,6 +134,8 @@ func statusScheduleFormFromRequest(r *http.Request) statusScheduleForm {
 		WindowEnd: strings.TrimSpace(r.FormValue("window_end")), Timezone: strings.TrimSpace(r.FormValue("timezone")),
 		StartDate: strings.TrimSpace(r.FormValue("start_date")), EndDate: strings.TrimSpace(r.FormValue("end_date")),
 		Recipients: dedupeStrings(r.Form["recipients"]),
+		AIEnabled:  r.FormValue("ai_enabled") != "",
+		AITopic:    strings.TrimSpace(r.FormValue("ai_topic")),
 	}
 	return f
 }
@@ -154,6 +166,10 @@ type statusScheduleFormPageData struct {
 	Summary          string
 	ObjectsAvailable bool
 	MediaLimits      []mediaKindDisplay
+	// AIAvailable: the AI client is wired. false disables the toggle.
+	AIAvailable bool
+	AITopicMax  int
+	AITopicLen  int // runes already typed, for the server-rendered counter
 }
 
 func (h *handlers) statusScheduleFormData(r *http.Request, isEdit bool, id string, form statusScheduleForm, errMsg string) statusScheduleFormPageData {
@@ -198,8 +214,9 @@ func (h *handlers) statusScheduleFormData(r *http.Request, isEdit bool, id strin
 		IsEdit: isEdit, ScheduleID: id, Form: form, Error: errMsg, Sessions: sessions,
 		Swatches: statusColorSwatches, ActiveSwatch: active, Timezones: tzs,
 		Weekdays: statusWeekdayOptions(form.Weekdays), Recipients: recips,
-		Summary:          statusScheduleSummary(form.Weekdays, form.WindowStart, form.WindowEnd, form.Timezone),
+		Summary:          statusScheduleSummary(form.Weekdays, form.WindowStart, form.WindowEnd, form.Timezone, form.AIEnabled),
 		ObjectsAvailable: h.Objects != nil, MediaLimits: h.mediaKindDisplays(),
+		AIAvailable: h.StatusAIAvailable, AITopicMax: statusAITopicMaxChars, AITopicLen: len([]rune(form.AITopic)),
 	}
 	data.PageBase = h.newPageBase(r, title, statusScheduleBasePath)
 	return data
@@ -284,9 +301,22 @@ func (h *handlers) validateStatusSchedule(r *http.Request, form statusScheduleFo
 	}
 	out.Name, out.SessionID = form.Name, form.SessionID
 
+	if form.AIEnabled {
+		if !h.StatusAIAvailable {
+			return out, "AI writing is not configured on this deployment — turn off “Write each post with AI” or ask the operator to set WSM_CODEX_CLI_*"
+		}
+		if form.AITopic == "" {
+			return out, "tell the AI what to write about: topic is required"
+		}
+		if len([]rune(form.AITopic)) > statusAITopicMaxChars {
+			return out, fmt.Sprintf("topic is over %d characters", statusAITopicMaxChars)
+		}
+		out.AIEnabled, out.AITopic = true, form.AITopic
+	}
+
 	switch form.Kind {
 	case sched.KindText:
-		if form.Text == "" {
+		if form.Text == "" && !form.AIEnabled {
 			return out, "status text is required"
 		}
 		if len([]rune(form.Text)) > statusTextMaxChars {
@@ -531,6 +561,12 @@ type statusScheduleView struct {
 	LastLabel       string
 	RecipientsLabel string
 	Editable        bool
+	// NextTextLabel is the planned wording for the pending slot, truncated;
+	// NextSourceLabel says where it came from ("AI" or "static"). Both are
+	// empty unless a post is actually pending.
+	NextTextLabel   string
+	NextSourceLabel string
+	AIWritten       bool
 }
 
 func (h *handlers) toStatusScheduleView(sc sched.Schedule) statusScheduleView {
@@ -548,7 +584,15 @@ func (h *handlers) toStatusScheduleView(sc sched.Schedule) statusScheduleView {
 	}
 	if sc.State == sched.StateActive && !sc.NextFireAt.IsZero() {
 		v.NextLabel = sc.NextFireAt.In(loc).Format("Mon 2 Jan 15:04 MST")
+		if sc.NextText != "" {
+			v.NextTextLabel = truncateRunes(sc.NextText, statusNextTextShowChars)
+			v.NextSourceLabel = "static"
+			if sc.NextTextSource == sched.TextSourceAI {
+				v.NextSourceLabel = "AI"
+			}
+		}
 	}
+	v.AIWritten = sc.AIEnabled
 	if !sc.LastFiredAt.IsZero() {
 		v.LastLabel = sc.LastResult + " · " + sc.LastFiredAt.In(loc).Format("Mon 2 Jan 15:04 MST")
 	}
@@ -668,4 +712,14 @@ func (h *handlers) PostStatusScheduleDelete(w http.ResponseWriter, r *http.Reque
 	}
 	h.deleteStatusScheduleObject(r.Context(), sc.MediaObjectKey)
 	w.WriteHeader(http.StatusOK)
+}
+
+// truncateRunes shortens s to at most n runes, marking the cut with an
+// ellipsis (counted inside n).
+func truncateRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
 }

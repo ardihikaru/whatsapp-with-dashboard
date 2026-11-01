@@ -6,11 +6,14 @@
 <tr class="ss-row">
   <td><a href="{{u "/status/schedules"}}/{{.ID}}/edit">{{.Name}}</a></td>
   <td>{{.SessionName}}</td>
-  <td>{{.KindLabel}}</td>
+  <td>{{.KindLabel}}{{if .AIWritten}} <span class="badge ss-source" data-source="AI" title="Each post is written by AI from a topic">AI</span>{{end}}</td>
   <td>{{.DaysLabel}}</td>
   <td class="mono">{{.WindowLabel}}</td>
   <td>{{.RecipientsLabel}}</td>
-  <td class="mono">{{.NextLabel}}</td>
+  <td>
+    <span class="mono">{{.NextLabel}}</span>
+    {{if .NextTextLabel}}<br><small class="muted ss-next-text" title="{{.NextText}}"><span class="badge ss-source" data-source="{{.NextSourceLabel}}">{{.NextSourceLabel}}</span> {{.NextTextLabel}}</small>{{end}}
+  </td>
   <td>
     <span class="mono">{{.LastLabel}}</span>
     {{if .LastError}}<br><small class="muted" title="{{.LastError}}">{{.LastError}}</small>{{end}}

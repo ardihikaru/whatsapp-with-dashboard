@@ -144,3 +144,65 @@ func TestDeleteRemovesTheRow(t *testing.T) {
 		t.Errorf("second Delete = %v, want ErrNotFound", err)
 	}
 }
+
+func TestTheAIColumnsRoundTripThroughInsertAndUpdate(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	sc := sample("a")
+	sc.AIEnabled, sc.AITopic = true, "kopi pagi"
+	if err := repo.Insert(ctx, sc); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := repo.Get(ctx, "a")
+	if !got.AIEnabled || got.AITopic != "kopi pagi" || got.NextText != "" || got.NextTextSource != "" || got.LastAIText != "" {
+		t.Fatalf("Insert lost the AI columns: %+v", got)
+	}
+
+	at := time.Date(2026, 11, 2, 3, 0, 0, 0, time.UTC)
+	if err := repo.MarkPlannedWithText(ctx, "a", "2026-11-02", at, "Selamat pagi!", TextSourceAI, "Selamat pagi!"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = repo.Get(ctx, "a")
+	if got.NextText != "Selamat pagi!" || got.NextTextSource != TextSourceAI || got.LastAIText != "Selamat pagi!" || !got.NextFireAt.Equal(at) {
+		t.Fatalf("MarkPlannedWithText did not store the plan: %+v", got)
+	}
+
+	// A static-fallback plan must not erase the last REAL AI text.
+	if err := repo.MarkPlannedWithText(ctx, "a", "2026-11-03", at, "fallback", TextSourceStatic, ""); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = repo.Get(ctx, "a")
+	if got.NextText != "fallback" || got.NextTextSource != TextSourceStatic || got.LastAIText != "Selamat pagi!" {
+		t.Errorf("static plan clobbered last_ai_text: %+v", got)
+	}
+
+	// Editing re-plans from scratch: stale wording must go, last_ai_text stays.
+	edited := sample("a")
+	edited.AIEnabled, edited.AITopic = false, ""
+	if err := repo.Update(ctx, edited); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = repo.Get(ctx, "a")
+	if got.AIEnabled || got.AITopic != "" || got.NextText != "" || got.NextTextSource != "" || got.LastAIText != "Selamat pagi!" {
+		t.Errorf("Update left stale AI planning behind: %+v", got)
+	}
+}
+
+func TestSetStateAndMarkPlannedWithoutTextClearTheStaleWording(t *testing.T) {
+	repo := newTestRepository(t)
+	ctx := context.Background()
+	_ = repo.Insert(ctx, sample("a"))
+	at := time.Date(2026, 11, 2, 3, 0, 0, 0, time.UTC)
+	_ = repo.MarkPlannedWithText(ctx, "a", "2026-11-02", at, "old", TextSourceAI, "old")
+	if err := repo.SetState(ctx, "a", StatePaused, "x"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := repo.Get(ctx, "a"); got.NextText != "" || got.NextTextSource != "" {
+		t.Errorf("SetState kept wording for a slot it just cleared: %+v", got)
+	}
+	_ = repo.MarkPlannedWithText(ctx, "a", "2026-11-02", at, "old", TextSourceAI, "old")
+	_ = repo.MarkPlanned(ctx, "a", "2026-11-03", time.Time{})
+	if got, _ := repo.Get(ctx, "a"); got.NextText != "" || got.NextTextSource != "" {
+		t.Errorf("MarkPlanned kept wording: %+v", got)
+	}
+}

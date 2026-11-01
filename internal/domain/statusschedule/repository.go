@@ -26,7 +26,8 @@ const cols = `id, name, session_id, kind, text, bg_argb, caption,
   weekdays, window_start, window_end, timezone, start_date, end_date,
   recipients_mode, recipients_json,
   state, paused_reason, last_planned_date, next_fire_at, last_fired_at,
-  last_result, last_error, created_at, updated_at`
+  last_result, last_error, created_at, updated_at,
+  ai_enabled, ai_topic, next_text, next_text_source, last_ai_text`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -48,22 +49,32 @@ func parseTime(s string) time.Time {
 func scan(s scanner) (Schedule, error) {
 	var sc Schedule
 	var bg int64
-	var end, planned sql.NullString
+	var end, planned, nextText, lastAI sql.NullString
+	var ai int64
 	var next, fired, created, updated string
 	err := s.Scan(&sc.ID, &sc.Name, &sc.SessionID, &sc.Kind, &sc.Text, &bg, &sc.Caption,
 		&sc.MediaObjectKey, &sc.MediaContentType, &sc.MediaFilename,
 		&sc.Weekdays, &sc.WindowStart, &sc.WindowEnd, &sc.Timezone, &sc.StartDate, &end,
 		&sc.RecipientsMode, &sc.RecipientsJSON,
 		&sc.State, &sc.PausedReason, &planned, &next, &fired,
-		&sc.LastResult, &sc.LastError, &created, &updated)
+		&sc.LastResult, &sc.LastError, &created, &updated,
+		&ai, &sc.AITopic, &nextText, &sc.NextTextSource, &lastAI)
 	if err != nil {
 		return Schedule{}, err
 	}
 	sc.BgARGB = uint32(bg)
+	sc.AIEnabled, sc.NextText, sc.LastAIText = ai != 0, nextText.String, lastAI.String
 	sc.EndDate, sc.LastPlannedDate = end.String, planned.String
 	sc.NextFireAt, sc.LastFiredAt = parseTime(next), parseTime(fired)
 	sc.CreatedAt, sc.UpdatedAt = parseTime(created), parseTime(updated)
 	return sc, nil
+}
+
+func boolInt(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func nullable(s string) any {
@@ -82,13 +93,14 @@ func (r *Repository) Insert(ctx context.Context, sc *Schedule) error {
 		sc.UpdatedAt = sc.CreatedAt
 	}
 	_, err := r.pool.ExecContext(ctx,
-		`INSERT INTO wa_status_schedules (`+cols+`) VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?,?, ?,?, ?,?,?,?,?, ?,?,?,?)`,
+		`INSERT INTO wa_status_schedules (`+cols+`) VALUES (?,?,?,?,?,?,?, ?,?,?, ?,?,?,?,?,?, ?,?, ?,?,?,?,?, ?,?,?,?, ?,?,?,?,?)`,
 		sc.ID, sc.Name, sc.SessionID, sc.Kind, sc.Text, int64(sc.BgARGB), sc.Caption,
 		sc.MediaObjectKey, sc.MediaContentType, sc.MediaFilename,
 		sc.Weekdays, sc.WindowStart, sc.WindowEnd, sc.Timezone, sc.StartDate, nullable(sc.EndDate),
 		sc.RecipientsMode, sc.RecipientsJSON,
 		sc.State, sc.PausedReason, nullable(sc.LastPlannedDate), fmtTime(sc.NextFireAt), fmtTime(sc.LastFiredAt),
-		sc.LastResult, sc.LastError, fmtTime(sc.CreatedAt), fmtTime(sc.UpdatedAt))
+		sc.LastResult, sc.LastError, fmtTime(sc.CreatedAt), fmtTime(sc.UpdatedAt),
+		boolInt(sc.AIEnabled), sc.AITopic, nullable(sc.NextText), sc.NextTextSource, nullable(sc.LastAIText))
 	return err
 }
 
@@ -145,12 +157,12 @@ func (r *Repository) Update(ctx context.Context, sc *Schedule) error {
 		`UPDATE wa_status_schedules SET name=?, session_id=?, kind=?, text=?, bg_argb=?, caption=?,
 		   media_object_key=?, media_content_type=?, media_filename=?,
 		   weekdays=?, window_start=?, window_end=?, timezone=?, start_date=?, end_date=?,
-		   recipients_mode=?, recipients_json=?,
-		   last_planned_date=NULL, next_fire_at='', updated_at=? WHERE id=?`,
+		   recipients_mode=?, recipients_json=?, ai_enabled=?, ai_topic=?,
+		   last_planned_date=NULL, next_fire_at='', next_text=NULL, next_text_source='', updated_at=? WHERE id=?`,
 		sc.Name, sc.SessionID, sc.Kind, sc.Text, int64(sc.BgARGB), sc.Caption,
 		sc.MediaObjectKey, sc.MediaContentType, sc.MediaFilename,
 		sc.Weekdays, sc.WindowStart, sc.WindowEnd, sc.Timezone, sc.StartDate, nullable(sc.EndDate),
-		sc.RecipientsMode, sc.RecipientsJSON, fmtTime(sc.UpdatedAt), sc.ID)
+		sc.RecipientsMode, sc.RecipientsJSON, boolInt(sc.AIEnabled), sc.AITopic, fmtTime(sc.UpdatedAt), sc.ID)
 	return affected(res, err)
 }
 
@@ -179,16 +191,28 @@ func (r *Repository) Delete(ctx context.Context, id string) error {
 // pause.
 func (r *Repository) SetState(ctx context.Context, id, state, reason string) error {
 	return affected(r.pool.ExecContext(ctx,
-		`UPDATE wa_status_schedules SET state=?, paused_reason=?, last_planned_date=NULL, next_fire_at='', updated_at=? WHERE id=?`,
+		`UPDATE wa_status_schedules SET state=?, paused_reason=?, last_planned_date=NULL, next_fire_at='', next_text=NULL, next_text_source='', updated_at=? WHERE id=?`,
 		state, reason, fmtTime(r.now()), id))
 }
 
 // MarkPlanned records that date has been planned. fireAt zero means "nothing
 // to fire today" (the draw was skipped); non-zero is the instant to fire.
+// Any previously planned wording is cleared: a plan without text is a plan
+// for a schedule that does not use AI (or has nothing to post).
 func (r *Repository) MarkPlanned(ctx context.Context, id, date string, fireAt time.Time) error {
+	return r.MarkPlannedWithText(ctx, id, date, fireAt, "", "", "")
+}
+
+// MarkPlannedWithText is MarkPlanned plus the wording for the planned slot:
+// nextText/source are stored verbatim (the fire posts exactly this, with no
+// AI call of its own). lastAIText, when non-empty, replaces last_ai_text —
+// the "do not repeat this" input of the next prompt; empty leaves it alone,
+// so a static fallback never erases the last real AI text.
+func (r *Repository) MarkPlannedWithText(ctx context.Context, id, date string, fireAt time.Time, nextText, source, lastAIText string) error {
 	return affected(r.pool.ExecContext(ctx,
-		`UPDATE wa_status_schedules SET last_planned_date=?, next_fire_at=?, updated_at=? WHERE id=?`,
-		date, fmtTime(fireAt), fmtTime(r.now()), id))
+		`UPDATE wa_status_schedules SET last_planned_date=?, next_fire_at=?, next_text=?, next_text_source=?,
+		   last_ai_text=COALESCE(NULLIF(?, ''), last_ai_text), updated_at=? WHERE id=?`,
+		date, fmtTime(fireAt), nullable(nextText), source, lastAIText, fmtTime(r.now()), id))
 }
 
 // ClaimFire atomically clears next_fire_at iff it still equals fireAt. The

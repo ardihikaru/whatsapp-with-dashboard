@@ -112,6 +112,13 @@ type Deps struct {
 	// (older test servers) and renders an empty list / refuses saves. There
 	// is deliberately no enabling flag: the feature is always on.
 	StatusSchedules *statusschedule.Repository
+	// StatusAIAvailable reports whether the AI client behind AI-written
+	// status posts is wired (cmd/app: the same client handed to
+	// internal/statussched, nil when WSM_CODEX_CLI_* is incomplete). The
+	// handler never calls the model itself — it only needs to know whether
+	// the "Write each post with AI" option can be honoured. false (the zero
+	// value) disables the toggle and rejects enabling it server-side.
+	StatusAIAvailable bool
 
 	// KnownGroups is the per-session known-WhatsApp-groups CRUD seam
 	// (internal/domain/knowngroup) backing the /groups page. nil is legal
