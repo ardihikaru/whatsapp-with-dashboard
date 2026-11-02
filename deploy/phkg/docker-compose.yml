@@ -59,7 +59,10 @@ services:
     # one build, unlike the earlier app-only 20260902/20260901 split this
     # comment used to describe (a rebuild of app alone, with no migration
     # change behind it).
-    image: whatsapp-with-dashboard:phkg-20261102
+    # phkg-20261102b: app-only rebuild from a `git archive` of febb28c (the
+    # session-alert sender-membership fix). No migration change, so
+    # `migrate` stays at phkg-20261102.
+    image: whatsapp-with-dashboard:phkg-20261102b
     restart: unless-stopped
 
     # HARD SINGLETON. One device websocket, one store. Two replicas against one

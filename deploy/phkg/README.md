@@ -34,7 +34,9 @@ build yang salah:
 
 Cetakan terakhirnya harus memunculkan image dengan ID yang identik dengan
 produksi. Transfer `20261102`: `ecfded288394` (app), `74a65fd996fb`
-(migrate) — diverifikasi di host 2026-11-02. waxum tidak lagi ikut transfer
+(migrate) — diverifikasi di host 2026-11-02. Transfer `20261102b`
+(app saja, fix pengirim alert): `54eb877c3363` (app); migrate tetap
+`phkg-20261102`. waxum tidak lagi ikut transfer
 ini; ID-nya dicek terpisah kalau image waxum itu sendiri yang berubah. Kalau
 ID berbeda, image yang dimuat bukan build yang sedang jalan di produksi —
 jangan diteruskan.
