@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"net/http"
 	"net/url"
@@ -22,15 +23,21 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
 
+// errSendFailed is a fixed sentinel so TestSendTestMessageNamesTheSenderEvenWhenTheSendItselfFails
+// can assert on a predictable Send() failure.
+var errSendFailed = errors.New("fake: send failed")
+
 // fakeAlertGateway is a minimal sessionalert.Gateway double for handler
 // tests — package handler cannot fabricate a connected *wa.ManagedSession
 // (see api_group_code_test.go's own doc comment on exactly this
 // limitation), so SendTest's own success/failure path is exercised
 // against a Gateway built independently of any live Manager/backend.
 type fakeAlertGateway struct {
-	snaps []sessionalert.Snapshot
-	sends []struct{ SessionID, GroupJID, Text string }
-	err   error
+	snaps   []sessionalert.Snapshot
+	sends   []struct{ SessionID, GroupJID, Text string }
+	err     error
+	members map[string]bool // sessionID -> is a member of whatever group is asked about
+	events  []string
 }
 
 func (g *fakeAlertGateway) Snapshots() []sessionalert.Snapshot { return g.snaps }
@@ -40,6 +47,19 @@ func (g *fakeAlertGateway) Send(_ context.Context, sessionID, groupJID, text str
 	}
 	g.sends = append(g.sends, struct{ SessionID, GroupJID, Text string }{sessionID, groupJID, text})
 	return nil
+}
+
+// Member backs chooseSender's fallback tier — see that function's doc
+// comment (internal/sessionalert/sender.go). Every test in this file uses
+// a self-reminder or configured sender, neither of which is ever
+// membership-checked, so this only matters for tests that explicitly
+// populate g.members.
+func (g *fakeAlertGateway) Member(_ context.Context, sessionID, _ string) (bool, error) {
+	return g.members[sessionID], nil
+}
+
+func (g *fakeAlertGateway) RecordEvent(level, note string) {
+	g.events = append(g.events, level+": "+note)
 }
 
 // newSettingsAlertsTestServer wires a handler.New(Deps{...}) around a
@@ -146,7 +166,7 @@ func TestAnInvalidDailyTimeIsRejectedWithoutSaving(t *testing.T) {
 // button drives sessionalert.Service.SendTest, which calls through to the
 // Gateway's Send — real evidence of wiring, not just a 200 status.
 func TestSendTestMessageCallsTheGateway(t *testing.T) {
-	gw := &fakeAlertGateway{snaps: []sessionalert.Snapshot{{ID: "s1", Connected: true, SelfReminder: true}}}
+	gw := &fakeAlertGateway{snaps: []sessionalert.Snapshot{{ID: "s1", Name: "Ardi laptop", Connected: true, SelfReminder: true}}}
 	srv, sessions := newSettingsAlertsTestServer(t, gw)
 
 	// Configure a target group first (SendTest refuses without one).
@@ -167,8 +187,42 @@ func TestSendTestMessageCallsTheGateway(t *testing.T) {
 	if gw.sends[0].SessionID != "s1" || gw.sends[0].GroupJID != "120363222222222222@g.us" {
 		t.Errorf("Send called with %+v, want session s1 / the configured group", gw.sends[0])
 	}
-	if !strings.Contains(res.Body.String(), "Test message sent") {
+	body := res.Body.String()
+	if !strings.Contains(body, "Test message sent") {
 		t.Error("response does not confirm the test message was sent")
+	}
+	// The whole point of this fix: the operator must see WHICH session
+	// sent it, not just a bare "sent" — verified against the actual
+	// rendered body, not inferred from the 200 status.
+	if !strings.Contains(body, "Ardi laptop") {
+		t.Errorf("response does not name the sending session (Ardi laptop); body:\n%s", body)
+	}
+}
+
+// TestSendTestMessageNamesTheSenderEvenWhenTheSendItselfFails proves a
+// chosen-but-failed send still tells the operator which session was
+// tried — not just "it didn't work" — the same gap PostSettingsAlertsTest
+// used to have (a bare 200 with no outcome detail).
+func TestSendTestMessageNamesTheSenderEvenWhenTheSendItselfFails(t *testing.T) {
+	gw := &fakeAlertGateway{
+		snaps: []sessionalert.Snapshot{{ID: "s1", Name: "Ardi laptop", Connected: true, SelfReminder: true}},
+		err:   errSendFailed,
+	}
+	srv, sessions := newSettingsAlertsTestServer(t, gw)
+	authedPostForm(t, srv, sessions, "/settings/alerts", url.Values{
+		"group_jid": {"120363222222222222@g.us"}, "daily_time": {"08:00"}, "timezone": {"Asia/Jakarta"},
+	})
+
+	res := authedPostForm(t, srv, sessions, "/settings/alerts/test", url.Values{})
+	if res.Code != 200 {
+		t.Fatalf("POST = %d", res.Code)
+	}
+	body := res.Body.String()
+	if !strings.Contains(body, "alert-error") {
+		t.Error("a failed test send did not render alert-error")
+	}
+	if !strings.Contains(body, "Ardi laptop") {
+		t.Errorf("failure response does not name the session that was tried; body:\n%s", body)
 	}
 }
 

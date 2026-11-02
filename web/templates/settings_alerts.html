@@ -8,7 +8,7 @@
 
 {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
 {{if .Saved}}<div class="alert alert-success">Saved.</div>{{end}}
-{{if .TestSent}}<div class="alert alert-success">Test message sent.</div>{{end}}
+{{if .TestSent}}<div class="alert alert-success">Test message sent from {{.TestSentFrom}}.</div>{{end}}
 
 <div class="card form-card">
   <form action="{{u "/settings/alerts"}}" method="post" novalidate>
