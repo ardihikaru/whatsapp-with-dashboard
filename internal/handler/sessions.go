@@ -315,13 +315,17 @@ func (h *handlers) PostSessionEdit(w http.ResponseWriter, r *http.Request) {
 		slog.Error("edit session: set self-reminder", "session", s.ID, "err", err)
 	}
 
-	snap := s.Snapshot()
+	// Success renders NOTHING into #session-edit-slot — unlike the fail()
+	// branches above, which must re-render the dialog (still open, with
+	// its data-autoopen) so the operator sees the inline error. Emptying
+	// the slot removes the dialog from the DOM outright, which is what
+	// "closes the dialog" (the plan's own wording) has to mean: a dialog
+	// swapped back in WOULD carry data-autoopen again (every swap creates
+	// a fresh, closed <dialog> node — see session-edit.js's own doc
+	// comment), and session-edit.js's afterSwap handler would immediately
+	// reopen it, racing against (and winning over) the "sessions-changed"
+	// listener that is also trying to close it.
 	w.Header().Set("HX-Trigger", "sessions-changed")
-	h.Renderer.RenderPartial(w, "session_edit_dialog", sessionEditDialogData{
-		Session: snap, Name: snap.Name, GroupCodesCSV: groupCodesToCSV(snap.GroupCodes),
-		Master: snap.IsMaster, SelfReminder: snap.SelfReminder, GroupCodes: h.Manager.GroupCodes(),
-		CurrentHolderName: h.selfReminderHolderName(snap.ID),
-	})
 }
 
 // sessionDeleteDialogData feeds the session_delete_dialog partial — the
@@ -364,5 +368,12 @@ func (h *handlers) PostSessionDelete(w http.ResponseWriter, r *http.Request) {
 	if err := h.Manager.Delete(r.Context(), r.PathValue("id")); err != nil && !errors.Is(err, wa.ErrNotFound) {
 		slog.Warn("delete session", "err", err)
 	}
+	// This response's own hx-target is #session-rows, not
+	// #session-edit-slot — the delete confirmation dialog is never
+	// touched by this swap and would otherwise stay open (now pointed at
+	// a deleted session) forever. HX-Trigger: sessions-changed is what
+	// session-edit.js's document-level listener closes it on; see that
+	// file's own doc comment.
+	w.Header().Set("HX-Trigger", "sessions-changed")
 	h.GetSessionRows(w, r)
 }

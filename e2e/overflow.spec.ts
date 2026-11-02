@@ -68,6 +68,11 @@ const PAGES = [
   // management is never gated by the flag) all still render normally.
   "/self-convo",
   "/self-convo/templates",
+  // Session groups/self-reminder + alerts (this phase): the Edit/Delete
+  // dialogs and the chip input are exercised in session-edit.spec.ts; this
+  // file only cares that the LIST page and the new settings page don't
+  // overflow a phone.
+  "/settings/alerts",
 ];
 
 for (const path of PAGES) {

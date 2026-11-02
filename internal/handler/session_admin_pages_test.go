@@ -597,6 +597,14 @@ func TestSavingTheEditDialogAppliesNameGroupsAndMasterTogetherAndFiresHXTrigger(
 	if got := res.Header().Get("HX-Trigger"); got != "sessions-changed" {
 		t.Errorf(`HX-Trigger = %q, want "sessions-changed"`, got)
 	}
+	// A successful save must render NOTHING — re-rendering the dialog
+	// (even with data-autoopen) would reopen it the instant htmx swaps it
+	// back in, racing the "sessions-changed" listener that closes it (see
+	// PostSessionEdit's own doc comment on this exact bug, caught live by
+	// e2e/session-edit.spec.ts).
+	if body := res.Body.String(); strings.TrimSpace(body) != "" {
+		t.Errorf("a successful save rendered a non-empty body (would reopen the dialog instead of closing it); body:\n%s", body)
+	}
 
 	snap := s.Snapshot()
 	if snap.Name != "Renamed Gateway" {
