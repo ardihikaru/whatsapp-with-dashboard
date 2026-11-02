@@ -146,6 +146,11 @@ type Snapshot struct {
 	JID             string
 	State           State
 	Connected       bool
+	// Active mirrors ManagedSession.active — OPERATOR INTENT (see that
+	// field's doc comment), not live connectivity. internal/sessionalert's
+	// daily non-connected report reads this to mark a session
+	// "(deactivated)" rather than reporting it as an unexplained outage.
+	Active          bool
 	QueueLen        int
 	CreatedAt       time.Time
 	LastSelectedAt  *time.Time
@@ -192,6 +197,7 @@ func (s *ManagedSession) Snapshot() Snapshot {
 		Stalled:        s.stalled,
 		StalledReason:  s.stalledReason,
 		IsMaster:       s.isMaster,
+		Active:         s.active,
 		GroupCode:      firstGroupCode(s.groupCodes),
 		GroupCodes:     append([]string(nil), s.groupCodes...),
 		SelfReminder:   s.isSelfReminder,
@@ -253,6 +259,9 @@ func (s *ManagedSession) setState(st State) {
 	if err := s.mgr.repo.UpdateStatus(s.mgr.persistCtx, s.ID, string(st)); err != nil {
 		slog.Warn("persist status", "session", s.ID, "state", st, "err", err)
 	}
+	s.mgr.publishStateChange(StateChange{
+		ID: s.ID, Name: s.Name(), Phone: s.Phone, From: old, To: st, At: time.Now(),
+	})
 }
 
 // ensureCtxLocked lazily establishes the per-session ctx (child of

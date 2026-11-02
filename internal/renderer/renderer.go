@@ -181,6 +181,14 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/system_log/list.html"),
 		root:  "base",
 	},
+	// settings_alerts — /settings/alerts (internal/sessionalert
+	// configuration). No rows partial; the page is a single form plus a
+	// group picker loaded from the SAME GET /groups/picker partial
+	// known_groups.html already uses, so it is not duplicated here.
+	"settings_alerts": {
+		files: append(chrome(), "templates/settings_alerts.html"),
+		root:  "base",
+	},
 }
 
 // chrome is the shared base-layout file set every full page needs.

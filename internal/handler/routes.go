@@ -15,10 +15,12 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/knowngroup"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
+	sa "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/sessionalert"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/statusschedule"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/groupbroadcast"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/renderer"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/selfconvo"
+	"github.com/ardihikaru/whatsapp-with-dashboard/internal/sessionalert"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/storage"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/wa"
 )
@@ -106,6 +108,17 @@ type Deps struct {
 	// so those refusals live in one place; plain schedule CRUD and listing
 	// go through Convo directly and need no Planner at all.
 	Planner *selfconvo.Planner
+
+	// SessionAlertSettings is the persistence seam for the logged-out
+	// alert / daily report configuration (internal/domain/sessionalert)
+	// behind /settings/alerts. nil is legal (older test servers) and
+	// renders defaults / refuses saves — same convention as
+	// StatusSchedules below.
+	SessionAlertSettings sa.Repository
+	// SessionAlert is the running alert service (internal/sessionalert),
+	// wired by cmd/app/main.go. nil is legal and means "Send test
+	// message" refuses with a clear reason rather than panicking.
+	SessionAlert *sessionalert.Service
 
 	// StatusSchedules is the scheduled-status persistence seam
 	// (internal/domain/statusschedule) behind /status/schedules. nil is legal

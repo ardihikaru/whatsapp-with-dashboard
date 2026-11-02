@@ -68,6 +68,13 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("POST "+bp+"/admin/api-clients/{id}/rotate", page(http.HandlerFunc(h.PostAPIClientRotate)))
 	mux.Handle("POST "+bp+"/admin/api-clients/{id}/delete", page(http.HandlerFunc(h.PostAPIClientDelete)))
 
+	// Session alerts settings (internal/sessionalert) — logged-out alert
+	// and daily non-connected report configuration. Cookie-only page
+	// routes; no /api/v1 route, so no MCP tool is needed (per the plan).
+	mux.Handle("GET "+bp+"/settings/alerts", page(http.HandlerFunc(h.GetSettingsAlerts)))
+	mux.Handle("POST "+bp+"/settings/alerts", page(http.HandlerFunc(h.PostSettingsAlerts)))
+	mux.Handle("POST "+bp+"/settings/alerts/test", page(http.HandlerFunc(h.PostSettingsAlertsTest)))
+
 	// Sessions + pairing pages and partials.
 	mux.Handle("GET "+bp+"/sessions", page(http.HandlerFunc(h.GetSessions)))
 	mux.Handle("GET "+bp+"/sessions/rows", page(http.HandlerFunc(h.GetSessionRows)))

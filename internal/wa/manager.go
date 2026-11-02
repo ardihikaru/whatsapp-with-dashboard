@@ -7,6 +7,7 @@ package wa
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -145,6 +146,53 @@ type Manager struct {
 	// nothing extra here and matches this package's existing convention
 	// for an id-keyed map with no bulk-iteration need.
 	inboundLastSeen sync.Map
+
+	// stateChanges fans out every ManagedSession.setState transition to
+	// internal/sessionalert's logout-alert collector — see
+	// publishStateChange's doc comment. Always non-nil (same convention as
+	// sysRing/inboundPoke above), buffered so a slow/absent consumer never
+	// blocks a state transition.
+	stateChanges chan StateChange
+}
+
+// StateChange is one ManagedSession.setState transition, published on
+// Manager.StateChanges() for internal/sessionalert's logout-alert
+// collector. Boot restore (manager_boot.go) assigns s.state DIRECTLY
+// rather than calling setState, specifically so a restart never publishes
+// one of these — see manager_boot.go's own comment at that assignment.
+type StateChange struct {
+	ID, Name, Phone string
+	From, To        State
+	At              time.Time
+}
+
+// stateChangeBuffer bounds StateChanges()'s channel. 64 comfortably covers
+// the 2026-09-30 incident this exists to alert on (six sessions flipping
+// within two minutes, see CLAUDE.md) with headroom; publishStateChange
+// drops and logs rather than blocking if a consumer ever falls behind this
+// far, because a state transition commit must never stall on alerting.
+const stateChangeBuffer = 64
+
+// publishStateChange is setState's ONLY side channel to
+// internal/sessionalert (session.go calls this on every committed
+// transition, old != new). Non-blocking: a full buffer means a very
+// unusual pile-up with no consumer draining it, and the worse outcome by
+// far would be the state machine itself backing up behind alerting that
+// is, by design, best-effort.
+func (m *Manager) publishStateChange(c StateChange) {
+	select {
+	case m.stateChanges <- c:
+	default:
+		slog.Warn("wa: state-change buffer full; dropped", "session", c.ID, "from", c.From, "to", c.To)
+	}
+}
+
+// StateChanges exposes the state-transition feed for internal/sessionalert
+// (or any other in-process consumer) to range over. The channel is never
+// closed by this package; a consumer should stop reading via its own ctx
+// instead.
+func (m *Manager) StateChanges() <-chan StateChange {
+	return m.stateChanges
 }
 
 // sysRingSize is the app-wide diagnostic ring's capacity — bigger than one
@@ -176,8 +224,9 @@ func NewManager(rootCtx context.Context, backend Backend,
 		persistCtx:  context.WithoutCancel(rootCtx),
 		supCtx:      supCtx,
 		supCancel:   supCancel,
-		sysRing:     NewRing(sysRingSize),
-		inboundPoke: make(chan struct{}, 1),
+		sysRing:      NewRing(sysRingSize),
+		inboundPoke:  make(chan struct{}, 1),
+		stateChanges: make(chan StateChange, stateChangeBuffer),
 	}
 	// Nothing to reconnect without a backend (Snapshot/Close already guard
 	// the same way) — every test that constructs a nil-backend Manager
