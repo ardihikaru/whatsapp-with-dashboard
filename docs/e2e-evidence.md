@@ -2281,3 +2281,64 @@ overridden this way.
   injected clock only); migration 0015/0016 against real MySQL (SQLite-only
   here, per CLAUDE.md — no MySQL this task may touch).
 - No secret was written into this file.
+
+## 2026-11-02 — Production deploy: session groups/alerts (d62c27f) to laptop, mini-PC, wa-phkg
+
+Live deploy of the merged `feat/session-groups-alerts` branch (main @ d62c27f)
+to all three hosts, plus wsm-mcp. Recorded here per the standing rule that
+production verification (not just local `go test`/`make e2e`) gets an entry.
+
+### Laptop
+
+- `migrate status`/`migrate up`: goose 0014 → 16 (0015 applied in 48ms, 0016
+  in 13ms).
+- `make up`.
+- `GET http://10.10.0.3:18801/api/v1/health` → 200
+  `{"connected":1,"sessions":6,"status":"ok"}`.
+- Self-reminder flag set on session `14069e6d6cd7ca92513633ee77e87453`
+  ("ardi laptop", 6285132148259).
+- Alert settings saved: logout alert and daily report both ON, daily time
+  08:00 Asia/Jakarta, target group `120363412780859023@g.us` ("Hikaru App").
+- Test message sent 08:13 WIB, status sent, from "ardi laptop".
+
+### Mini-PC
+
+- `git pull` to d62c27f.
+- `migrate status`/`migrate up`: goose 0014 → 16.
+- `make up REMOTE_DB=1`.
+- Health: 200, `connected` 0 → 2, `sessions` 9.
+- Self-reminder flag set on session `59c90033bb24b0badf408566b26fe835`
+  ("Ardi new").
+- Same alert settings/target group as the laptop.
+- First test message, 08:15 WIB: **FAILED**, sent from "no reply #3" —
+  `waxum: unexpected status 500: ... IQ request failed: received a server
+  error response: code=403, text='forbidden'` (403, not a member of the
+  target group; "Ardi new" — the self-reminder session — was still
+  reconnecting after the restart at the time). `wa_messages` row:
+  `category=session_alert`, `status=failed`. Second test message, 08:16
+  WIB: sent, from "Ardi new" (now connected). This is the exact incident
+  `fix/session-alert-sender-membership` root-causes and fixes: the
+  automatic sender fallback picked a connected-but-non-member session
+  because it had no group-membership filter. See that branch's own commit
+  for the fix and its red-then-green tests.
+
+### wa-phkg
+
+- Images built from `git archive` of d62c27f: app `ecfded288394`, migrate
+  `74a65fd996fb`. SHA256 verified on host.
+- `docker-compose.yml` backed up to `docker-compose.yml.bak.20261102`
+  before editing.
+- `migrate status`/`migrate up`: goose 0011 → 16 (0012 through 0016 all OK;
+  wa-phkg had never had 0012–0014 applied before this).
+- `docker compose up -d`.
+- `GET http://192.168.20.10:18801/api/v1/health` → 200
+  `{"connected":3,"sessions":3}`.
+- Alert settings: **NOT yet configured** — the PHKG admin credential is not
+  available to the operator tooling that did this deploy. Pending a
+  follow-up with that credential in hand.
+
+### wsm-mcp
+
+- Redeployed on clinodb via `deploy/clinodb/update.sh`: `wsm-mcp ok (0.6.0)`.
+
+No secret was written into this file.
