@@ -17,20 +17,27 @@ langkah di bawah hanya butuh `docker`, `docker compose`, dan `/bin/sh`.
 | `.env.template` | Semua variabel yang dibaca app; baris `ISI` sengaja kosong. |
 | `load-images.sh` | Verifikasi checksum → `docker load` → alias tag bertanggal. |
 | `bootstrap-db.sql.tmpl` | Satu schema + satu user least-privilege. Dipakai dua kali. |
-| `images/` | `wsm-app-20260901.tar.gz`, `wsm-migrate-20260901.tar.gz`, `waxum-0.12.2-uploaded-media.tar.gz`, `SHA256SUMS`. |
+| `images/` | `wsm-app-<stamp>.tar.gz`, `wsm-migrate-<stamp>.tar.gz`, `SHA256SUMS-<stamp>`. Sekarang HANYA app+migrate — waxum punya tag tersendiri (`ardihikaru/waxum:$WAXUM_TAG`) dan dimuat terpisah, tidak lagi ikut setiap transfer biasa. Transfer terbaru: stamp `20261102`. |
 
 ## Urutan
 
 ### 1. Muat image — bisa dikerjakan sekarang
 
+`load-images.sh` sekarang WAJIB diberi stamp — tidak ada default lagi,
+supaya stamp lama yang tertinggal di skrip tidak pernah diam-diam memuat
+build yang salah:
+
 ```sh
-./load-images.sh
+./load-images.sh 20261102
+# atau: STAMP=20261102 ./load-images.sh
 ```
 
-Cetakan terakhirnya harus memunculkan tiga image dengan ID yang identik dengan
-produksi: `d7b40a798051` (app), `7c09964d975f` (migrate), `e7c51aa15c99`
-(waxum). Kalau ID berbeda, image yang dimuat bukan build yang sedang jalan di
-produksi — jangan diteruskan.
+Cetakan terakhirnya harus memunculkan image dengan ID yang identik dengan
+produksi. Transfer `20261102`: `ecfded288394` (app), `74a65fd996fb`
+(migrate) — diverifikasi di host 2026-11-02. waxum tidak lagi ikut transfer
+ini; ID-nya dicek terpisah kalau image waxum itu sendiri yang berubah. Kalau
+ID berbeda, image yang dimuat bukan build yang sedang jalan di produksi —
+jangan diteruskan.
 
 ### 2. Isi `.env` — SUDAH LENGKAP 2026-09-01, DIPINDAH KE INFRA INTERNAL 2026-09-02
 
@@ -131,7 +138,15 @@ Riwayat: sampai 2026-09-02 ini adalah `wa_dashboard_phkg` dan `waxum_phkg` di
 `bootstrap-db.sql.tmpl`. Keduanya sengaja **tidak dihapus** setelah cutover —
 itu yang membuat rollback cukup `cp .env.bak-20260902 .env && docker compose up -d`.
 
-### 4. Migrasi schema — SUDAH DILAKUKAN, versi 6 (diulang 2026-09-02 di `.15`)
+### 4. Migrasi schema — SUDAH DILAKUKAN, versi 16 (2026-11-02; sebelumnya baru versi 11)
+
+**2026-11-02**: host ini ketinggalan jauh sebelum dijalankan — `.env`/DB-nya
+masih di goose versi **0011**, artinya migrasi 0012–0014 (yang sudah lama ada
+di `main`) belum pernah diterapkan di sini sama sekali, dan build app yang
+berjalan (`phkg-20261026`) sudah lama hidup tanpa fitur-fitur yang
+bergantung padanya. `migrate up` hari itu menerapkan 0012 sampai 0016
+sekaligus (semuanya OK) sampai ke versi 16, sejalan dengan image app/migrate
+`phkg-20261102` di atas.
 
 Wajib sebelum app dipakai. Binary-nya tidak pernah migrate saat boot: perubahan
 schema adalah tindakan operator, bukan efek samping start-up dari service yang
@@ -152,8 +167,8 @@ justru datang lebih dulu daripada MinIO. Image `migrate` sendiri tidak butuh
 apa pun selain `WSM_MYSQL_*`, jadi jalankan langsung:
 
 ```sh
-docker run --rm --env-file .env whatsapp-with-dashboard-migrate:phkg-20260901 status
-docker run --rm --env-file .env whatsapp-with-dashboard-migrate:phkg-20260901 up
+docker run --rm --env-file .env whatsapp-with-dashboard-migrate:phkg-20261102 status
+docker run --rm --env-file .env whatsapp-with-dashboard-migrate:phkg-20261102 up
 ```
 
 `migrations/*.sql` tertanam di dalam image itu — tidak ada file SQL yang perlu

@@ -51,13 +51,15 @@ volumes:
 
 services:
   app:
-    # 20260902 while `migrate` below stays on 20260901, deliberately: the two
-    # stamps name two different builds, and only this one was rebuilt. The
-    # 0902 build carries the corrected session-delete confirmation (the old
-    # one promised an unlink waxum cannot perform); nothing under migrations/
-    # or Dockerfile.migrate changed, so re-stamping the migrate image would
-    # claim a rebuild that never happened.
-    image: whatsapp-with-dashboard:phkg-20261022
+    # phkg-20261102: built from a `git archive` of d62c27f (session groups,
+    # self-reminder, session alerts, the Edit/Delete dialog redesign) —
+    # see docs/e2e-evidence.md's 2026-11-02 entry. `migrate` below carries
+    # the SAME stamp this time, deliberately: migrations/0012-0016 landed
+    # in that same range of commits, so both images genuinely come from
+    # one build, unlike the earlier app-only 20260902/20260901 split this
+    # comment used to describe (a rebuild of app alone, with no migration
+    # change behind it).
+    image: whatsapp-with-dashboard:phkg-20261102
     restart: unless-stopped
 
     # HARD SINGLETON. One device websocket, one store. Two replicas against one
@@ -196,7 +198,7 @@ services:
   #   docker compose --profile migrate run --rm migrate status
   migrate:
     profiles: ["migrate"]
-    image: whatsapp-with-dashboard-migrate:phkg-20261005
+    image: whatsapp-with-dashboard-migrate:phkg-20261102
     env_file:
       - .env
     environment:

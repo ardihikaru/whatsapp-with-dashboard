@@ -245,3 +245,26 @@ func TestPHKGBundleIsComplete(t *testing.T) {
 		}
 	}
 }
+
+// load-images.sh used to hardcode STAMP=20260901 — a silent way to reload a
+// stale build while believing a new one was loaded, since the script would
+// still "succeed" against whatever old tars happened to be in images/. It
+// also used to load a waxum tar.gz on every transfer even though waxum has
+// its own pinned tag and is not part of a normal app/migrate transfer. See
+// deploy/phkg/load-images.sh's own header comment for the full story.
+func TestPHKGLoadImagesRequiresAnExplicitStampAndLoadsOnlyAppAndMigrate(t *testing.T) {
+	src := composeSource(t, "deploy/phkg/load-images.sh")
+	if regexp.MustCompile(`(?m)^STAMP=\d+\s*$`).MatchString(src) {
+		t.Error("load-images.sh hardcodes a numeric STAMP default — a stale value here " +
+			"silently reloads an old build instead of failing; STAMP must come from an " +
+			"argument or the environment with no numeric fallback")
+	}
+	if regexp.MustCompile(`waxum[-\w.]*\.tar\.gz`).MatchString(src) {
+		t.Error("load-images.sh still references a waxum *.tar.gz filename — waxum has its own " +
+			"pinned tag and is no longer part of a normal app/migrate transfer")
+	}
+	if !strings.Contains(src, "SHA256SUMS-$STAMP") && !strings.Contains(src, `SHA256SUMS-"$STAMP"`) {
+		t.Error(`load-images.sh does not checksum against a stamp-named "SHA256SUMS-<stamp>" ` +
+			"file — the checksum file travels under the same stamp as the tars it covers")
+	}
+}
