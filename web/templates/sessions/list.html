@@ -4,12 +4,13 @@
   <a class="btn btn-primary" href="{{u "/sessions/new"}}">New session</a>
 </div>
 <p>Automatic routing sends through the connected session with the lowest queue,
-   choosing only among sessions with NO group code and skipping any flagged
+   choosing only among sessions with NO groups and skipping any flagged
    Master (a caller can opt in per request with <code>allow_master</code>, or
-   pin to the master with <code>master_only</code>). A session WITH a group
-   code is reachable only by a request naming that same <code>group_code</code>,
-   so setting one takes the session out of default routing. Direct sends
-   naming a session by id are unaffected by both.</p>
+   pin to the master with <code>master_only</code>). A session may belong to
+   several routing groups: one in groups X and Y is reachable by a request
+   naming X <em>or</em> Y, so adding any group takes the session out of the
+   default (ungrouped) pool. A session with no groups stays in that default
+   pool. Direct sends naming a session by id are unaffected by either.</p>
 <!-- Reconciler verdict (wa.Manager.Reconcile): empty unless WSM and the
      backend disagree past the grace period. Outside the polled tbody, like
      the group editor below, and polled on its own slower cadence. -->

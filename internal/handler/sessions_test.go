@@ -468,3 +468,34 @@ func TestEverySessionRowOffersDeleteConfirmRegardlessOfState(t *testing.T) {
 		}
 	}
 }
+
+// TestTheSessionsPageExplainsMultiGroupRoutingNotJustASingleCode pins the
+// intro paragraph's wording after 0015's multi-group model: the old text
+// ("A session WITH a group code is reachable only by a request naming
+// that same group_code") described the single-group era and became
+// actively misleading once a session could carry several groups at once
+// — it read as "only one code can ever reach it" when in fact a session
+// in groups X and Y is reachable by a request naming EITHER.
+func TestTheSessionsPageExplainsMultiGroupRoutingNotJustASingleCode(t *testing.T) {
+	webFS, err := fs.Sub(wsm.FS, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rend, err := renderer.New(webFS, "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	rend.RenderPage(rec, "sessions", sessionsPageData{})
+	body := rec.Body.String()
+
+	if strings.Contains(body, "A session WITH a group code is reachable only by a request naming that same") {
+		t.Errorf("sessions page still describes the single-group-code era; body:\n%s", body)
+	}
+	for _, want := range []string{"several routing groups", "reachable by a request\n   naming X", "no groups stays in that default\n   pool"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("sessions page intro is missing %q (multi-group wording); body:\n%s", want, body)
+		}
+	}
+}
