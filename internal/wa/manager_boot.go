@@ -53,8 +53,19 @@ func (m *Manager) StartAll(ctx context.Context) error {
 			// group_code silently returns every scoped handset in the
 			// fleet to the default automatic-routing pool on every
 			// restart.
-			groupCode: row.GroupCode,
+			// isSelfReminder hydrates from the persisted flag — same
+			// fail-open-if-missing reasoning as isMaster above: without
+			// this, the flag survives in the database but every restart
+			// silently un-flags the session in memory, so the next
+			// logged-out/daily alert would fall through to the "any
+			// connected session" fallback instead of the configured one.
+			isSelfReminder: row.IsSelfReminder,
 		}
+		// groupCodes hydrates RAW from wa_session_groups — deliberately NOT
+		// re-normalized here, same fail-CLOSED reasoning the groupCode
+		// comment above already gives for the single-column case: a
+		// hand-edited row stays visible and simply matches no Route.
+		s.groupCodes = append([]string(nil), row.GroupCodes...)
 		switch {
 		case row.JID == "":
 			s.state = StateNew

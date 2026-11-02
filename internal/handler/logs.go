@@ -85,7 +85,7 @@ func (h *handlers) GetLogRows(w http.ResponseWriter, r *http.Request) {
 // be able to filter the log down to it.
 var logCategories = []string{
 	message.CategoryOTP, message.CategoryNotification, message.CategoryAlert, message.CategoryManual,
-	message.CategorySelfConvo,
+	message.CategorySelfConvo, message.CategorySessionAlert,
 }
 
 // parseLogFilter reads the filter from the query string. Unknown values are simply

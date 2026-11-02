@@ -47,22 +47,26 @@ type rowSession struct {
 	StalledReason string
 	IsMaster      bool
 	GroupCode     string
+	GroupCodes    []string
+	SelfReminder  bool
 }
 
 type rowsData struct{ Sessions []rowSession }
 
 func TestPartialURLsCarryTheMount(t *testing.T) {
-	data := rowsData{Sessions: []rowSession{{ID: "abc", Name: "Kasir", Phone: "628", JID: "628@s", State: "connected", IsMaster: true, GroupCode: "kemang"}}}
+	data := rowsData{Sessions: []rowSession{{ID: "abc", Name: "Kasir", Phone: "628", JID: "628@s", State: "connected", IsMaster: true, GroupCode: "kemang", GroupCodes: []string{"kemang"}}}}
 
 	mounted := renderPartial(t, "/wsm", "session_rows", data)
 	if !strings.Contains(mounted, `/wsm/sessions/abc/`) {
 		t.Errorf("mounted session_rows has no /wsm/sessions/abc/ URL:\n%s", mounted)
 	}
-	// The master toggle is a sixth URL sharing this same prefixing risk —
-	// a fixture with IsMaster:true is required to even reach it, since it
-	// only renders on the {{if .IsMaster}} branch.
-	if !strings.Contains(mounted, `/wsm/sessions/abc/master`) {
-		t.Errorf("mounted session_rows has no /wsm/sessions/abc/master URL:\n%s", mounted)
+	// The Edit dialog's URL is another one sharing this same prefixing
+	// risk, reachable from every row regardless of IsMaster.
+	if !strings.Contains(mounted, `/wsm/sessions/abc/edit`) {
+		t.Errorf("mounted session_rows has no /wsm/sessions/abc/edit URL:\n%s", mounted)
+	}
+	if !strings.Contains(mounted, `/wsm/sessions/abc/delete-confirm`) {
+		t.Errorf("mounted session_rows has no /wsm/sessions/abc/delete-confirm URL:\n%s", mounted)
 	}
 	if !strings.Contains(mounted, `badge-master`) {
 		t.Errorf("mounted session_rows dropped the master badge:\n%s", mounted)

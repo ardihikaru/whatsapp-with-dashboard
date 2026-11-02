@@ -492,6 +492,29 @@ var schema = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_wa_status_schedules_state_fire
 	  ON wa_status_schedules(state, next_fire_at)`,
+	// 0015: multiple routing groups per session. See that migration's
+	// header — wa_sessions.group_code stays as the cached first group;
+	// this table is the full set.
+	`CREATE TABLE IF NOT EXISTS wa_session_groups (
+	  session_id  TEXT NOT NULL,
+	  group_code  TEXT NOT NULL,
+	  created_at  TEXT NOT NULL,
+	  PRIMARY KEY (session_id, group_code)
+	)`,
+	// 0016: operator-configurable session alerting (logout alert + daily
+	// report). Single row, id always 1 — see that migration's header.
+	`CREATE TABLE IF NOT EXISTS wa_session_alert_settings (
+	  id                    INTEGER PRIMARY KEY,
+	  logout_alert_enabled  INTEGER NOT NULL DEFAULT 0,
+	  daily_report_enabled  INTEGER NOT NULL DEFAULT 0,
+	  daily_time            TEXT NOT NULL DEFAULT '08:00',
+	  timezone              TEXT NOT NULL DEFAULT 'Asia/Jakarta',
+	  target_group_jid      TEXT NOT NULL DEFAULT '',
+	  target_group_name     TEXT NOT NULL DEFAULT '',
+	  sender_session_id     TEXT NOT NULL DEFAULT '',
+	  last_daily_date       TEXT NOT NULL DEFAULT '',
+	  updated_at            TEXT NOT NULL
+	)`,
 }
 
 // EnsureSchema creates the app tables and index if missing, inside one
@@ -519,6 +542,10 @@ func EnsureSchema(ctx context.Context, pool *sql.DB) error {
 	}
 	// 0009 routing group code, same reason.
 	if err := ensureColumn(ctx, pool, "wa_sessions", "group_code", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// 0015 self-reminder flag, same reason.
+	if err := ensureColumn(ctx, pool, "wa_sessions", "is_self_reminder", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	// 0002 attribution columns, for a SQLite dev DB created before they existed.

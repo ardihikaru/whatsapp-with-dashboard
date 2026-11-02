@@ -75,6 +75,11 @@ const (
 	// people for a while", distinct from iconSend's paper-plane (one direct
 	// message to one destination): a WhatsApp status/story is neither.
 	iconStatus template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm0 2a8 8 0 1 1 0 16 8 8 0 0 1 0-16zm-1 3h2v5h-2V7zm0 7h2v2h-2v-2z"/></svg>`
+	// a bell glyph — "something will page an operator", distinct from
+	// every other Admin icon: this is the one page that configures an
+	// OUTBOUND notification about the gateway itself, not a feature of
+	// the gateway's own messaging.
+	iconAlerts template.HTML = `<svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" aria-hidden="true"><path d="M12 2a6 6 0 0 0-6 6v3.6c0 .9-.4 1.8-1.1 2.4L4 15h16l-.9-1c-.7-.6-1.1-1.5-1.1-2.4V8a6 6 0 0 0-6-6zm0 20a2.5 2.5 0 0 0 2.5-2.5h-5A2.5 2.5 0 0 0 12 22z"/></svg>`
 )
 
 // platformLink is the sidebar footer's way back out to the platform backoffice.
@@ -122,6 +127,7 @@ func buildNav(basePath, currentPath string) []NavSection {
 		{Subheader: "Admin", Items: []NavItem{
 			{Title: "API Clients", Path: "/admin/api-clients", Icon: iconClients},
 			{Title: "System Log", Path: "/system-log", Icon: iconSystemLog},
+			{Title: "Session Alerts", Path: "/settings/alerts", Icon: iconAlerts},
 		}},
 		{Subheader: "Docs", Items: []NavItem{
 			{Title: "API Docs", Path: "/docs", Icon: iconDocs},

@@ -42,13 +42,42 @@ type Route struct {
 //     AllowMaster; otherwise AllowMaster widens the pool to include masters,
 //     and its absence excludes them.
 func EligibleForRoute(snap Snapshot, rt Route) bool {
-	if !snap.Connected || snap.GroupCode != rt.GroupCode {
+	if !snap.Connected || !snap.InGroupScope(rt.GroupCode) {
 		return false
 	}
 	if rt.MasterOnly {
 		return snap.IsMaster
 	}
 	return rt.AllowMaster || !snap.IsMaster
+}
+
+// InGroupScope reports whether snap is reachable by a Route carrying this
+// group code — "" (the ungrouped scope) matches only a session with NO
+// groups at all; a named code matches when it is ANY of the session's
+// groups, not just the first (Snapshot.GroupCode). This is the single
+// predicate EligibleForRoute's group check and every handler-side
+// diagnostic (api.go's noGroupRouteMessage) must agree on, so there is only
+// one place "is this session in this scope" is decided.
+func (snap Snapshot) InGroupScope(code string) bool {
+	groups := snap.GroupCodes
+	// Fall back to the single-code field when GroupCodes was never
+	// populated — every snapshot taken through ManagedSession.Snapshot
+	// sets both together (GroupCode is derived FROM GroupCodes there), but
+	// a literal Snapshot{GroupCode: "alpha"} built by older callers/tests
+	// never got GroupCodes to begin with. This keeps that single-field
+	// shape meaningful rather than silently always-ungrouped.
+	if len(groups) == 0 && snap.GroupCode != "" {
+		groups = []string{snap.GroupCode}
+	}
+	if code == "" {
+		return len(groups) == 0
+	}
+	for _, g := range groups {
+		if g == code {
+			return true
+		}
+	}
+	return false
 }
 
 // SelectForRoute is the general-purpose automatic pick: it filters every

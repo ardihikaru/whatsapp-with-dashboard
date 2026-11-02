@@ -68,6 +68,13 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("POST "+bp+"/admin/api-clients/{id}/rotate", page(http.HandlerFunc(h.PostAPIClientRotate)))
 	mux.Handle("POST "+bp+"/admin/api-clients/{id}/delete", page(http.HandlerFunc(h.PostAPIClientDelete)))
 
+	// Session alerts settings (internal/sessionalert) — logged-out alert
+	// and daily non-connected report configuration. Cookie-only page
+	// routes; no /api/v1 route, so no MCP tool is needed (per the plan).
+	mux.Handle("GET "+bp+"/settings/alerts", page(http.HandlerFunc(h.GetSettingsAlerts)))
+	mux.Handle("POST "+bp+"/settings/alerts", page(http.HandlerFunc(h.PostSettingsAlerts)))
+	mux.Handle("POST "+bp+"/settings/alerts/test", page(http.HandlerFunc(h.PostSettingsAlertsTest)))
+
 	// Sessions + pairing pages and partials.
 	mux.Handle("GET "+bp+"/sessions", page(http.HandlerFunc(h.GetSessions)))
 	mux.Handle("GET "+bp+"/sessions/rows", page(http.HandlerFunc(h.GetSessionRows)))
@@ -79,9 +86,12 @@ func (h *handlers) mountUI(mux *http.ServeMux) {
 	mux.Handle("POST "+bp+"/sessions/{id}/deactivate", page(http.HandlerFunc(h.PostSessionDeactivate)))
 	mux.Handle("POST "+bp+"/sessions/{id}/master", page(http.HandlerFunc(h.PostSessionSetMaster)))
 	mux.Handle("POST "+bp+"/sessions/{id}/group-code", page(http.HandlerFunc(h.PostSessionSetGroupCode)))
-	mux.Handle("GET "+bp+"/sessions/{id}/group-code/edit", page(http.HandlerFunc(h.GetSessionGroupCodeEditor)))
-	mux.Handle("GET "+bp+"/sessions/{id}/name/edit", page(http.HandlerFunc(h.GetSessionNameEditor)))
-	mux.Handle("POST "+bp+"/sessions/{id}/name", page(http.HandlerFunc(h.PostSessionSetName)))
+	// The single Edit session dialog (Part 3) — replaces the old separate
+	// name/group-code list editors above, which the ops page's own static
+	// card (PostSessionSetGroupCode) does not need and keeps.
+	mux.Handle("GET "+bp+"/sessions/{id}/edit", page(http.HandlerFunc(h.GetSessionEdit)))
+	mux.Handle("POST "+bp+"/sessions/{id}/edit", page(http.HandlerFunc(h.PostSessionEdit)))
+	mux.Handle("GET "+bp+"/sessions/{id}/delete-confirm", page(http.HandlerFunc(h.GetSessionDeleteConfirm)))
 	mux.Handle("POST "+bp+"/sessions/{id}/delete", page(http.HandlerFunc(h.PostSessionDelete)))
 	mux.Handle("GET "+bp+"/sessions/{id}/pair", page(http.HandlerFunc(h.GetPair)))
 	mux.Handle("POST "+bp+"/sessions/{id}/pair/start", page(http.HandlerFunc(h.PostPairStart)))

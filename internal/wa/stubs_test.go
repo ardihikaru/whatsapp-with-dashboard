@@ -11,20 +11,23 @@ import (
 
 // stubSessions records every persistence call the manager makes.
 type stubSessions struct {
-	mu       sync.Mutex
-	rows     []wasession.Session
-	statuses map[string][]string
-	active   map[string][]bool
-	master   map[string][]bool
-	groups   map[string][]string
-	names    map[string][]string
-	deleted  []string
+	mu        sync.Mutex
+	rows      []wasession.Session
+	statuses  map[string][]string
+	active    map[string][]bool
+	master    map[string][]bool
+	groups    map[string][]string
+	names     map[string][]string
+	deleted   []string
+	groupSets map[string][][]string
+	selfRem   map[string][]bool
 }
 
 func newStubSessions(rows ...wasession.Session) *stubSessions {
 	return &stubSessions{rows: rows,
 		statuses: map[string][]string{}, active: map[string][]bool{}, master: map[string][]bool{},
-		groups: map[string][]string{}, names: map[string][]string{}}
+		groups: map[string][]string{}, names: map[string][]string{},
+		groupSets: map[string][][]string{}, selfRem: map[string][]bool{}}
 }
 
 func (s *stubSessions) All(context.Context) ([]wasession.Session, error) {
@@ -72,6 +75,50 @@ func (s *stubSessions) SetGroupCode(_ context.Context, id, code string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.groups[id] = append(s.groups[id], code)
+	return nil
+}
+
+func (s *stubSessions) SetGroupCodes(_ context.Context, id string, codes []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cp := append([]string(nil), codes...)
+	s.groupSets[id] = append(s.groupSets[id], cp)
+	for i := range s.rows {
+		if s.rows[i].ID == id {
+			s.rows[i].GroupCodes = cp
+			if len(cp) > 0 {
+				s.rows[i].GroupCode = cp[0]
+			} else {
+				s.rows[i].GroupCode = ""
+			}
+		}
+	}
+	return nil
+}
+
+func (s *stubSessions) GroupCodes(context.Context) (map[string][]string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string][]string{}
+	for _, row := range s.rows {
+		if len(row.GroupCodes) > 0 {
+			out[row.ID] = append([]string(nil), row.GroupCodes...)
+		}
+	}
+	return out, nil
+}
+
+func (s *stubSessions) SetSelfReminder(_ context.Context, id string, on bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.selfRem[id] = append(s.selfRem[id], on)
+	for i := range s.rows {
+		if s.rows[i].ID == id {
+			s.rows[i].IsSelfReminder = on
+		} else if on {
+			s.rows[i].IsSelfReminder = false
+		}
+	}
 	return nil
 }
 

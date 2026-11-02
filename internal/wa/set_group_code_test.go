@@ -14,7 +14,7 @@ func TestSetGroupCodeRejectsAnInvalidCodeWithoutTouchingState(t *testing.T) {
 	repo := newStubSessions()
 	m := newTestManager(repo, newStubMsgs())
 	s := &ManagedSession{ID: "s1", name: "s1", Phone: "628120000",
-		mgr: m, state: StateDisconnected, groupCode: "alpha", events: NewRing(ringSize)}
+		mgr: m, state: StateDisconnected, groupCodes: []string{"alpha"}, events: NewRing(ringSize)}
 	m.sessions[s.ID] = s
 
 	err := s.SetGroupCode(context.Background(), "kemang selatan")
@@ -27,7 +27,7 @@ func TestSetGroupCodeRejectsAnInvalidCodeWithoutTouchingState(t *testing.T) {
 	if got := s.Snapshot().GroupCode; got != "alpha" {
 		t.Fatalf("Snapshot().GroupCode = %q after a rejected SetGroupCode, want unchanged %q", got, "alpha")
 	}
-	if calls := repo.groups[s.ID]; len(calls) != 0 {
-		t.Fatalf("repo.SetGroupCode called %d time(s), want 0 — an invalid code must never reach the repository", len(calls))
+	if calls := repo.groupSets[s.ID]; len(calls) != 0 {
+		t.Fatalf("repo.SetGroupCodes called %d time(s), want 0 — an invalid code must never reach the repository", len(calls))
 	}
 }

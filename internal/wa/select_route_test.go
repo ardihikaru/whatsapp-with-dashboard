@@ -27,8 +27,12 @@ func routeTestManager(t *testing.T, specs ...routeSpec) *Manager {
 		if sp.connected {
 			state = StateConnected
 		}
+		var codes []string
+		if sp.groupCode != "" {
+			codes = []string{sp.groupCode}
+		}
 		m.sessions[sp.id] = &ManagedSession{ID: sp.id, name: sp.id, Phone: "628120000",
-			mgr: m, state: state, isMaster: sp.isMaster, groupCode: sp.groupCode, events: NewRing(ringSize)}
+			mgr: m, state: state, isMaster: sp.isMaster, groupCodes: codes, events: NewRing(ringSize)}
 	}
 	return m
 }

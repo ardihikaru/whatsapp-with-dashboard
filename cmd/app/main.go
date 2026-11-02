@@ -8,13 +8,19 @@
 // → repos → wa.Manager + boot reconciliation → self-convo runner AND planner
 // (both nil unless WSM_SELF_CONVO_ENABLED=true; startSelfConvo, selfconvo.go)
 // → status-schedules scheduler (always on; startStatusSchedules,
-// statussched.go) → HTTP. Shutdown order is a hard requirement:
-// server.Shutdown → statusScheduler.Stop → planner.Stop (if non-nil) → runner.Stop (if non-nil) → manager.Close
+// statussched.go) → session-alert service (always on; startSessionAlert,
+// sessionalert.go — started AFTER StartAll so it never sees boot restore's
+// direct state assignments, only real setState transitions) → HTTP.
+// Shutdown order is a hard requirement:
+// server.Shutdown → statusScheduler.Stop → sessionAlert.Stop → planner.Stop (if non-nil) → runner.Stop (if non-nil) → manager.Close
 // (which now also closes the backend) → the WA backend's own store, if it
 // opened one → pool.Close. The planner stops FIRST, before the runner,
 // because the planner's only effect is calling the runner's own
 // StartOccurrence — stopping it first guarantees no new occurrence can be
-// materialised while the runner is already winding down.
+// materialised while the runner is already winding down. sessionAlert stops
+// before either of them (it reads state changes and sessions, writes
+// nothing they depend on) but after statusScheduler, matching its position
+// in the startup order above.
 package main
 
 import (
@@ -44,6 +50,7 @@ import (
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/inbound"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/knowngroup"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/message"
+	sessionalertdomain "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/sessionalert"
 	statusschedule "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/statusschedule"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/wasession"
 	"github.com/ardihikaru/whatsapp-with-dashboard/internal/handler"
@@ -183,6 +190,7 @@ func run() error {
 	contactRepo := contact.NewRepository(appDB)
 	groupBroadcastRepo := gb.NewRepository(appDB)
 	statusScheduleRepo := statusschedule.NewRepository(appDB)
+	sessionAlertRepo := sessionalertdomain.NewRepository(appDB)
 	// inboundRepo is nil-able on Manager (see Manager.inbound's doc
 	// comment) but always real in production — WSM_INBOUND_ENABLED only
 	// gates whether internal/wa's pump actually polls waxum for it, not
@@ -220,6 +228,10 @@ func run() error {
 	}
 	statusScheduler := startStatusSchedules(ctx, statusScheduleRepo, manager, contactRepo, objectStore,
 		statusTextGenerator(aiClient, cfg.CodexCLIModel), cfg.GroupBroadcastAIDeadline)
+
+	// Logged-out alert + daily non-connected report: always on, no env
+	// flag — see startSessionAlert's doc comment (cmd/app/sessionalert.go).
+	sessionAlert := startSessionAlert(ctx, sessionAlertRepo, manager)
 
 	webFS, err := fs.Sub(wsm.FS, "web")
 	if err != nil {
@@ -266,6 +278,8 @@ func run() error {
 			Contacts:               contactRepo,
 			GroupBroadcast:         groupBroadcastRepo,
 			StatusSchedules:        statusScheduleRepo,
+			SessionAlertSettings:   sessionAlertRepo,
+			SessionAlert:           sessionAlert,
 			StatusAIAvailable:      aiClient != nil,
 			GroupBroadcastRunner:   gbRunner,
 			GroupBroadcastEnabled:  cfg.GroupBroadcastEnabled,
@@ -310,6 +324,7 @@ func run() error {
 	select {
 	case err := <-errCh:
 		statusScheduler.Stop()
+		sessionAlert.Stop()
 		if gbPlanner != nil {
 			gbPlanner.Stop()
 		}
@@ -331,6 +346,7 @@ func run() error {
 	defer cancel()
 	err = server.Shutdown(shutdownCtx) // 1) stop accepting / drain HTTP
 	statusScheduler.Stop()             // 1b) join the status-schedule loop; an in-flight post finishes first
+	sessionAlert.Stop()                // 1c) join the session-alert loop
 	if gbPlanner != nil {
 		gbPlanner.Stop() // 2) join the group-broadcast planner loop, same ordering as the self-convo planner below
 	}

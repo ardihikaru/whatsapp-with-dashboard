@@ -89,15 +89,29 @@ type ManagedSession struct {
 	// socket, or active.
 	isMaster bool
 
-	// groupCode mirrors wa_sessions.group_code: a ROUTING SCOPE parallel to
-	// isMaster above, not a second exclusion flag. "" is the ungrouped
-	// default pool; a non-empty code removes this session from default
-	// automatic selection (load_balance.go's EligibleForRoute) entirely —
-	// including a global master_only pick — and it becomes reachable only
-	// by a Route naming this same code. Set by SetGroupCode below, which
-	// touches only this field and its persisted column — never state, the
-	// socket, or active — exactly like SetMaster.
-	groupCode string
+	// groupCodes mirrors wa_session_groups (0015) — the FULL routing-scope
+	// set, parallel to isMaster above and not a second exclusion flag.
+	// nil/empty is the ungrouped default pool; a non-empty set removes this
+	// session from default automatic selection (load_balance.go's
+	// EligibleForRoute) entirely — including a global master_only pick —
+	// and it becomes reachable by a Route naming ANY of these codes, not
+	// just the first. Always kept sorted and de-duplicated by
+	// SetGroupCodes, so Snapshot's "first code" projection (see
+	// Snapshot.GroupCode) is deterministic. Set by SetGroupCode/
+	// SetGroupCodes below, which touch only this field and its persisted
+	// column(s) — never state, the socket, or active — exactly like
+	// SetMaster.
+	groupCodes []string
+
+	// isSelfReminder mirrors wa_sessions.is_self_reminder (0015): the one
+	// session, per host, every alert this app sends (internal/
+	// sessionalert) defaults to posting FROM. Exclusivity across every
+	// ManagedSession is enforced by Manager.SetSelfReminder, which is the
+	// ONLY writer of this field — never set directly here, the same
+	// division of labour isMaster has with SetMaster, except the "clear
+	// every OTHER row" step requires the manager's map, not just this
+	// session.
+	isSelfReminder bool
 
 	// stalled/stalledReason mark "needs operator attention" — the
 	// reconnect supervisor (reconnect.go) has called Backend.Connect
@@ -132,6 +146,11 @@ type Snapshot struct {
 	JID             string
 	State           State
 	Connected       bool
+	// Active mirrors ManagedSession.active — OPERATOR INTENT (see that
+	// field's doc comment), not live connectivity. internal/sessionalert's
+	// daily non-connected report reads this to mark a session
+	// "(deactivated)" rather than reporting it as an unexplained outage.
+	Active          bool
 	QueueLen        int
 	CreatedAt       time.Time
 	LastSelectedAt  *time.Time
@@ -149,10 +168,18 @@ type Snapshot struct {
 	// comment. Read by load_balance.go's exclusion predicate.
 	IsMaster bool
 
-	// GroupCode mirrors ManagedSession.groupCode — see that field's doc
-	// comment. Read by load_balance.go's EligibleForRoute as the scope
-	// match.
+	// GroupCode is the FIRST (lexically) code in GroupCodes below, or "" —
+	// kept for every existing template/API consumer that reads a single
+	// code (session_rows.html, apiSession.GroupCode). Prefer GroupCodes for
+	// anything that must see the whole set.
 	GroupCode string
+	// GroupCodes mirrors ManagedSession.groupCodes — see that field's doc
+	// comment. Read by load_balance.go's EligibleForRoute as the scope
+	// match (membership, not equality).
+	GroupCodes []string
+	// SelfReminder mirrors ManagedSession.isSelfReminder — see that
+	// field's doc comment.
+	SelfReminder bool
 }
 
 // Snapshot copies the live status. Connected asks the backend's Live (a
@@ -170,7 +197,10 @@ func (s *ManagedSession) Snapshot() Snapshot {
 		Stalled:        s.stalled,
 		StalledReason:  s.stalledReason,
 		IsMaster:       s.isMaster,
-		GroupCode:      s.groupCode,
+		Active:         s.active,
+		GroupCode:      firstGroupCode(s.groupCodes),
+		GroupCodes:     append([]string(nil), s.groupCodes...),
+		SelfReminder:   s.isSelfReminder,
 	}
 	if !s.jid.IsEmpty() {
 		snap.JID = s.jid.String()
@@ -229,6 +259,9 @@ func (s *ManagedSession) setState(st State) {
 	if err := s.mgr.repo.UpdateStatus(s.mgr.persistCtx, s.ID, string(st)); err != nil {
 		slog.Warn("persist status", "session", s.ID, "state", st, "err", err)
 	}
+	s.mgr.publishStateChange(StateChange{
+		ID: s.ID, Name: s.Name(), Phone: s.Phone, From: old, To: st, At: time.Now(),
+	})
 }
 
 // ensureCtxLocked lazily establishes the per-session ctx (child of
@@ -328,27 +361,50 @@ func (s *ManagedSession) SetMaster(ctx context.Context, master bool) error {
 	return nil
 }
 
-// SetGroupCode assigns or clears this session's routing scope (see
-// groupCode's doc comment). Normalization happens FIRST, before any state or
-// DB write — an invalid code returns a *ValidationError and leaves the
-// session exactly as it was, the same contract manager_crud.go's session
-// creation already relies on for phone/name validation. Like SetMaster this
-// never touches state, the socket, or active.
+// SetGroupCode assigns or clears this session's routing scope to a SINGLE
+// code — a thin wrapper over SetGroupCodes kept for every existing caller
+// that only ever dealt with one (PostSessionSetGroupCode's list/ops
+// editors, PutAPISessionGroupCode, PostAPISessions). "" clears every group.
 func (s *ManagedSession) SetGroupCode(ctx context.Context, code string) error {
-	normalized, err := NormalizeGroupCode(code)
-	if err != nil {
-		return &ValidationError{Field: "group_code", Msg: err.Error()}
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return s.SetGroupCodes(ctx, nil)
 	}
+	return s.SetGroupCodes(ctx, []string{code})
+}
+
+// firstGroupCode returns codes[0], or "" for an empty set — codes is
+// assumed already sorted (SetGroupCodes' contract), so this is also the
+// lexically-first code, matching Snapshot.GroupCode's doc comment.
+func firstGroupCode(codes []string) string {
+	if len(codes) == 0 {
+		return ""
+	}
+	return codes[0]
+}
+
+// SetGroupCodes assigns or clears this session's FULL routing-scope set
+// (see groupCodes' doc comment). Every code is normalized and de-duplicated
+// FIRST, before any state or DB write — the same "validate everything, then
+// change nothing on failure" contract SetGroupCode's callers already rely
+// on. An empty/nil codes clears every group (back to the ungrouped pool).
+// Like SetMaster this never touches state, the socket, or active.
+func (s *ManagedSession) SetGroupCodes(ctx context.Context, codes []string) error {
+	normalized, err := NormalizeGroupCodes(codes)
+	if err != nil {
+		return &ValidationError{Field: "group_codes", Msg: err.Error()}
+	}
+
 	s.mu.Lock()
-	s.groupCode = normalized
+	s.groupCodes = normalized
 	s.mu.Unlock()
-	if err := s.mgr.repo.SetGroupCode(s.mgr.persistCtx, s.ID, normalized); err != nil {
+	if err := s.mgr.repo.SetGroupCodes(s.mgr.persistCtx, s.ID, normalized); err != nil {
 		return err
 	}
-	if normalized != "" {
-		s.ring(fmt.Sprintf("assigned to routing group %q — excluded from ungrouped automatic routing", normalized))
+	if len(normalized) > 0 {
+		s.ring(fmt.Sprintf("routing groups set to %s — excluded from ungrouped automatic routing", strings.Join(normalized, ", ")))
 	} else {
-		s.ring("routing group cleared — back in the ungrouped automatic routing pool")
+		s.ring("routing groups cleared — back in the ungrouped automatic routing pool")
 	}
 	return nil
 }
@@ -370,12 +426,9 @@ func (s *ManagedSession) Name() string {
 // untouched. waxum keeps the name it was given at CreateSession: it has no
 // rename call, and WSM's name is purely cosmetic there.
 func (s *ManagedSession) SetName(ctx context.Context, name string) error {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return &ValidationError{Field: "name", Msg: "name is required"}
-	}
-	if utf8.RuneCountInString(name) > maxSessionNameLen {
-		return &ValidationError{Field: "name", Msg: fmt.Sprintf("name must be at most %d characters", maxSessionNameLen)}
+	name, err := ValidateSessionName(name)
+	if err != nil {
+		return err
 	}
 	if err := s.mgr.repo.SetName(s.mgr.persistCtx, s.ID, name); err != nil {
 		return err
@@ -384,6 +437,23 @@ func (s *ManagedSession) SetName(ctx context.Context, name string) error {
 	s.name = name
 	s.nameMu.Unlock()
 	return nil
+}
+
+// ValidateSessionName is the pure check SetName applies — trimmed,
+// non-empty, at most maxSessionNameLen runes — exported so a caller that
+// must validate several fields TOGETHER before writing any of them (the
+// /sessions edit dialog's PostSessionEdit, internal/handler) can check this
+// one without a side effect, the same role NormalizeGroupCodes plays for
+// the group-code half of that same form.
+func ValidateSessionName(name string) (string, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return "", &ValidationError{Field: "name", Msg: "name is required"}
+	}
+	if utf8.RuneCountInString(name) > maxSessionNameLen {
+		return "", &ValidationError{Field: "name", Msg: fmt.Sprintf("name must be at most %d characters", maxSessionNameLen)}
+	}
+	return name, nil
 }
 
 // markDeviceGone handles E8: paired row without a whatsmeow device (DB file

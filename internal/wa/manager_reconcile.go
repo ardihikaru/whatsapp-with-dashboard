@@ -338,9 +338,16 @@ func (m *Manager) reconcileOnce(now time.Time) {
 
 // announceReconcile writes the one slog.Warn + system-log event per new
 // discrepancy (not per pass — a standing mismatch must not spam the 500-slot
-// ring). The repo has no outbound notification channel (no ntfy/telegram/
-// webhook-to-operator anywhere), so slog + system log + /api/v1/health +
-// the /sessions banner are the whole surface; none is invented here.
+// ring). This reconciler still has no outbound notification channel of its
+// own — slog + system log + /api/v1/health + the /sessions banner remain
+// the whole surface for a WSM-vs-backend DISAGREEMENT. That is now a
+// narrower claim than it used to be: internal/sessionalert DOES post a
+// real WhatsApp-group message, but only for a session's own committed
+// state transition to logged_out (ManagedSession.setState's
+// publishStateChange) and a daily non-connected roundup — neither of
+// which this reconciler's mismatch/BackendProblem events feed. A
+// standing WSM-vs-waxum disagreement (this function's own subject) still
+// reaches no operator outside the four channels above.
 func (m *Manager) announceReconcile(mm *Mismatch, bp *BackendProblem, age time.Duration) {
 	var note string
 	if mm != nil {

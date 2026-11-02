@@ -1,0 +1,71 @@
+{{define "session_edit_dialog"}}
+<dialog id="session-edit-dialog" class="modal session-edit-modal" data-autoopen>
+  <div class="modal-head">
+    <h4>Edit session — {{.Session.Name}}</h4>
+    <button type="button" class="btn-icon" data-modal-close aria-label="Close">&times;</button>
+  </div>
+  <div class="modal-body">
+    {{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+    <form hx-post="{{u "/sessions"}}/{{.Session.ID}}/edit" hx-target="#session-edit-slot" hx-swap="innerHTML"
+          action="{{u "/sessions"}}/{{.Session.ID}}/edit" method="post" novalidate>
+      <label class="textfield">
+        <span class="textfield-label">Name</span>
+        <input name="name" value="{{.Name}}" maxlength="190" autocomplete="off" required>
+      </label>
+
+      <span class="textfield-label">Routing groups</span>
+      <!-- data-chip-group wraps BOTH the chip input box and the
+           data-chip-empty note — session-edit.js's wireOneChipGroup scopes
+           its querySelector("[data-chip-empty]") to this element, so the
+           note has to be a DESCENDANT of it, not merely a later sibling
+           outside it, or render()'s `emptyNote.hidden = …` line always
+           finds null and the note stays visible unconditionally
+           regardless of chip count (the bug e2e/session-edit.spec.ts
+           pins). -->
+      <div data-chip-group>
+        <div class="se-chips">
+          <input type="hidden" name="group_codes" value="{{.GroupCodesCSV}}" data-chip-hidden>
+          <span data-chip-list>
+            <input type="text" class="se-chip-input" list="wa-edit-group-codes" data-chip-input
+                   placeholder="Type and press Enter or , to add" autocomplete="off">
+          </span>
+          <datalist id="wa-edit-group-codes">
+            {{range .GroupCodes}}<option value="{{.}}">{{end}}
+          </datalist>
+        </div>
+        <small class="se-chips-empty" data-chip-empty>No group — uses the default (ungrouped) pool.</small>
+      </div>
+      <small class="muted">A session reachable by any of its groups' sends; with none, it only
+        joins the default automatic pool.</small>
+
+      <!-- Plain block flow, NOT a flex .form-actions stack (that class is
+           the Save/Cancel button row below) — a flex `gap` between the
+           self-reminder label and its "will move from …" hint fought
+           .se-switch-hint's own tight margin-top:2px and pushed the hint
+           visibly away from its toggle. Matches settings_alerts.html's
+           own switch+hint markup, which has never had this problem. -->
+      <div style="margin-top:20px;">
+        <label class="se-switch">
+          <input type="checkbox" name="master" value="true" class="se-switch-input" {{if .Master}}checked{{end}}>
+          <span class="se-switch-track"><span class="se-switch-thumb"></span></span>
+          <span>Master (excluded from automatic routing)</span>
+        </label>
+
+        <label class="se-switch" style="margin-top:16px;">
+          <input type="checkbox" name="self_reminder" value="true" class="se-switch-input" {{if .SelfReminder}}checked{{end}}>
+          <span class="se-switch-track"><span class="se-switch-thumb"></span></span>
+          <span>Self reminder (default alert sender)</span>
+        </label>
+        {{if .CurrentHolderName}}
+        <small class="se-switch-hint muted">will move from {{.CurrentHolderName}}</small>
+        {{end}}
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">Save</button>
+        <button class="btn btn-outline" type="button" data-modal-close>Cancel</button>
+      </div>
+    </form>
+  </div>
+</dialog>
+{{end}}

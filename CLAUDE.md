@@ -207,8 +207,15 @@ backend that keeps failing or answering 429, via slog.Warn, the system log, a
 banner on `/sessions`, and the `reconcile` object in `/api/v1/health`
 (booleans and counts ONLY — that route is public). NOT covered: waxum sessions
 WSM does not know, because the list-sessions response shape has never been
-captured from a live waxum. There is no outbound notification channel in this
-repo and none was invented. `/sessions` also has a "Check now" button
+captured from a live waxum. This reconciler's OWN mismatch/BackendProblem
+events still have no outbound channel — `internal/sessionalert` (added
+alongside multi-group routing) posts a real WhatsApp-group message, but
+only for a session's own committed transition to `logged_out`
+(`ManagedSession.setState`'s `publishStateChange`) and a daily
+non-connected roundup, neither of which this reconciler's own findings
+feed; a standing WSM-vs-waxum disagreement still reaches no operator
+outside slog/system-log/`/api/v1/health`/the `/sessions` banner.
+`/sessions` also has a "Check now" button
 (`POST /sessions/reconcile`, cookie-only page route, coalesced to one pass per
 10s by `Manager.ReconcileNow`); it re-reads the same cached polls, so it cannot
 feed waxum's rate limiter.

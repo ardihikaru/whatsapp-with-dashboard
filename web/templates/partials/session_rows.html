@@ -6,17 +6,16 @@
   <td class="mono">{{.JID}}</td>
   <td><span class="badge badge-{{.State}}">{{.State}}</span>
       {{if .IsMaster}}<span class="badge badge-master">Master</span>{{end}}
+      {{if .SelfReminder}}<span class="badge badge-self-reminder">Self reminder</span>{{end}}
       {{if gt .QueueLen 0}}<small>({{.QueueLen}} queued)</small>{{end}}
       {{if .Stalled}}<br><small class="muted" title="{{.StalledReason}}">needs attention — automatic reconnect stopped, see title / Activate to retry</small>{{end}}</td>
   <!-- READ-ONLY, deliberately: this tbody re-polls itself every 5s with
        hx-swap="innerHTML" (list.html), which would wipe a half-typed value
-       out of a text input mid-edit. The "Set master" button above survives
-       that poll only because a button holds no state — a live input does
-       not. Editing happens in #session-group-editor below the table
-       (list.html), loaded on demand by the "Edit group" button in
-       .row-actions below, and on the Ops page (sessions/ops.html) — both
-       sit OUTSIDE this polled tbody. -->
-  <td>{{if .GroupCode}}<span class="badge badge-group">{{.GroupCode}}</span>{{else}}<span class="muted">—</span>{{end}}</td>
+       out of a text input mid-edit. Editing happens in the single Edit
+       session dialog (#session-edit-slot, list.html), loaded on demand by
+       the "Edit" button in .row-actions below — a session may now carry
+       SEVERAL groups (or none), rendered as one badge per group. -->
+  <td>{{if .GroupCodes}}{{range .GroupCodes}}<span class="badge badge-group">{{.}}</span> {{end}}{{else}}<span class="muted">—</span>{{end}}</td>
   <td class="row-actions">
     {{if eq .State "connected"}}
       <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.ID}}/deactivate"
@@ -29,24 +28,17 @@
     {{else}}
       <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/pair">Pair</a>
     {{end}}
-    {{if .IsMaster}}
-      <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.ID}}/master" hx-vals='{"master": "false"}'
-              hx-target="#session-rows" hx-swap="innerHTML">Unset master</button>
-    {{else}}
-      <button class="btn btn-outline" hx-post="{{u "/sessions"}}/{{.ID}}/master" hx-vals='{"master": "true"}'
-              hx-target="#session-rows" hx-swap="innerHTML">Set master</button>
-    {{end}}
-    <!-- Offered on EVERY row, master or not — group_code is deliberately
-         uncoupled from is_master (list.html's own explainer paragraph). -->
-    <button class="btn btn-outline" hx-get="{{u "/sessions"}}/{{.ID}}/name/edit"
-            hx-target="#session-name-editor" hx-swap="innerHTML show:#session-name-editor:top">Edit name</button>
-    <button class="btn btn-outline" hx-get="{{u "/sessions"}}/{{.ID}}/group-code/edit"
-            hx-target="#session-group-editor" hx-swap="innerHTML show:#session-group-editor:top">Edit group</button>
-    <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/ops">Ops</a>
-    <a class="btn btn-outline" href="{{u "/sessions"}}/{{.ID}}/webhooks">Webhooks</a>
-    <button class="btn btn-outline btn-danger" hx-post="{{u "/sessions"}}/{{.ID}}/delete"
-            hx-target="#session-rows" hx-swap="innerHTML"
-            hx-confirm="Delete session {{.Name}}? This removes it here, but does NOT unlink the device on the waxum backend — open WhatsApp on the handset, go to Linked devices, and remove it there too, or it keeps occupying one of the account's linked-device slots.">Delete</button>
+    <button class="btn btn-outline" hx-get="{{u "/sessions"}}/{{.ID}}/edit"
+            hx-target="#session-edit-slot" hx-swap="innerHTML">Edit</button>
+    <details class="row-menu">
+      <summary class="btn-icon" aria-label="More actions for {{.Name}}">⋮</summary>
+      <div class="row-menu-list">
+        <a class="row-menu-item" href="{{u "/sessions"}}/{{.ID}}/ops">Ops</a>
+        <a class="row-menu-item" href="{{u "/sessions"}}/{{.ID}}/webhooks">Webhooks</a>
+        <button class="row-menu-item row-menu-item-danger" hx-get="{{u "/sessions"}}/{{.ID}}/delete-confirm"
+                hx-target="#session-edit-slot" hx-swap="innerHTML">Delete…</button>
+      </div>
+    </details>
   </td>
 </tr>
 {{else}}

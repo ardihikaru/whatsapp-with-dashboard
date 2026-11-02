@@ -181,6 +181,14 @@ var pageDefs = map[string]pageDef{
 		files: append(chrome(), "templates/system_log/list.html"),
 		root:  "base",
 	},
+	// settings_alerts — /settings/alerts (internal/sessionalert
+	// configuration). No rows partial; the page is a single form plus a
+	// group picker loaded from the SAME GET /groups/picker partial
+	// known_groups.html already uses, so it is not duplicated here.
+	"settings_alerts": {
+		files: append(chrome(), "templates/settings_alerts.html"),
+		root:  "base",
+	},
 }
 
 // chrome is the shared base-layout file set every full page needs.
@@ -210,8 +218,8 @@ var partialFiles = []string{
 	"templates/partials/verify_rows.html",
 	"templates/partials/session_ops_panel.html",
 	"templates/partials/session_group_code_result.html",
-	"templates/partials/session_group_editor.html",
-	"templates/partials/session_name_editor.html",
+	"templates/partials/session_edit_dialog.html",
+	"templates/partials/session_delete_dialog.html",
 	"templates/partials/webhook_rows.html",
 	"templates/partials/webhook_dlq_rows.html",
 	"templates/partials/convo_run_rows.html",

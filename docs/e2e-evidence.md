@@ -2225,3 +2225,59 @@ is enabled in the browser run without any possibility of reaching a real AI serv
 - NOT verified: a real generation against the live ai-codex-cli (the dummy URL refuses
   connections; unit tests use a fake generator); a real status post; the dark-theme look
   of the switch (token counterparts are asserted by a unit test, not by eye).
+
+## 2026-11-02 — Session groups, self-reminder, Edit/Delete dialogs, session alerts
+
+Run: `make e2e` (`./scripts/e2e-run.sh`) against a fresh throwaway SQLite state dir
+(`cmd/e2eseed`'s 3 sessions, now with e2e-sess-0002 carrying two groups
+"kemang"+"selatan" and e2e-sess-0001 flagged self-reminder) and a throwaway admin
+password file (`_data/paswd` does not exist on this host; `WSM_E2E_PASSWORD_FILE`
+pointed at a one-off test-only password file that died with the process, never
+committed, never echoed). `WSM_WA_BACKEND=whatsmeow` passed explicitly on the
+`make` command line — this host's `.env` sets `WSM_WA_BACKEND=waxum` and
+Makefile's bare `export` directive (line 21) leaks every `-include .env` variable
+into every recipe's environment, overriding `scripts/e2e-env.sh`'s own
+`${WSM_WA_BACKEND:-whatsmeow}` default; a plain `make e2e` therefore fails to boot
+at all here (`WSM_WAXUM_URL is required when WSM_WA_BACKEND=waxum`) unless
+overridden this way.
+
+- Result: **190 passed, 6 failed** across mobile-portrait (390), mobile-small
+  (360) and desktop (1280). The 6 failures are both in `e2e/convo-schedules.spec.ts`
+  ("the create form submits a valid weekly schedule…", "pause then resume
+  round-trips a schedule's state badge") × 3 viewports — confirmed PRE-EXISTING
+  and unrelated to this work by running the same two tests against unmodified
+  `main` in a separate `git worktree` (same failure, same error, on `main`).
+- New coverage (`e2e/session-edit.spec.ts`): the sessions list renders one
+  `.badge-group` per group (2 for e2e-sess-0002) and exactly one
+  `.badge-self-reminder`; the Edit dialog shows the grouped session's two
+  existing chips; the chip input adds/removes a group end to end through a
+  real save (round-tripped back to zero groups so the fixture stays
+  idempotent across reruns); the Delete dialog's type-to-confirm button stays
+  disabled until the session's own name is typed, and is enabled once it is.
+  `/settings/alerts` added to `e2e/overflow.spec.ts`'s page list — no element
+  wider than the configured viewport at any of the three widths.
+- **Caught a real bug live**: the first run of the new "round-tripping to no
+  groups" test failed — `POST /sessions/{id}/edit`'s success path re-rendered
+  the Edit dialog partial (carrying `data-autoopen`), so `session-edit.js`'s
+  own `htmx:afterSwap` handler immediately reopened the freshly-swapped,
+  closed `<dialog>` node, racing the `sessions-changed` listener meant to
+  close it. Fixed by rendering nothing on success (see
+  `internal/handler/sessions.go`'s `PostSessionEdit`); `PostSessionDelete`
+  needed the same `HX-Trigger: sessions-changed` header added, since its own
+  dialog sits outside the delete button's swap target and was never being
+  told to close at all. A Go test
+  (`TestSavingTheEditDialogAppliesNameGroupsAndMasterTogetherAndFiresHXTrigger`)
+  now asserts the success body is empty; watched it fail against the old
+  code and pass against the fix.
+- Screenshots (edit dialog, delete dialog, `/settings/alerts`, light + dark)
+  captured via a one-off Playwright script against the manually-run server
+  (`scripts/e2e-env.sh`), reusing `e2e/.auth/admin.json`'s credential and the
+  `wsm_theme` cookie to force each theme; viewed directly, not committed
+  (same convention as every prior entry here).
+- NOT verified: a real alert send (no paired handset; `internal/sessionalert`'s
+  `Send` goes through the exact same `wa.Manager.Dispatch` path the group
+  broadcast gateway already uses, which has never been exercised live either);
+  the daily report actually firing in a real 24h window (unit-tested with an
+  injected clock only); migration 0015/0016 against real MySQL (SQLite-only
+  here, per CLAUDE.md — no MySQL this task may touch).
+- No secret was written into this file.

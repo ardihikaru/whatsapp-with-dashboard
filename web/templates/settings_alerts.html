@@ -1,0 +1,86 @@
+{{define "content"}}
+<div class="page-heading">
+  <h4>Session Alerts</h4>
+</div>
+<p class="page-subtitle">A WhatsApp-group alert whenever a session logs out, and an optional daily
+  roundup of every session that is not connected. The default sender is whichever session on
+  /sessions carries the Self reminder flag.</p>
+
+{{if .Error}}<div class="alert alert-error">{{.Error}}</div>{{end}}
+{{if .Saved}}<div class="alert alert-success">Saved.</div>{{end}}
+{{if .TestSent}}<div class="alert alert-success">Test message sent.</div>{{end}}
+
+<div class="card form-card">
+  <form action="{{u "/settings/alerts"}}" method="post" novalidate>
+    <label class="se-switch">
+      <input type="checkbox" name="logout_alert_enabled" value="true" class="se-switch-input"
+             {{if .Form.LogoutAlertEnabled}}checked{{end}}>
+      <span class="se-switch-track"><span class="se-switch-thumb"></span></span>
+      <span>Logged-out alert</span>
+    </label>
+    <small class="se-switch-hint muted">Fires when a session goes logged_out — batched for about
+      30s and limited to one alert per session every 30 minutes.</small>
+
+    <label class="se-switch" style="margin-top:16px;">
+      <input type="checkbox" name="daily_report_enabled" value="true" class="se-switch-input"
+             {{if .Form.DailyReportEnabled}}checked{{end}}>
+      <span class="se-switch-track"><span class="se-switch-thumb"></span></span>
+      <span>Daily non-connected report</span>
+    </label>
+    <small class="se-switch-hint muted">Lists every session that is not connected, including ones
+      deactivated on purpose — sent once per day at the time below.</small>
+
+    <label class="textfield" style="margin-top:20px;">
+      <span class="textfield-label">Daily time (local to the timezone below)</span>
+      <input type="text" name="daily_time" value="{{.Form.DailyTime}}" placeholder="08:00" maxlength="5">
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Timezone</span>
+      <input type="text" name="timezone" value="{{.Form.Timezone}}" placeholder="Asia/Jakarta">
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Sender session</span>
+      <select name="sender_session_id" class="select">
+        <option value="">Use the self-reminder session{{if .SelfReminderName}} ({{.SelfReminderName}}){{else}} (none set — falls back to any connected session){{end}}</option>
+        {{range .Sessions}}
+        <option value="{{.ID}}" {{if eq $.Form.SenderSessionID .ID}}selected{{end}}>{{.Name}} (+{{.Phone}})</option>
+        {{end}}
+      </select>
+    </label>
+
+    <label class="textfield">
+      <span class="textfield-label">Session to browse for the target group</span>
+      <select class="select" hx-get="{{u "/groups/picker"}}" hx-trigger="change" hx-target="#settings-alerts-picker" hx-include="this" name="session_id">
+        <option value="">Choose a session…</option>
+        {{range .Sessions}}<option value="{{.ID}}">{{.Name}} (+{{.Phone}})</option>{{end}}
+      </select>
+    </label>
+    <div id="settings-alerts-picker"></div>
+
+    <label class="textfield">
+      <span class="textfield-label">Target group JID</span>
+      <input type="text" name="group_jid" value="{{.Form.TargetGroupJID}}" placeholder="120363xxxxxxxxxxxx@g.us">
+      <small class="muted">Pasted here automatically when you pick a group above, or paste one by hand.</small>
+    </label>
+    <label class="textfield">
+      <span class="textfield-label">Target group name (display only)</span>
+      <input type="text" name="name" value="{{.Form.TargetGroupName}}" maxlength="190">
+    </label>
+
+    <div class="form-actions">
+      <button class="btn btn-primary" type="submit">Save</button>
+    </div>
+  </form>
+</div>
+
+<div class="card form-card">
+  <h5>Send test message</h5>
+  <p class="muted">Sends one message through the same sender-selection order a real alert uses,
+    so a success here is evidence the configured group and sender actually work.</p>
+  <form action="{{u "/settings/alerts/test"}}" method="post">
+    <button class="btn btn-outline" type="submit">Send test message</button>
+  </form>
+  {{if .Form.LastDailyDate}}<p class="muted">Last daily report sent for: {{.Form.LastDailyDate}}</p>{{end}}
+</div>
+{{end}}

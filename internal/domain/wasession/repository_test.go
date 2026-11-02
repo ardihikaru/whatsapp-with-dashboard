@@ -185,3 +185,156 @@ func TestSetNameRoundTripsThroughTheSessionsTable(t *testing.T) {
 		t.Errorf("sess-2 Name = %q, want untouched", got.Name)
 	}
 }
+
+// TestSetGroupCodesRoundTripsAndCachesTheFirstCodeOnGroupCode proves
+// SetGroupCodes writes every row into wa_session_groups AND keeps
+// wa_sessions.group_code in sync as the first (already-sorted) code —
+// 0015's "legacy column stays a cached projection" contract.
+func TestSetGroupCodesRoundTripsAndCachesTheFirstCodeOnGroupCode(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	if err := r.Insert(ctx, &Session{ID: "sess-1", Name: "sess-1", Phone: "628000", LastStatus: "new"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetGroupCodes(ctx, "sess-1", []string{"beta", "alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, ok := findByID(all, "sess-1")
+	if !ok {
+		t.Fatal("session sess-1 not found after SetGroupCodes")
+	}
+	if got.GroupCode != "beta" {
+		t.Errorf("GroupCode = %q, want the cached first-written code %q (SetGroupCodes trusts caller ordering)", got.GroupCode, "beta")
+	}
+	if len(got.GroupCodes) != 2 || got.GroupCodes[0] != "alpha" || got.GroupCodes[1] != "beta" {
+		t.Errorf("GroupCodes = %v, want [alpha beta] (All sorts its own load)", got.GroupCodes)
+	}
+
+	// Replacing with an empty set clears both the join table and the
+	// cached column.
+	if err := r.SetGroupCodes(ctx, "sess-1", nil); err != nil {
+		t.Fatal(err)
+	}
+	all, err = r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, _ = findByID(all, "sess-1")
+	if got.GroupCode != "" || len(got.GroupCodes) != 0 {
+		t.Errorf("GroupCode/GroupCodes = %q/%v after clearing, want empty", got.GroupCode, got.GroupCodes)
+	}
+}
+
+// TestSetGroupCodesOnlyTouchesTheNamedSessionsRows proves a second
+// session's groups survive untouched by the first's SetGroupCodes call —
+// the DELETE in SetGroupCodes must be scoped to session_id.
+func TestSetGroupCodesOnlyTouchesTheNamedSessionsRows(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	for _, id := range []string{"sess-1", "sess-2"} {
+		if err := r.Insert(ctx, &Session{ID: id, Name: id, Phone: "628000" + id, LastStatus: "new"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SetGroupCodes(ctx, "sess-1", []string{"alpha"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetGroupCodes(ctx, "sess-2", []string{"beta"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetGroupCodes(ctx, "sess-1", []string{"gamma"}); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, _ := findByID(all, "sess-2")
+	if len(s2.GroupCodes) != 1 || s2.GroupCodes[0] != "beta" {
+		t.Errorf("sess-2 GroupCodes = %v, want untouched [beta]", s2.GroupCodes)
+	}
+}
+
+// TestSetSelfReminderIsExclusiveAcrossRows proves the repository's own
+// CASE WHEN statement, not just the in-memory mirror internal/wa also
+// keeps, ends with exactly one row flagged after moving the flag.
+func TestSetSelfReminderIsExclusiveAcrossRows(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	for _, id := range []string{"sess-1", "sess-2", "sess-3"} {
+		if err := r.Insert(ctx, &Session{ID: id, Name: id, Phone: "628000" + id, LastStatus: "new"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SetSelfReminder(ctx, "sess-1", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetSelfReminder(ctx, "sess-2", true); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var flagged []string
+	for _, s := range all {
+		if s.IsSelfReminder {
+			flagged = append(flagged, s.ID)
+		}
+	}
+	if len(flagged) != 1 || flagged[0] != "sess-2" {
+		t.Fatalf("rows flagged self-reminder = %v, want exactly [sess-2]", flagged)
+	}
+
+	if err := r.SetSelfReminder(ctx, "sess-2", false); err != nil {
+		t.Fatal(err)
+	}
+	all, err = r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range all {
+		if s.IsSelfReminder {
+			t.Fatalf("session %s still flagged after SetSelfReminder(sess-2, false)", s.ID)
+		}
+	}
+}
+
+// TestSetSelfReminderFalseOnlyClearsTheNamedSessionNotWhicheverIsFlagged
+// catches a real bug found live (2026-11-02): SetSelfReminder(id, false)'s
+// SQL was `WHERE id = ? OR is_self_reminder = 1`, so calling it with
+// on=false for a session that was NEVER flagged (e.g. PostSessionEdit
+// saves self_reminder=false on every edit of every OTHER session) cleared
+// is_self_reminder from whichever row actually held it — silently
+// stealing the flag on an unrelated save. The in-memory stub
+// (internal/wa's stubSessions, used by every wa-package unit test) never
+// had this bug, so TestSetSelfReminderFalseOnlyClearsTheNamedSession
+// (internal/wa/set_self_reminder_test.go) passed throughout; only a test
+// against the REAL SQL repository, with session A actually flagged, is
+// able to catch it.
+func TestSetSelfReminderFalseOnlyClearsTheNamedSessionNotWhicheverIsFlagged(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	for _, id := range []string{"sess-a", "sess-b"} {
+		if err := r.Insert(ctx, &Session{ID: id, Name: id, Phone: "628000" + id, LastStatus: "new"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SetSelfReminder(ctx, "sess-a", true); err != nil {
+		t.Fatal(err)
+	}
+
+	// sess-b was NEVER flagged; clearing it must be a no-op for sess-a.
+	if err := r.SetSelfReminder(ctx, "sess-b", false); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := findByID(all, "sess-a")
+	if !a.IsSelfReminder {
+		t.Fatal("sess-a lost its self-reminder flag after SetSelfReminder(sess-b, false) — an edit save on an unrelated session must never clear it")
+	}
+}
