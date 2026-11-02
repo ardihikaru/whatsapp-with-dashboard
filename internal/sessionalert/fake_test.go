@@ -2,6 +2,7 @@ package sessionalert
 
 import (
 	"context"
+	"errors"
 	"sync"
 
 	sa "github.com/ardihikaru/whatsapp-with-dashboard/internal/domain/sessionalert"
@@ -13,6 +14,16 @@ type fakeGateway struct {
 	snaps   []Snapshot
 	sends   []fakeSend
 	sendErr error
+
+	// members maps sessionID -> the set of group JIDs that session
+	// belongs to, for Member's fallback-tier membership check. A session
+	// id with no entry at all answers "unknown" (an error), the fail-
+	// closed default — see memberErrFor for forcing a specific error.
+	members     map[string]map[string]bool
+	memberErrs  map[string]error
+	memberCalls []string // session ids Member was actually asked about, in order
+
+	events []string // level+note pairs recorded via RecordEvent, "level: note"
 }
 
 type fakeSend struct {
@@ -20,7 +31,7 @@ type fakeSend struct {
 }
 
 func newFakeGateway(snaps ...Snapshot) *fakeGateway {
-	return &fakeGateway{snaps: snaps}
+	return &fakeGateway{snaps: snaps, members: map[string]map[string]bool{}, memberErrs: map[string]error{}}
 }
 
 func (g *fakeGateway) Snapshots() []Snapshot {
@@ -39,6 +50,45 @@ func (g *fakeGateway) Send(ctx context.Context, sessionID, groupJID, text string
 	return nil
 }
 
+// setMember marks sessionID as a (non-)member of groupJID for Member's
+// lookup — call with member=true to make a session eligible for the
+// fallback tier.
+func (g *fakeGateway) setMember(sessionID, groupJID string, member bool) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if g.members[sessionID] == nil {
+		g.members[sessionID] = map[string]bool{}
+	}
+	g.members[sessionID][groupJID] = member
+}
+
+// setMemberErr makes Member(sessionID, ...) fail — simulating "membership
+// unknown" (e.g. a backend error fetching the joined-group list).
+func (g *fakeGateway) setMemberErr(sessionID string, err error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.memberErrs[sessionID] = err
+}
+
+func (g *fakeGateway) Member(ctx context.Context, sessionID, groupJID string) (bool, error) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.memberCalls = append(g.memberCalls, sessionID)
+	if err, ok := g.memberErrs[sessionID]; ok {
+		return false, err
+	}
+	if groups, ok := g.members[sessionID]; ok {
+		return groups[groupJID], nil
+	}
+	return false, errors.New("fake: membership unknown for " + sessionID)
+}
+
+func (g *fakeGateway) RecordEvent(level, note string) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	g.events = append(g.events, level+": "+note)
+}
+
 func (g *fakeGateway) sentCount() int {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -52,6 +102,27 @@ func (g *fakeGateway) lastSend() fakeSend {
 		return fakeSend{}
 	}
 	return g.sends[len(g.sends)-1]
+}
+
+func (g *fakeGateway) memberCallCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.memberCalls)
+}
+
+func (g *fakeGateway) eventCount() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return len(g.events)
+}
+
+func (g *fakeGateway) lastEvent() string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	if len(g.events) == 0 {
+		return ""
+	}
+	return g.events[len(g.events)-1]
 }
 
 // fakeSettings is an in-memory sa.Repository double.

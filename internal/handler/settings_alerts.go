@@ -22,7 +22,13 @@ type settingsAlertsPageData struct {
 	SelfReminderName string
 	Saved            bool
 	TestSent         bool
-	Error            string
+	// TestSentFrom names the session a "Send test message" click actually
+	// used — set whenever a sender was chosen, even on a FAILED send
+	// (sessionalert.Service.SendTest's own SendTestResult carries this
+	// through the error case too), so a failure still tells the operator
+	// which session was tried instead of just "it didn't work".
+	TestSentFrom string
+	Error        string
 }
 
 // sessionAlertSettings loads the current settings, or DefaultSettings()
@@ -145,7 +151,9 @@ func (h *handlers) PostSettingsAlertsTest(w http.ResponseWriter, r *http.Request
 		h.Renderer.RenderPage(w, "settings_alerts", data)
 		return
 	}
-	if err := h.SessionAlert.SendTest(r.Context()); err != nil {
+	result, err := h.SessionAlert.SendTest(r.Context())
+	data.TestSentFrom = result.SenderName
+	if err != nil {
 		data.Error = "test message failed: " + err.Error()
 		h.Renderer.RenderPage(w, "settings_alerts", data)
 		return

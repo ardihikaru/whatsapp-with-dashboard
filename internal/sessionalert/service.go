@@ -50,6 +50,18 @@ type Gateway interface {
 	// Send posts text to groupJID through session sessionID, stamped with
 	// message.CategorySessionAlert by the implementation.
 	Send(ctx context.Context, sessionID, groupJID, text string) error
+	// MembershipChecker backs chooseSender's final fallback tier — see
+	// that function's doc comment. The production implementation
+	// (gateway_wa.go) MUST cache this per session for a sensible TTL: it
+	// is reachable only from the fallback path, but a poorly-cached
+	// implementation could still feed waxum's tiny rate-limit burst
+	// (CLAUDE.md) on every Tick while several sessions are logged out at
+	// once.
+	MembershipChecker
+	// RecordEvent writes a manager-level system-log entry (no single
+	// session in scope) — used when no eligible sender exists at all, so
+	// that failure is visible on the system log page, not just in slog.
+	RecordEvent(level, note string)
 }
 
 // Snapshot is the reporting-relevant slice of wa.Snapshot this package
@@ -241,9 +253,9 @@ func (s *Service) maybeFlushBatch(ctx context.Context, now time.Time, settings s
 	for _, e := range batch {
 		excluded[e.ID] = true
 	}
-	sender, ok := chooseSender(s.gw.Snapshots(), settings.SenderSessionID, excluded)
+	sender, ok := chooseSender(ctx, s.gw, s.gw.Snapshots(), settings.SenderSessionID, settings.TargetGroupJID, excluded)
 	if !ok {
-		s.log.Warn("sessionalert: no connected session available to send the logout alert", "count", len(batch))
+		s.noEligibleSender("logout alert", len(batch))
 		return nil
 	}
 	return s.gw.Send(ctx, sender.ID, settings.TargetGroupJID, buildLogoutAlertText(batch))
@@ -303,32 +315,69 @@ func (s *Service) sendDailyReport(ctx context.Context, settings sa.Settings) err
 	for _, sn := range notConnected {
 		excluded[sn.ID] = true
 	}
-	sender, ok := chooseSender(snaps, settings.SenderSessionID, excluded)
+	sender, ok := chooseSender(ctx, s.gw, snaps, settings.SenderSessionID, settings.TargetGroupJID, excluded)
 	if !ok {
-		s.log.Warn("sessionalert: no connected session available to send the daily report")
+		s.noEligibleSender("daily report", 0)
 		return nil
 	}
 	return s.gw.Send(ctx, sender.ID, settings.TargetGroupJID, buildDailyReportText(notConnected, len(snaps)))
 }
 
+// noEligibleSenderMsg names the real failure mode root-caused live
+// 2026-11-02 (CLAUDE.md): the self-reminder session itself had logged
+// out, and the old unconditional "any connected session" fallback picked
+// one that had never joined the target group — waxum answered 403
+// forbidden and the alert was lost. "No connected session" alone would
+// have been misleading (other sessions WERE connected); the group
+// membership requirement is the actual cause an operator needs to see.
+const noEligibleSenderMsg = "no connected session is a member of the target group"
+
+// noEligibleSender logs AND records a system-log event (RecordEvent) for
+// the no-eligible-sender case — unlike every other warning in this file,
+// this one means the alert could not be sent AT ALL, which is worth
+// surfacing on the system log page, not only in container logs.
+func (s *Service) noEligibleSender(what string, batchSize int) {
+	args := []any{"kind", what}
+	if batchSize > 0 {
+		args = append(args, "count", batchSize)
+	}
+	s.log.Warn("sessionalert: "+noEligibleSenderMsg, args...)
+	s.gw.RecordEvent("warn", fmt.Sprintf("sessionalert: %s not sent — %s", what, noEligibleSenderMsg))
+}
+
+// SendTestResult names which session attempted a test send — surfaced by
+// the /settings/alerts "Send test message" button even when the send
+// itself failed, so an operator sees exactly what a real alert would have
+// done, not just a bare error.
+type SendTestResult struct {
+	SenderID, SenderName string
+}
+
 // SendTest posts a short test message using the SAME sender-selection
 // order both real alerts use, so a successful "Send test message" click
 // on /settings/alerts is real evidence the configured group/sender
-// actually works. Returns an error naming why it could not send, rather
-// than silently doing nothing.
-func (s *Service) SendTest(ctx context.Context) error {
+// actually works. The returned SendTestResult names the chosen sender
+// even when the error is non-nil (a Send failure, as opposed to no
+// eligible sender at all), so the caller can always say which session was
+// tried.
+func (s *Service) SendTest(ctx context.Context) (SendTestResult, error) {
 	settings, err := s.settings.Get(ctx)
 	if err != nil {
-		return err
+		return SendTestResult{}, err
 	}
 	if settings.TargetGroupJID == "" {
-		return errors.New("no target group configured")
+		return SendTestResult{}, errors.New("no target group configured")
 	}
-	sender, ok := chooseSender(s.gw.Snapshots(), settings.SenderSessionID, nil)
+	sender, ok := chooseSender(ctx, s.gw, s.gw.Snapshots(), settings.SenderSessionID, settings.TargetGroupJID, nil)
 	if !ok {
-		return errors.New("no connected session available to send")
+		s.noEligibleSender("test message", 0)
+		return SendTestResult{}, errors.New(noEligibleSenderMsg)
 	}
-	return s.gw.Send(ctx, sender.ID, settings.TargetGroupJID, "✅ WSM session-alert test message")
+	result := SendTestResult{SenderID: sender.ID, SenderName: sender.Name}
+	if err := s.gw.Send(ctx, sender.ID, settings.TargetGroupJID, "✅ WSM session-alert test message"); err != nil {
+		return result, fmt.Errorf("sent from %s, but the send failed: %w", sender.Name, err)
+	}
+	return result, nil
 }
 
 // Start spawns the loop on a context detached from ctx's cancellation —

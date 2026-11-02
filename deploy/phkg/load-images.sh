@@ -1,9 +1,12 @@
 #!/usr/bin/env sh
-# Load the three production images on wa-phkg from the tar.gz bundle.
+# Load the production images on wa-phkg from the tar.gz bundle.
 #
-# Run FROM this directory, on wa-phkg:
+# Run FROM this directory, on wa-phkg, naming the stamp of the build being
+# transferred (no default — a stale hardcoded stamp here once silently
+# reloaded an old build while believing it had loaded a new one):
 #
-#   ./load-images.sh
+#   ./load-images.sh 20261102
+#   STAMP=20261102 ./load-images.sh
 #
 # Idempotent: `docker load` on an image that is already present is a no-op,
 # and the alias tags are re-applied every run.
@@ -13,18 +16,32 @@
 set -eu
 
 IMAGES_DIR=${IMAGES_DIR:-./images}
-STAMP=20260901
+STAMP=${1:-${STAMP:-}}
+
+if [ -z "$STAMP" ]; then
+    echo "usage: $0 <stamp>   (or: STAMP=<stamp> $0)" >&2
+    echo "  e.g. $0 20261102" >&2
+    exit 1
+fi
 
 cd "$IMAGES_DIR"
 
 echo "### verify checksums"
-# The same SHA256SUMS travelled with the tars from the production host, so this
-# checks the whole path — save, two scp hops, and the disk here.
-sha256sum -c SHA256SUMS
+# The checksum file travels under the SAME stamp as the tars — SHA256SUMS
+# alone, with no stamp, would silently go stale the moment a second
+# transfer landed in the same directory and nobody noticed it was
+# checksumming the WRONG tars.
+sha256sum -c "SHA256SUMS-$STAMP"
 
 echo
 echo "### load"
-for f in wsm-app-$STAMP.tar.gz wsm-migrate-$STAMP.tar.gz waxum-0.12.2-uploaded-media.tar.gz; do
+# Only the app and migrate images travel in a normal transfer. waxum is
+# NOT part of this: it already has its own pinned, meaningful tag
+# (ardihikaru/waxum:$WAXUM_TAG, read from .env) and is pulled/loaded
+# separately, on its own cadence, only when waxum itself changes — bundling
+# a waxum tar into every app-only transfer just made every bundle bigger
+# for no reason tied to what actually changed.
+for f in wsm-app-$STAMP.tar.gz wsm-migrate-$STAMP.tar.gz; do
     echo "--- $f"
     gzip -dc "$f" | docker load
 done
@@ -36,14 +53,9 @@ echo "### alias tags"
 # aliases instead, so the running container is traceable to one transfer.
 docker tag whatsapp-with-dashboard:local          "whatsapp-with-dashboard:phkg-$STAMP"
 docker tag whatsapp-with-dashboard-migrate:latest "whatsapp-with-dashboard-migrate:phkg-$STAMP"
-# waxum keeps its own tag: it is already pinned, already meaningful, and
-# docker-compose.yml reads it from WAXUM_TAG in .env.
 
 echo
 echo "### result — these IDs must match production"
-#   whatsapp-with-dashboard          d7b40a798051
-#   whatsapp-with-dashboard-migrate  7c09964d975f
-#   ardihikaru/waxum                 e7c51aa15c99
 docker images --format '{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.Size}}' \
   | grep -E 'whatsapp-with-dashboard|waxum' \
   | sort

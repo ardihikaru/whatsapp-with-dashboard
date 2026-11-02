@@ -2,6 +2,7 @@ package sessionalert
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -199,23 +200,106 @@ func TestDailyReportWithNothingToReportSaysSoCheerfully(t *testing.T) {
 	}
 }
 
+const testGroupJID = "120363xxx@g.us"
+
 // TestSenderFallbackOrderIsConfiguredThenSelfReminderThenAnyConnected
-// drives chooseSender's three tiers directly.
+// drives chooseSender's three tiers directly. The fallback ("plain")
+// candidate must be a confirmed group MEMBER to be chosen — see
+// TestTheFallbackTierExcludesANonMemberSession for the negative case this
+// positive case is paired with.
 func TestSenderFallbackOrderIsConfiguredThenSelfReminderThenAnyConnected(t *testing.T) {
+	ctx := context.Background()
+	gw := newFakeGateway()
+	gw.setMember("plain", testGroupJID, true)
+
 	snaps := []Snapshot{
 		{ID: "configured", Connected: true},
 		{ID: "self-reminder", Connected: true, SelfReminder: true},
 		{ID: "plain", Connected: true},
 	}
-	if got, ok := chooseSender(snaps, "configured", nil); !ok || got.ID != "configured" {
+	if got, ok := chooseSender(ctx, gw, snaps, "configured", testGroupJID, nil); !ok || got.ID != "configured" {
 		t.Errorf("chooseSender with a configured id = %q/%v, want configured/true", got.ID, ok)
 	}
-	if got, ok := chooseSender(snaps, "", nil); !ok || got.ID != "self-reminder" {
+	if got, ok := chooseSender(ctx, gw, snaps, "", testGroupJID, nil); !ok || got.ID != "self-reminder" {
 		t.Errorf("chooseSender with no configured id = %q/%v, want self-reminder/true", got.ID, ok)
 	}
 	noSelfReminder := []Snapshot{{ID: "plain", Connected: true}}
-	if got, ok := chooseSender(noSelfReminder, "", nil); !ok || got.ID != "plain" {
+	if got, ok := chooseSender(ctx, gw, noSelfReminder, "", testGroupJID, nil); !ok || got.ID != "plain" {
 		t.Errorf("chooseSender with no configured id and no self-reminder = %q/%v, want plain/true", got.ID, ok)
+	}
+}
+
+// TestTheFallbackTierExcludesANonMemberSession reproduces the bug
+// observed live on the mini-PC 2026-11-02: the self-reminder session was
+// itself the one logged out, and the OLD "any connected session"
+// fallback (no membership filter) picked a session that had never joined
+// the target group — waxum answered 403 forbidden and the alert was
+// lost. The fallback tier must skip a non-member and keep looking.
+func TestTheFallbackTierExcludesANonMemberSession(t *testing.T) {
+	ctx := context.Background()
+	gw := newFakeGateway()
+	gw.setMember("not-a-member", testGroupJID, false)
+	gw.setMember("is-a-member", testGroupJID, true)
+
+	snaps := []Snapshot{
+		{ID: "not-a-member", Connected: true},
+		{ID: "is-a-member", Connected: true},
+	}
+	got, ok := chooseSender(ctx, gw, snaps, "", testGroupJID, nil)
+	if !ok || got.ID != "is-a-member" {
+		t.Fatalf("chooseSender = %q/%v, want is-a-member/true (the non-member must be skipped, not chosen)", got.ID, ok)
+	}
+
+	// And when NO connected session is a member, there must be no
+	// candidate at all — never a fallback-of-the-fallback onto the
+	// non-member.
+	onlyNonMember := []Snapshot{{ID: "not-a-member", Connected: true}}
+	if got, ok := chooseSender(ctx, gw, onlyNonMember, "", testGroupJID, nil); ok {
+		t.Fatalf("chooseSender = %q/true with only a non-member connected, want no candidate", got.ID)
+	}
+}
+
+// TestMembershipUnknownIsTreatedAsNotEligible proves a Member lookup
+// ERROR (not merely "false") is also fail-closed — "membership unknown"
+// must never be read as "assume member".
+func TestMembershipUnknownIsTreatedAsNotEligible(t *testing.T) {
+	ctx := context.Background()
+	gw := newFakeGateway()
+	gw.setMemberErr("broken", errors.New("waxum: timeout"))
+	gw.setMember("fine", testGroupJID, true)
+
+	snaps := []Snapshot{
+		{ID: "broken", Connected: true},
+		{ID: "fine", Connected: true},
+	}
+	got, ok := chooseSender(ctx, gw, snaps, "", testGroupJID, nil)
+	if !ok || got.ID != "fine" {
+		t.Fatalf("chooseSender = %q/%v, want fine/true (a membership lookup error must be skipped, not chosen)", got.ID, ok)
+	}
+}
+
+// TestConfiguredAndSelfReminderAreNeverMembershipChecked proves tiers 1
+// and 2 are chosen WITHOUT ever calling Member — even if membership for
+// them would answer false or error, an operator's deliberate choice is
+// never second-guessed by this check (sender.go's own doc comment).
+func TestConfiguredAndSelfReminderAreNeverMembershipChecked(t *testing.T) {
+	ctx := context.Background()
+	gw := newFakeGateway()
+	gw.setMember("configured", testGroupJID, false) // deliberately NOT a member
+	gw.setMemberErr("self-reminder", errors.New("would fail if ever asked"))
+
+	snaps := []Snapshot{
+		{ID: "configured", Connected: true},
+		{ID: "self-reminder", Connected: true, SelfReminder: true},
+	}
+	if got, ok := chooseSender(ctx, gw, snaps, "configured", testGroupJID, nil); !ok || got.ID != "configured" {
+		t.Fatalf("chooseSender = %q/%v, want configured/true regardless of its membership", got.ID, ok)
+	}
+	if got, ok := chooseSender(ctx, gw, snaps[1:], "", testGroupJID, nil); !ok || got.ID != "self-reminder" {
+		t.Fatalf("chooseSender = %q/%v, want self-reminder/true regardless of its membership", got.ID, ok)
+	}
+	if gw.memberCallCount() != 0 {
+		t.Errorf("Member was called %d time(s) for tiers 1/2, want 0", gw.memberCallCount())
 	}
 }
 
@@ -223,12 +307,14 @@ func TestSenderFallbackOrderIsConfiguredThenSelfReminderThenAnyConnected(t *test
 // even when the configured sender IS one of the sessions being reported —
 // it must fall through to the next tier instead.
 func TestSenderIsNeverAReportedSession(t *testing.T) {
+	ctx := context.Background()
+	gw := newFakeGateway()
 	snaps := []Snapshot{
 		{ID: "configured", Connected: true},
 		{ID: "self-reminder", Connected: true, SelfReminder: true},
 	}
 	excluded := map[string]bool{"configured": true, "self-reminder": true}
-	got, ok := chooseSender(snaps, "configured", excluded)
+	got, ok := chooseSender(ctx, gw, snaps, "configured", testGroupJID, excluded)
 	if ok {
 		t.Fatalf("chooseSender returned %q despite every connected session being excluded, want no candidate", got.ID)
 	}
@@ -236,8 +322,32 @@ func TestSenderIsNeverAReportedSession(t *testing.T) {
 	// With only the configured one excluded, the self-reminder session
 	// still wins — never falls through to "configured" just because it
 	// was asked for.
-	got, ok = chooseSender(snaps, "configured", map[string]bool{"configured": true})
+	got, ok = chooseSender(ctx, gw, snaps, "configured", testGroupJID, map[string]bool{"configured": true})
 	if !ok || got.ID != "self-reminder" {
 		t.Errorf("chooseSender with configured excluded = %q/%v, want self-reminder/true", got.ID, ok)
+	}
+}
+
+// TestNoEligibleSenderRecordsASystemLogEvent proves the no-eligible-
+// sender case writes a system-log event (RecordEvent), not just a slog
+// line, and that its message names the real cause (not a group member),
+// matching the 2026-11-02 incident this whole fix addresses.
+func TestNoEligibleSenderRecordsASystemLogEvent(t *testing.T) {
+	gw := newFakeGateway(Snapshot{ID: "not-a-member", Connected: true})
+	gw.setMember("not-a-member", testGroupJID, false)
+	svc, clk, _ := newTestService(t, dailyEnabledSettings(), gw)
+	clk.t = jakartaTime(2026, 11, 2, 8, 5)
+
+	if err := svc.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if gw.sentCount() != 0 {
+		t.Fatalf("sent %d despite no eligible sender, want 0", gw.sentCount())
+	}
+	if gw.eventCount() != 1 {
+		t.Fatalf("RecordEvent called %d time(s), want 1", gw.eventCount())
+	}
+	if !strings.Contains(gw.lastEvent(), "member of the target group") {
+		t.Errorf("system-log event does not name the real cause; got: %q", gw.lastEvent())
 	}
 }
