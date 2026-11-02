@@ -14,28 +14,44 @@
       </label>
 
       <span class="textfield-label">Routing groups</span>
-      <div class="se-chips" data-chip-group>
-        <input type="hidden" name="group_codes" value="{{.GroupCodesCSV}}" data-chip-hidden>
-        <span data-chip-list>
-          <input type="text" class="se-chip-input" list="wa-edit-group-codes" data-chip-input
-                 placeholder="Type and press Enter or , to add" autocomplete="off">
-        </span>
-        <datalist id="wa-edit-group-codes">
-          {{range .GroupCodes}}<option value="{{.}}">{{end}}
-        </datalist>
+      <!-- data-chip-group wraps BOTH the chip input box and the
+           data-chip-empty note — session-edit.js's wireOneChipGroup scopes
+           its querySelector("[data-chip-empty]") to this element, so the
+           note has to be a DESCENDANT of it, not merely a later sibling
+           outside it, or render()'s `emptyNote.hidden = …` line always
+           finds null and the note stays visible unconditionally
+           regardless of chip count (the bug e2e/session-edit.spec.ts
+           pins). -->
+      <div data-chip-group>
+        <div class="se-chips">
+          <input type="hidden" name="group_codes" value="{{.GroupCodesCSV}}" data-chip-hidden>
+          <span data-chip-list>
+            <input type="text" class="se-chip-input" list="wa-edit-group-codes" data-chip-input
+                   placeholder="Type and press Enter or , to add" autocomplete="off">
+          </span>
+          <datalist id="wa-edit-group-codes">
+            {{range .GroupCodes}}<option value="{{.}}">{{end}}
+          </datalist>
+        </div>
+        <small class="se-chips-empty" data-chip-empty>No group — uses the default (ungrouped) pool.</small>
       </div>
-      <small class="se-chips-empty" data-chip-empty>No group — uses the default (ungrouped) pool.</small>
       <small class="muted">A session reachable by any of its groups' sends; with none, it only
         joins the default automatic pool.</small>
 
-      <div class="form-actions" style="margin-top:20px; flex-direction:column; align-items:flex-start; gap:12px;">
+      <!-- Plain block flow, NOT a flex .form-actions stack (that class is
+           the Save/Cancel button row below) — a flex `gap` between the
+           self-reminder label and its "will move from …" hint fought
+           .se-switch-hint's own tight margin-top:2px and pushed the hint
+           visibly away from its toggle. Matches settings_alerts.html's
+           own switch+hint markup, which has never had this problem. -->
+      <div style="margin-top:20px;">
         <label class="se-switch">
           <input type="checkbox" name="master" value="true" class="se-switch-input" {{if .Master}}checked{{end}}>
           <span class="se-switch-track"><span class="se-switch-thumb"></span></span>
           <span>Master (excluded from automatic routing)</span>
         </label>
 
-        <label class="se-switch">
+        <label class="se-switch" style="margin-top:16px;">
           <input type="checkbox" name="self_reminder" value="true" class="se-switch-input" {{if .SelfReminder}}checked{{end}}>
           <span class="se-switch-track"><span class="se-switch-thumb"></span></span>
           <span>Self reminder (default alert sender)</span>

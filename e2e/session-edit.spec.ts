@@ -40,6 +40,59 @@ test("the Edit dialog shows the grouped session's existing chips", async ({ page
   await expect(dialog.locator(".se-chip")).toHaveCount(2);
   await expect(dialog).toContainText("kemang");
   await expect(dialog).toContainText("selatan");
+
+  // The "No group — uses the default (ungrouped) pool." note must be
+  // hidden while chips are present — session-edit.js:75's
+  // `emptyNote.hidden = codes.length > 0` only works if [data-chip-empty]
+  // is actually found inside the [data-chip-group] scope it queries.
+  await expect(dialog.locator("[data-chip-empty]")).toBeHidden();
+
+  await dialog.getByRole("button", { name: "Cancel" }).click();
+  await expect(dialog).toBeHidden();
+});
+
+// TestTheSelfReminderHintSitsCloseToItsOwnToggle (named per the Go
+// convention even though this is a .spec.ts file, for grep-ability) pins
+// the "will move from …" hint as the self-reminder toggle's own
+// sub-label, the same visual relationship settings_alerts.html's switch
+// hints already have — not a paragraph separated from it by the
+// flex `gap` a repurposed .form-actions wrapper used to introduce.
+test("the self-reminder hint sits close to its own toggle, not detached below it", async ({ page }) => {
+  await page.goto("/sessions");
+  await expect(page.locator("#session-rows")).not.toContainText("Loading", { timeout: 10_000 });
+
+  // GROUPED_ID does not itself hold the self-reminder flag (SELF_REMINDER_ID
+  // does), so its dialog renders the "will move from …" hint.
+  const row = page.locator("tr", { hasText: GROUPED_NAME });
+  await row.getByRole("button", { name: "Edit" }).click();
+
+  const dialog = page.locator("#session-edit-dialog");
+  await expect(dialog).toBeVisible();
+  const hint = dialog.locator(".se-switch-hint");
+  await expect(hint).toContainText(`will move from ${SELF_REMINDER_NAME}`);
+
+  const masterBox = await dialog.locator('label.se-switch:has-text("Master")').boundingBox();
+  const toggleBox = await dialog.locator('label.se-switch:has-text("Self reminder")').boundingBox();
+  const hintBox = await hint.boundingBox();
+  if (!masterBox || !toggleBox || !hintBox) throw new Error("could not measure the toggle/hint layout");
+
+  // Master and Self reminder must stack on separate rows, not sit side by
+  // side — .se-switch used to be display:inline-flex, which only stacked
+  // by accident when a block-level hint happened to follow the FIRST
+  // toggle; the Master/Self-reminder pair has no hint between them, so an
+  // inline-flex regression put them on the same line whenever the dialog
+  // was wide enough.
+  expect(toggleBox.y).toBeGreaterThanOrEqual(masterBox.y + masterBox.height);
+
+  // The hint must read as the toggle's own sub-label: its top sits just
+  // under the toggle's bottom. .se-switch-hint's own CSS margin-top is
+  // 2px; the bug (the toggle + hint wrapped in a flex-column
+  // .form-actions carrying gap:12px) measured 14px here — asserting
+  // single digits is what actually distinguishes "tight" from the bug,
+  // not just "not literally touching Save".
+  const gap = hintBox.y - (toggleBox.y + toggleBox.height);
+  expect(gap).toBeLessThan(8);
+
   await dialog.getByRole("button", { name: "Cancel" }).click();
   await expect(dialog).toBeHidden();
 });
@@ -58,11 +111,13 @@ test("the Edit dialog's chip input can add and remove a group, round-tripping to
   const dialog = page.locator("#session-edit-dialog");
   await expect(dialog).toBeVisible();
   await expect(dialog.locator(".se-chip")).toHaveCount(0);
+  await expect(dialog.locator("[data-chip-empty]")).toBeVisible();
 
   await dialog.locator("[data-chip-input]").fill("temp-e2e");
   await dialog.locator("[data-chip-input]").press("Enter");
   await expect(dialog.locator(".se-chip")).toHaveCount(1);
   await expect(dialog).toContainText("temp-e2e");
+  await expect(dialog.locator("[data-chip-empty]")).toBeHidden();
 
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toBeHidden({ timeout: 5_000 });
@@ -75,6 +130,7 @@ test("the Edit dialog's chip input can add and remove a group, round-tripping to
   await expect(dialog2.locator(".se-chip")).toHaveCount(1);
   await dialog2.locator(".se-chip-remove").click();
   await expect(dialog2.locator(".se-chip")).toHaveCount(0);
+  await expect(dialog2.locator("[data-chip-empty]")).toBeVisible();
   await dialog2.getByRole("button", { name: "Save" }).click();
   await expect(dialog2).toBeHidden({ timeout: 5_000 });
   await expect(page.locator("tr", { hasText: UNGROUPED_NAME }).locator(".badge-group")).toHaveCount(0);

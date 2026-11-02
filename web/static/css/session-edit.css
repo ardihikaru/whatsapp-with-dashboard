@@ -198,7 +198,16 @@
 .se-switch-input { position: absolute; opacity: 0; pointer-events: none; }
 
 .se-switch {
-  display: inline-flex;
+  /* display:flex, not inline-flex — this is a block-level row (full
+     container width), not an inline label meant to sit beside text. Two
+     switches with no block-level element between them (e.g. a toggle
+     with no "will move from …" hint, immediately followed by another
+     toggle) would otherwise sit SIDE BY SIDE whenever there is room, as
+     an inline-flex box: they only stacked by accident, because a hint's
+     own `display:block` forced a line break before it — found live
+     2026-11-02 on the Edit dialog's Master/Self-reminder pair, which has
+     no hint between them. */
+  display: flex;
   align-items: center;
   gap: 12px;
   min-height: 40px;
