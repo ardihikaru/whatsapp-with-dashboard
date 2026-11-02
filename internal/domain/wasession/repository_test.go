@@ -300,3 +300,41 @@ func TestSetSelfReminderIsExclusiveAcrossRows(t *testing.T) {
 		}
 	}
 }
+
+// TestSetSelfReminderFalseOnlyClearsTheNamedSessionNotWhicheverIsFlagged
+// catches a real bug found live (2026-11-02): SetSelfReminder(id, false)'s
+// SQL was `WHERE id = ? OR is_self_reminder = 1`, so calling it with
+// on=false for a session that was NEVER flagged (e.g. PostSessionEdit
+// saves self_reminder=false on every edit of every OTHER session) cleared
+// is_self_reminder from whichever row actually held it — silently
+// stealing the flag on an unrelated save. The in-memory stub
+// (internal/wa's stubSessions, used by every wa-package unit test) never
+// had this bug, so TestSetSelfReminderFalseOnlyClearsTheNamedSession
+// (internal/wa/set_self_reminder_test.go) passed throughout; only a test
+// against the REAL SQL repository, with session A actually flagged, is
+// able to catch it.
+func TestSetSelfReminderFalseOnlyClearsTheNamedSessionNotWhicheverIsFlagged(t *testing.T) {
+	r, ctx := newTestRepo(t)
+	for _, id := range []string{"sess-a", "sess-b"} {
+		if err := r.Insert(ctx, &Session{ID: id, Name: id, Phone: "628000" + id, LastStatus: "new"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := r.SetSelfReminder(ctx, "sess-a", true); err != nil {
+		t.Fatal(err)
+	}
+
+	// sess-b was NEVER flagged; clearing it must be a no-op for sess-a.
+	if err := r.SetSelfReminder(ctx, "sess-b", false); err != nil {
+		t.Fatal(err)
+	}
+
+	all, err := r.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ := findByID(all, "sess-a")
+	if !a.IsSelfReminder {
+		t.Fatal("sess-a lost its self-reminder flag after SetSelfReminder(sess-b, false) — an edit save on an unrelated session must never clear it")
+	}
+}

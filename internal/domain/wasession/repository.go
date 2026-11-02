@@ -203,9 +203,16 @@ func (r *SQLRepository) SetGroupCodes(ctx context.Context, id string, codes []st
 func (r *SQLRepository) SetSelfReminder(ctx context.Context, id string, on bool) error {
 	ts := now()
 	if !on {
+		// Scoped to id ALONE — a prior version of this statement read
+		// `WHERE id = ? OR is_self_reminder = 1`, which cleared whichever
+		// OTHER row actually held the flag any time this was called with
+		// on=false for an unrelated session (e.g. PostSessionEdit saves
+		// self_reminder=false on every edit of every session that does
+		// not itself hold it). See
+		// TestSetSelfReminderFalseOnlyClearsTheNamedSessionNotWhicheverIsFlagged.
 		_, err := r.pool.ExecContext(ctx,
-			`UPDATE wa_sessions SET is_self_reminder = 0, updated_at = CASE WHEN id = ? THEN ? ELSE updated_at END WHERE id = ? OR is_self_reminder = 1`,
-			id, ts, id)
+			`UPDATE wa_sessions SET is_self_reminder = 0, updated_at = ? WHERE id = ?`,
+			ts, id)
 		return err
 	}
 	_, err := r.pool.ExecContext(ctx,
