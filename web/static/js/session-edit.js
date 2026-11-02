@@ -35,6 +35,15 @@
       var d = dialogs[i];
       if (typeof d.showModal === "function" && !d.open) {
         d.showModal();
+        // A row's kebab menu (<details class="row-menu">) stays open — a
+        // plain <details> has no "close on unrelated dialog" behaviour of
+        // its own — and a dialog's native ::backdrop blocks clicks through
+        // to it but does not hide it visually underneath. Closing every
+        // open menu here is cheap (there is normally at most one) and
+        // keeps what the operator sees in sync with what they can reach.
+        document.querySelectorAll("details.row-menu[open]").forEach(function (m) {
+          m.open = false;
+        });
       }
     }
   }
