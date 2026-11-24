@@ -609,6 +609,10 @@ re-injects); and because nginx must choose that header *before* it picks an
 upstream, the two waxum instances **share one `SUPERADMIN_TOKEN`** — a
 per-instance token could not follow the `waxum.mfardiansyah.id` failover.
 
+**Historical — the laptop host this entry describes was decommissioned
+2026-11-24; see that entry below.** `wa_pool` now has a single member and
+there is no failover.
+
 **Failing over changes which phone number sends.** `wa_pool`'s backup is a
 different WSM process, a different MySQL, a different waxum volume and a
 different paired handset — that is forced, not a shortcut, because a WhatsApp
@@ -634,9 +638,11 @@ wsm-mcp (`mcp/README.md`, `mcp/TUTORIAL.md`), wraps every `/api/v1` route in
 `internal/waxum.Client` as an MCP (Streamable HTTP + gRPC) tool for other AI
 agents, sharing one registry (`internal/mcp/registry`) between both front
 doors (`internal/mcp/mcpsrv`, `internal/mcp/grpcsrv`). It runs over a
-failover pool of hosts (`internal/mcp/upstream`) — mini-PC first, laptop
-backup, same priority as `wa_pool` above — reaching each host's WSM over
-HTTP Basic (`api_clients` row `wsm-mcp`, mirrored across both DBs, same
+pool of hosts (`internal/mcp/upstream`) that supports failover across any
+number of them, same priority convention as `wa_pool` above; since the
+laptop host was decommissioned 2026-11-24 only `minipc` is configured, so
+there is currently no failover — reaching that host's WSM over HTTP Basic
+(`api_clients` row `wsm-mcp`, mirrored across both DBs, same
 reasoning as the "failing over changes which phone number sends" entry
 above: a bearer token would need a separate login per host) and waxum over
 the shared `SUPERADMIN_TOKEN`. Deployed independently on `clinodb`
@@ -653,7 +659,9 @@ vhost), via `deploy/clinodb/{install,update,rollback}.sh`.
   Any change to either source therefore needs, in the same commit: a
   matching tool in `internal/mcp/registry`, a regenerated `mcp/tools.md`, a
   bumped `mcp/VERSION`, and a redeploy via `deploy/clinodb/update.sh`.
-- **Per-host session ids, same as `wa_pool`'s own split identity.** A WSM
+- **Per-host session ids, same as `wa_pool`'s own split identity. Historical
+  — the laptop host was decommissioned 2026-11-24 (see the dated hazard entry
+  near the end of this file); only `minipc` is configured now.** A WSM
   session id IS the waxum session id (`backend_waxum.go` passes it straight
   to `waxum.CreateSession`), and each host paired its own device under its
   own id — Ardi's number is `59c90033bb24b0badf408566b26fe835` on the
@@ -685,6 +693,24 @@ vhost), via `deploy/clinodb/{install,update,rollback}.sh`.
   duration, ok (CLAUDE.md's general secrets posture, applied to tool calls
   specifically because a phone number or message text is exactly the kind
   of thing that must never reach a log line here).
+
+**The laptop host was decommissioned 2026-11-24.** `wa_pool` and `waxum_pool`
+in `docs/deploy-nginx-{wa,waxum}.conf.example` now have a single member
+(the mini-PC, `10.10.0.4`), so there is no failover at the edge any more —
+both pools stay `upstream {}` groups rather than collapsing to a bare
+addr:port, so a second peer could be added back without touching the map or
+any location block, but nothing routes to `10.10.0.3` or any `-laptop`
+hostname today (`TestNeitherEdgeFileRoutesToTheRetiredLaptopHost`). The
+`-laptop` vhosts (`wa-laptop`, `waxum-laptop`) are gone, and the laptop
+entry in wsm-mcp's `WSM_MCP_HOSTS` is gone too — `mcp/mcp.env.example` now
+configures only `minipc`. The laptop's own `wsm-sqlite` and
+`waxum-sessions` Docker volumes still exist on that machine, stopped but
+never `down -v`'d (same singleton-identity rule as the hazard entries
+above — there is no reason to touch them, and every reason not to). The
+Let's Encrypt cert at `/etc/letsencrypt/live/wa/` still carries the
+`-laptop` SANs; that is harmless, so there is no reissue. The two entries
+above predate this decommission and describe the two-host topology as it
+was — read them as historical, not current.
 
 ---
 

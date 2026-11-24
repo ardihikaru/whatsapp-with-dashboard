@@ -229,10 +229,11 @@ services:
     # LAN or the internet puts that blast radius one hop away instead of zero.
     #
     # What changed is that clino's nginx now serves waxum's console at
-    # waxum{,-minipc,-laptop}.mfardiansyah.id, and clino can only reach this
-    # host over WireGuard — the compose network does not span machines. So the
-    # port is published, and WAXUM_BIND_ADDR pins it to the WireGuard address
-    # (10.10.0.4 on the mini-PC, 10.10.0.3 on the laptop) and nothing else.
+    # waxum{,-minipc}.mfardiansyah.id (the laptop host and its -laptop vhost
+    # were decommissioned 2026-11-24, CLAUDE.md), and clino can only reach
+    # this host over WireGuard — the compose network does not span machines.
+    # So the port is published, and WAXUM_BIND_ADDR pins it to the WireGuard
+    # address (10.10.0.4 on the mini-PC) and nothing else.
     #
     # `:?` NOT `:-`: an unset value must abort the container, never fall back.
     # A bare "3451:3451" or a 0.0.0.0 default here would publish a root

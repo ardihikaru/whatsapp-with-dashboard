@@ -39,38 +39,37 @@ include /etc/nginx/wa_waxum_tokens.conf;
 
 # ── UPSTREAMS: PASSIVE HEALTH CHECKS ONLY, SAME DISCIPLINE AS wa.conf's wa_pool ────
 #
-# waxum_pool is the public host's group: mini-PC primary, laptop as an explicit
-# `backup`. waxum_minipc and waxum_laptop are single-peer groups for the two
-# machine-specific hostnames, for the same "pin a request at one box while
-# diagnosing" reason wa.conf's wa_minipc/wa_laptop exist. max_fails/fail_timeout are
-# stated explicitly on BOTH peers, including the backup, so a future edit to the
-# primary's line cannot leave the backup silently on nginx's own defaults without it
-# being visible in a diff.
+# waxum_pool is the public host's group. It used to be mini-PC primary with the
+# laptop as an explicit `backup`; the laptop host was decommissioned 2026-11-24
+# (CLAUDE.md), so the pool now has a single member and there is no failover left
+# here. It stays an `upstream {}` group rather than collapsing into a bare
+# addr:port for the same reason wa.conf's wa_pool does: a peer could be added back
+# to it without touching the map or any location block. waxum_minipc remains a
+# single-peer group for the machine-specific hostname, for the same "pin a request
+# at one box while diagnosing" reason wa.conf's wa_minipc exists.
+# max_fails/fail_timeout stay stated explicitly even on this one peer, for the same
+# "intent visible, not implicit" reason as wa.conf's wa_pool.
 #
 # Unlike wa.conf, this file adds no proxy_next_upstream / proxy_request_buffering
 # overrides: nginx's own defaults (`proxy_next_upstream error timeout`,
 # `proxy_request_buffering on`) already exclude every 4xx from triggering a retry,
 # which is what matters here too — a 401/403 from waxum's own auth is a fact about
 # the request, not evidence the backend is down, and must not be retried against a
-# different waxum instance's session state.
+# different waxum instance's session state. (With a single-member pool this is
+# moot today, same as wa.conf's dormant failover comment above; kept for the same
+# reason.)
 upstream waxum_pool {
     server 10.10.0.4:3451 max_fails=2 fail_timeout=10s;
-    server 10.10.0.3:3451 backup max_fails=2 fail_timeout=10s;
 }
 
 upstream waxum_minipc {
     server 10.10.0.4:3451 max_fails=2 fail_timeout=10s;
 }
 
-upstream waxum_laptop {
-    server 10.10.0.3:3451 max_fails=2 fail_timeout=10s;
-}
-
 map $host $waxum_backend {
     hostnames;
     waxum.mfardiansyah.id         waxum_pool;
     waxum-minipc.mfardiansyah.id  waxum_minipc;
-    waxum-laptop.mfardiansyah.id  waxum_laptop;
     default                       "";
 }
 
@@ -101,7 +100,7 @@ limit_req_zone $binary_remote_addr zone=waxum_console:1m rate=5r/s;
 server {
     listen 80;
     listen [::]:80;
-    server_name waxum.mfardiansyah.id waxum-minipc.mfardiansyah.id waxum-laptop.mfardiansyah.id;
+    server_name waxum.mfardiansyah.id waxum-minipc.mfardiansyah.id;
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/acme;
@@ -112,9 +111,10 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
-    server_name waxum.mfardiansyah.id waxum-minipc.mfardiansyah.id waxum-laptop.mfardiansyah.id;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
+    server_name waxum.mfardiansyah.id waxum-minipc.mfardiansyah.id;
 
     # Same lineage as wa.conf: one certbot cert-name covers all six wa*/waxum* names,
     # so a neighbour product's broken DNS can never block renewal for either vhost.
