@@ -112,8 +112,9 @@ server {
 }
 
 server {
-    listen 443 ssl http2;
-    listen [::]:443 ssl http2;
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    http2 on;
     server_name waxum.mfardiansyah.id waxum-minipc.mfardiansyah.id waxum-laptop.mfardiansyah.id;
 
     # Same lineage as wa.conf: one certbot cert-name covers all six wa*/waxum* names,

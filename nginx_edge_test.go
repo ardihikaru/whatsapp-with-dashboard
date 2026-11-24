@@ -193,14 +193,18 @@ func TestTheEdgePublishesOnlyTheSendAndInboundAPIRoutes(t *testing.T) {
 		// for the same buffering reason as the exact /messages/media location
 		// above: the session-scoped media route needs its own
 		// proxy_request_buffering off, which a shared alternation could not give
-		// to only one branch.
-		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|contacts/check)$"`: true,
-		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/messages/media$"`:            true,
+		// to only one branch. `messages/group` joined this alternation alongside
+		// the exact /messages/group route above.
+		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|messages/group|contacts/check)$"`: true,
+		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/messages/media$"`:                           true,
 		// Read-only session views, published 2026-09-10. Both are method-gated to
 		// GET/HEAD only (TestTheEdgeGatesThePublishedSessionReadRoutesToSafeMethodsOnly);
 		// the bare presence of the path here does not mean POST/DELETE are public too.
 		"= /api/v1/sessions":                         true,
 		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}$"`: true,
+		// The groups a session's handset belongs to, published 2026-10-26, GET/HEAD
+		// only via the same $request_method gate as the two session views above.
+		`~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/groups$"`: true,
 		// Unauthenticated by design — see the doc comment above.
 		"= /api/v1/health": true,
 	}
