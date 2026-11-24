@@ -2342,3 +2342,91 @@ production verification (not just local `go test`/`make e2e`) gets an entry.
 - Redeployed on clinodb via `deploy/clinodb/update.sh`: `wsm-mcp ok (0.6.0)`.
 
 No secret was written into this file.
+
+## 2026-11-24 — Decommission the laptop host (repo side only)
+
+Scope: repo-only change on branch `chore/decommission-laptop-host`. No ssh,
+no live host touched, no deploy — the laptop containers were already
+stopped and wsm-mcp on clinodb already runs with only `minipc` in
+`WSM_MCP_HOSTS` before this branch existed. This entry records the local
+test evidence for that branch.
+
+### Commit A — synced `docs/deploy-nginx-{wa,waxum}.conf.example` with the
+live edge files (`http2 on;`, `proxy_connect_timeout 3s`, the
+`messages/group` session-scoped route, the new `/sessions/{id}/groups` GET
+route)
+
+`TestTheEdgePublishesOnlyTheSendAndInboundAPIRoutes` failed red against the
+synced files — its allowlist was stale relative to the two intentional,
+already-commented live additions (`messages/group` joining the
+session-scoped regex, the groups route published 2026-10-26). Fixed by
+updating the test's allowlist, not the live content:
+
+```
+--- FAIL: TestTheEdgePublishesOnlyTheSendAndInboundAPIRoutes (0.00s)
+    nginx_edge_test.go:218: docs/deploy-nginx-wa.conf.example no longer
+    publishes `location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|
+    contacts/check)$"` — that route is now 404 to every public caller
+    nginx_edge_test.go:224: docs/deploy-nginx-wa.conf.example publishes
+    `location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/(messages|messages/
+    group|contacts/check)$"`, which is not in the reviewed allowlist...
+    nginx_edge_test.go:224: docs/deploy-nginx-wa.conf.example publishes
+    `location ~ "^/api/v1/sessions/[A-Za-z0-9_-]{1,64}/groups$"`, which is
+    not in the reviewed allowlist...
+FAIL
+```
+
+After the test's allowlist was updated: `go test . -run TestTheEdge -v`
+— all five `TestTheEdge*` tests `PASS`.
+
+### Commit B — remove the retired laptop host
+
+Wrote `TestNeitherEdgeFileRoutesToTheRetiredLaptopHost` first and watched
+it fail against the commit-A files (still had `10.10.0.3`, `-laptop`
+names, and a `backup` peer in both pools):
+
+```
+=== RUN   TestNeitherEdgeFileRoutesToTheRetiredLaptopHost
+    nginx_edge_test.go:499: docs/deploy-nginx-wa.conf.example still routes
+    to the retired laptop host's address 10.10.0.3 outside a comment
+    nginx_edge_test.go:502: docs/deploy-nginx-wa.conf.example still has a
+    `-laptop` server_name, map entry or upstream group outside a comment
+    nginx_edge_test.go:514: docs/deploy-nginx-waxum.conf.example ...
+    nginx_edge_test.go:531: wa_pool in docs/deploy-nginx-wa.conf.example
+    still has a `backup` peer; the laptop backup was removed 2026-11-24...
+    nginx_edge_test.go:543: waxum_pool in docs/deploy-nginx-waxum.conf.
+    example still has a `backup` peer...
+--- FAIL: TestNeitherEdgeFileRoutesToTheRetiredLaptopHost (0.00s)
+FAIL
+```
+
+After removing the `10.10.0.3` backup peer, the `wa_laptop`/`waxum_laptop`
+upstream blocks, the `wa-laptop`/`waxum-laptop` map entries and the
+`-laptop` `server_name` tokens from both `.example` files:
+
+```
+=== RUN   TestNeitherEdgeFileRoutesToTheRetiredLaptopHost
+--- PASS: TestNeitherEdgeFileRoutesToTheRetiredLaptopHost (0.00s)
+PASS
+```
+
+`go test .` (the full root package, every `nginx_edge_test.go` test
+including `TestEveryHostMapEntryInEitherEdgeFileResolvesToADeclaredUpstreamGroup`)
+and `go test ./...` across the whole module: all packages `ok`, no
+failures. `go vet ./...`: clean, no output.
+
+`mcp/mcp.env.example`, `mcp/README.md`, `mcp/VERSION` (0.6.0 → 0.6.1) and
+`mcp/tools.md` (regenerated via `go run ./cmd/wsm-mcp tools`, changing only
+the version string in its header) were updated to match: `WSM_MCP_HOSTS`
+now configures only `minipc`. `docker-compose.yml` and `.env.example`
+comments describing the laptop as a waxum console host or a `WSM_HOST_LABEL`
+failover peer were corrected. `CLAUDE.md` gained one dated hazard entry
+("The laptop host was decommissioned 2026-11-24") plus pointer lines on the
+two older entries that described the two-host failover topology.
+
+Not verified: the live edge, the live wsm-mcp deployment, and the live
+`docker-compose.yml`/`.env` on either remaining host — this branch is
+repo-only, per the task that produced it. The operator deploys the edge
+files and verifies them separately.
+
+No secret was written into this file.

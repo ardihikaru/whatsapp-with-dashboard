@@ -37,11 +37,11 @@ MCP client (Claude Code, another agent)        gRPC client (a backend)
                             │
                             ▼
                  internal/mcp/upstream.Pool  (failover)
-                 ┌──────────────┴──────────────┐
-                 ▼                              ▼
-         host "minipc"                   host "laptop"
-     WSM /api/v1 (Basic)              WSM /api/v1 (Basic)
-     waxum (SUPERADMIN_TOKEN)         waxum (SUPERADMIN_TOKEN)
+                            │
+                            ▼
+                     host "minipc"
+                 WSM /api/v1 (Basic)
+                 waxum (SUPERADMIN_TOKEN)
 ```
 
 ## Hosts and failover (`internal/mcp/upstream`)
@@ -49,20 +49,25 @@ MCP client (Claude Code, another agent)        gRPC client (a backend)
 Configured by `WSM_MCP_HOSTS`, a priority-ordered list:
 
 ```
-WSM_MCP_HOSTS=minipc=http://10.10.0.4:18801|http://10.10.0.4:3451,laptop=http://10.10.0.3:18801|http://10.10.0.3:3451
+WSM_MCP_HOSTS=minipc=http://10.10.0.4:18801|http://10.10.0.4:3451
 ```
 
 Each entry is `name=wsmBaseURL|waxumBaseURL`. The first host listed is tried
-first for every call.
+first for every call. The pool code itself supports any number of hosts —
+only "minipc" is configured today: the laptop host (`10.10.0.3`) was
+decommissioned 2026-11-24 (see whatsapp-with-dashboard's CLAUDE.md), so
+there is currently no second host to fail over to. Everything below
+describes what the failover/multi-host machinery does when more than one
+host IS configured, for whenever that becomes true again.
 
 - **WSM auth**: HTTP Basic with one dedicated `api_clients` row
   (`WSM_MCP_WSM_LOGIN_ID`/`WSM_MCP_WSM_SECRET`). `api_clients` rows are
-  mirrored across both the mini-PC and laptop DBs, so one credential works on
-  every host — bearer tokens are per-DB and would need a separate login on
+  mirrored across every configured host's DB, so one credential works on
+  all of them — bearer tokens are per-DB and would need a separate login on
   each, which Basic avoids.
-- **waxum auth**: `WSM_MCP_WAXUM_TOKEN`, the shared `SUPERADMIN_TOKEN` both
-  waxum instances carry.
-- **Failover rule**:
+- **waxum auth**: `WSM_MCP_WAXUM_TOKEN`, the shared `SUPERADMIN_TOKEN` every
+  configured waxum instance carries.
+- **Failover rule** (dormant with a single host configured):
   - a **read** (GET/HEAD) fails over to the next host on a dial error, a
     timeout, or a 5xx.
   - a **write** fails over **only on a dial error** (the request never left
@@ -72,23 +77,25 @@ first for every call.
     `proxy_next_upstream` applies).
 - An optional **`target`** argument on every tool pins one host by name and
   disables failover for that call.
-- Every tool result is `{"host": "minipc"|"laptop", ...}` — the caller
-  always knows which host actually answered.
+- Every tool result is `{"host": "minipc", ...}` — the caller always knows
+  which host actually answered.
 
 ## session_id vs phone
 
-The same phone number has a **different session_id on each host** (a WSM
-session id *is* the waxum session id — `internal/wa/backend_waxum.go` passes
-it straight to `waxum.CreateSession` — and each host paired its own device
-under its own id). Every session-scoped tool therefore accepts `session_id`
-**or** `phone`:
+Before the laptop host was decommissioned, the same phone number had a
+**different session_id on each host** (a WSM session id *is* the waxum
+session id — `internal/wa/backend_waxum.go` passes it straight to
+`waxum.CreateSession` — and each host paired its own device under its own
+id); with only "minipc" configured today that distinction no longer applies
+in practice, but every session-scoped tool still accepts `session_id` **or**
+`phone`, since the pool code supports more than one host:
 
 - `phone` (any of `62xxxx`, `0xxxx`, `+62 xxx-xxx-xxxx`) is normalised and
   resolved against `GET /api/v1/sessions` on whichever host answers first
   (cached ~30s), honouring `target` if given.
 - `session_id` is looked up on every configured host until the one that
-  actually lists it is found, and that host is pinned for the call — passing
-  a mini-PC session_id never accidentally calls the laptop.
+  actually lists it is found, and that host is pinned for the call — this
+  only matters once a second host is configured again.
 - Neither given: falls back to `WSM_MCP_DEFAULT_PHONE` (Ardi's own number by
   default in production).
 - `wsm_resolve_session` reports the session_id on **every** host at once, for

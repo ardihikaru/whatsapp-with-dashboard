@@ -19,7 +19,9 @@
 # Its own certificate lineage, so a neighbour's broken DNS can never block renewal here.
 # Since the multi-host failover work the cert has been expanded to cover all six wa*/waxum*
 # names (wa, wa-laptop, wa-minipc, waxum, waxum-laptop, waxum-minipc, all .mfardiansyah.id)
-# under one lineage, one path, one renewal:
+# under one lineage, one path, one renewal. The laptop host was decommissioned 2026-11-24
+# (CLAUDE.md) and the -laptop names below are no longer served, but the cert itself still
+# carries their SANs — harmless, so there is no reissue:
 #   certbot certonly --webroot -w /var/www/acme --cert-name wa \
 #     -d wa.mfardiansyah.id -d wa-minipc.mfardiansyah.id -d wa-laptop.mfardiansyah.id \
 #     -d waxum.mfardiansyah.id -d waxum-minipc.mfardiansyah.id -d waxum-laptop.mfardiansyah.id \
@@ -35,31 +37,27 @@ map $http_upgrade $wa_connection_upgrade { default upgrade; '' close; }
 # `server` line plus proxy_next_upstream below deciding what counts as a failed
 # attempt worth acting on.
 #
-# wa_pool is the public host's group: mini-PC primary, laptop as an explicit `backup`
-# (nginx only sends traffic to a `backup` peer once every non-backup peer in the group
-# is marked down). wa_minipc and wa_laptop are single-peer groups for the two
-# machine-specific hostnames, which exist so an operator can pin a request at one box
-# deliberately (e.g. while diagnosing which host is unhealthy) without going through
-# failover logic at all.
+# wa_pool is the public host's group. It used to be mini-PC primary with the laptop
+# as an explicit `backup`; the laptop host was decommissioned 2026-11-24 (CLAUDE.md),
+# so the pool now has a single member and there is no failover left here. It stays an
+# `upstream {}` group rather than collapsing into a bare addr:port because
+# `proxy_pass http://$wa_backend;` needs to resolve to a declared group either way, and
+# a second peer could be added back to it without touching the map or any location
+# block. wa_minipc remains a single-peer group for the machine-specific hostname, which
+# exists so an operator can pin a request at this box deliberately (e.g. while
+# diagnosing) without going through the map's default resolution.
 #
-# A `backup` server with no max_fails/fail_timeout of its own still PARSES —
-# `nginx -t` accepts it — but silently loses the fast-fail behaviour every server here
-# depends on: with the directive's own defaults (max_fails=1 fail_timeout=10s) that is
-# usually harmless, but leaving it unstated invites a future edit to "simplify" the
-# primary's line without noticing the backup quietly drifted from it. Both lines below
-# set both parameters explicitly and identically for that reason. Guarded by
-# TestWaPoolMarksOnlyTheLaptopAsBackupAndBothPeersCarryExplicitHealthParameters.
+# max_fails/fail_timeout are still stated explicitly even on a single-peer group:
+# nginx's own defaults (max_fails=1 fail_timeout=10s) are usually harmless, but stating
+# them keeps the line's intent visible rather than implicit, and the test that used to
+# compare it against an explicit backup line now just checks this one peer directly.
+# Guarded by TestNeitherEdgeFileRoutesToTheRetiredLaptopHost.
 upstream wa_pool {
     server 10.10.0.4:18801 max_fails=2 fail_timeout=10s;
-    server 10.10.0.3:18801 backup max_fails=2 fail_timeout=10s;
 }
 
 upstream wa_minipc {
     server 10.10.0.4:18801 max_fails=2 fail_timeout=10s;
-}
-
-upstream wa_laptop {
-    server 10.10.0.3:18801 max_fails=2 fail_timeout=10s;
 }
 
 # Shared port register: 1<environment><product>1. whatsapp-with-dashboard owns slot 08.
@@ -73,15 +71,14 @@ upstream wa_laptop {
 # treats it as a hostname and falls back to resolving it via the configured resolver at
 # REQUEST time, failing with a clear `no resolver defined to resolve …` (or an actual DNS
 # lookup, if a resolver were configured) in error.log — loud, not silent. That fallback
-# path is exactly why this must be proven by a real failover test against the live edge
-# (stop the primary's app process, confirm a send still completes off the backup, confirm
-# error.log shows nginx switching peers) rather than assumed from reading this file — see
-# the deploy checklist this comment lives beside.
+# path is exactly why a group added back to wa_pool must be proven by a real failover
+# test against the live edge (stop the primary's app process, confirm a send still
+# completes off the new peer, confirm error.log shows nginx switching peers) rather than
+# assumed from reading this file — see the deploy checklist this comment lives beside.
 map $host $wa_backend {
     hostnames;
     wa.mfardiansyah.id         wa_pool;
     wa-minipc.mfardiansyah.id  wa_minipc;
-    wa-laptop.mfardiansyah.id  wa_laptop;
     default                    "";
 }
 
@@ -110,7 +107,7 @@ limit_req_zone $binary_remote_addr zone=wa_health:1m rate=1r/s;
 server {
     listen 80;
     listen [::]:80;
-    server_name wa.mfardiansyah.id wa-minipc.mfardiansyah.id wa-laptop.mfardiansyah.id;
+    server_name wa.mfardiansyah.id wa-minipc.mfardiansyah.id;
 
     location ^~ /.well-known/acme-challenge/ {
         root /var/www/acme;
@@ -124,7 +121,7 @@ server {
     listen 443 ssl;
     listen [::]:443 ssl;
     http2 on;
-    server_name wa.mfardiansyah.id wa-minipc.mfardiansyah.id wa-laptop.mfardiansyah.id;
+    server_name wa.mfardiansyah.id wa-minipc.mfardiansyah.id;
 
     ssl_certificate     /etc/letsencrypt/live/wa/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/wa/privkey.pem;
@@ -183,16 +180,26 @@ server {
     proxy_set_header Upgrade            $http_upgrade;
     proxy_set_header Connection         $wa_connection_upgrade;
     # 3s (was 10s until 2026-09-16): 10s tied the race with
-    # BO_WA_SEND_TIMEOUT_SECONDS (also 10s), so failing wa-minipc over to
-    # wa-laptop on a POST lost the race nearly every time -- the client gave
-    # up (499) right as this would have succeeded. A dead WireGuard-overlay
-    # LAN peer is detected well under a second; 3s leaves real margin.
+    # BO_WA_SEND_TIMEOUT_SECONDS (also 10s), so failing wa-minipc over to the
+    # laptop backup (decommissioned 2026-11-24, CLAUDE.md) on a POST lost the
+    # race nearly every time -- the client gave up (499) right as this would
+    # have succeeded. A dead WireGuard-overlay LAN peer is detected well under
+    # a second; 3s leaves real margin for any peer this pool gains in future.
     proxy_connect_timeout 3s;
     proxy_read_timeout 300s;
     proxy_send_timeout 300s;
     proxy_buffering off;
 
-    # ── FAILOVER REQUIRES A BUFFERED REQUEST BODY ───────────────────────────────
+    # ── FAILOVER REQUIRES A BUFFERED REQUEST BODY (DORMANT SINCE 2026-11-24) ────
+    #
+    # wa_pool had a laptop backup peer until 2026-11-24, when that host was
+    # decommissioned (CLAUDE.md). With a single member left in the pool there is
+    # currently no second peer for any of the machinery below to fail over to —
+    # these directives are kept rather than removed because wa_pool is still a
+    # group, not a bare addr:port, and a peer added back to it later should regain
+    # this behaviour without anyone having to reconstruct the reasoning. Read the
+    # rest of this block as "what happens if wa_pool ever has a backup peer again",
+    # not as a description of the pool's current state.
     #
     # nginx can only retry a request against the next upstream peer if it still HAS
     # the request to send — with proxy_request_buffering off (the previous setting,
@@ -200,17 +207,17 @@ server {
     # through as it arrives, and once any of it has left for the first peer there is
     # nothing left to replay. `on` makes nginx read the full body into a buffer (or
     # spill to a temp file above client_body_buffer_size) before it opens the
-    # upstream connection at all, so the SAME body can be handed to wa_pool's backup
-    # peer if the primary fails before answering.
+    # upstream connection at all, so the SAME body could be handed to a backup peer
+    # if the primary fails before answering.
     #
     # proxy_next_upstream deliberately names error/timeout/5xx and NO 4xx status.
     # A 409 from this app means the primary's WhatsApp session is disconnected —
     # see CLAUDE.md's "Connected means three different things" and orphaned-client-
     # wedge hazard notes — and that is a fact about THIS device's pairing state, not
-    # a transient fault the backup peer can fix. Retrying a 409 on wa_pool's backup
+    # a transient fault a backup peer could fix. Retrying a 409 on a backup peer
     # would not retry the same send: whatsapp-with-dashboard has no cross-host
     # session replication (CLAUDE.md: "the WhatsApp session is a hard singleton"),
-    # so the backup's app process is fronting a COMPLETELY DIFFERENT paired phone
+    # so a backup's app process would front a COMPLETELY DIFFERENT paired phone
     # number. Failing that request over would silently send the message from a
     # different sender identity than the caller intended, which is worse than the
     # 409 it was trying to avoid. http_403/http_404 are correctly excluded from this
@@ -219,8 +226,8 @@ server {
     #
     # proxy_next_upstream_tries 2 caps this at exactly one retry (the original
     # attempt plus one) rather than nginx's unbounded default, which would otherwise
-    # let a request round-trip the whole pool (both wa_pool peers here, but written
-    # to not silently change behaviour if this group ever grows) before giving up.
+    # let a request round-trip the whole pool before giving up, however many peers
+    # it has at the time.
     #
     # WHAT THIS DOES NOT COVER: nginx's own documented behaviour is that a
     # non-idempotent method (POST, LOCK, PATCH — every write route this API has) is
@@ -232,14 +239,15 @@ server {
     # add `non_idempotent`: retrying an already-sent POST /api/v1/messages could
     # double-send a WhatsApp message if the primary actually processed it and only
     # the RESPONSE was lost in transit — a worse failure than a client seeing one
-    # error and retrying itself. The practical effect: proxy_request_buffering on
-    # plus this directive buys real failover for the idempotent paths (GET/HEAD
-    # /api/v1/sessions*, /api/v1/health) and for a POST that fails before nginx has
-    # finished writing it to the primary (e.g. a connection refused at TCP connect
-    # time, which nginx counts as `error` before any bytes went out) — but a POST
-    # that reaches the primary and then times out waiting for a reply will NOT be
-    # retried on the backup. Do not assume otherwise without a real test that kills
-    # the primary mid-request and inspects error.log and wa_messages on both hosts.
+    # error and retrying itself. The practical effect, were a backup peer present:
+    # proxy_request_buffering on plus this directive buys real failover for the
+    # idempotent paths (GET/HEAD /api/v1/sessions*, /api/v1/health) and for a POST
+    # that fails before nginx has finished writing it to the primary (e.g. a
+    # connection refused at TCP connect time, which nginx counts as `error` before
+    # any bytes went out) — but a POST that reaches the primary and then times out
+    # waiting for a reply would NOT be retried on a backup. Do not assume otherwise
+    # without a real test that kills the primary mid-request and inspects
+    # error.log and wa_messages on both hosts.
     proxy_request_buffering on;
     proxy_next_upstream error timeout http_500 http_502 http_503 http_504;
     proxy_next_upstream_tries 2;

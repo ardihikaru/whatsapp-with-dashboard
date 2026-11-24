@@ -480,36 +480,68 @@ func namedBlock(t *testing.T, src, keyword, name string) string {
 	return ""
 }
 
-// A `backup` server with no max_fails/fail_timeout of its own still parses cleanly —
-// `nginx -t` accepts it — but silently falls back to nginx's own defaults
-// (max_fails=1 fail_timeout=10s), and the whole point of stating both explicitly on
-// every peer is that a future edit to the primary's line cannot leave the backup
-// drifted without it showing in a diff. This also catches the primary itself being
-// mismarked `backup` (which would mean wa_pool never sends live traffic to the
-// mini-PC at all) and a backup silently promoted to primary (which would defeat the
-// "only after every non-backup peer is down" ordering the whole failover story rests
-// on).
-func TestWaPoolMarksOnlyTheLaptopAsBackupAndBothPeersCarryExplicitHealthParameters(t *testing.T) {
-	body := namedBlock(t, edgeSource(t), "upstream", "wa_pool")
+// codeOnly strips the `#`-comment from every line, the same discipline edgeLocations
+// and namedBlock use, so a check below cannot be tripped by prose that mentions the
+// retired host deliberately — e.g. the top-of-file certbot example, which still lists
+// the -laptop names because the certificate's SANs are left alone (CLAUDE.md:
+// decommissioning a host is not a reason to reissue a cert that still validates).
+func codeOnly(src string) string {
+	var out []string
+	for _, line := range strings.Split(src, "\n") {
+		code, _, _ := strings.Cut(line, "#")
+		out = append(out, code)
+	}
+	return strings.Join(out, "\n")
+}
 
-	primary := regexp.MustCompile(`server\s+10\.10\.0\.4:18801\s+max_fails=\d+\s+fail_timeout=\S+;`)
-	if !primary.MatchString(body) {
+// The laptop host (10.10.0.3, wa-laptop/waxum-laptop) was decommissioned
+// 2026-11-24 — see CLAUDE.md's entry of that date. Both pools now have a single
+// member, so there is no backup peer and no failover left to lose silently; what
+// matters now is that neither edge file still ROUTES anything to that address or
+// hostname (prose mentioning it, e.g. in the certbot example, is fine and checked
+// separately), and that the one peer each pool DOES have still carries explicit
+// health parameters (the drift-without-a-diff risk the old two-peer test guarded
+// still applies to a pool that regains a second member later).
+func TestNeitherEdgeFileRoutesToTheRetiredLaptopHost(t *testing.T) {
+	for _, f := range []struct {
+		name string
+		src  string
+	}{
+		{edgeConf, codeOnly(edgeSource(t))},
+		{waxumConf, codeOnly(waxumSource(t))},
+	} {
+		if strings.Contains(f.src, "10.10.0.3") {
+			t.Errorf("%s still routes to the retired laptop host's address 10.10.0.3 "+
+				"outside a comment", f.name)
+		}
+		if strings.Contains(f.src, "-laptop") {
+			t.Errorf("%s still has a `-laptop` server_name, map entry or upstream group "+
+				"outside a comment", f.name)
+		}
+	}
+
+	wa := namedBlock(t, edgeSource(t), "upstream", "wa_pool")
+	waPeer := regexp.MustCompile(`server\s+10\.10\.0\.4:18801\s+max_fails=\d+\s+fail_timeout=\S+;`)
+	if !waPeer.MatchString(wa) {
 		t.Errorf("wa_pool in %s has no `server 10.10.0.4:18801 max_fails=… fail_timeout=…;` "+
-			"line with no `backup` keyword — the mini-PC must be the primary, taking live "+
-			"traffic under normal conditions", edgeConf)
+			"line; its one remaining peer must still carry explicit health parameters, not "+
+			"nginx's own silent defaults", edgeConf)
 	}
-	if regexp.MustCompile(`server\s+10\.10\.0\.4:18801[^;]*\bbackup\b`).MatchString(body) {
-		t.Errorf("wa_pool in %s marks the mini-PC (10.10.0.4) `backup`; that means the "+
-			"pool never sends live traffic there under normal conditions and defeats the "+
-			"primary/backup ordering the whole design rests on", edgeConf)
+	if strings.Contains(wa, "backup") {
+		t.Errorf("wa_pool in %s still has a `backup` peer; the laptop backup was removed "+
+			"2026-11-24 and the pool should now have exactly one member", edgeConf)
 	}
 
-	backup := regexp.MustCompile(`server\s+10\.10\.0\.3:18801\s+backup\s+max_fails=\d+\s+fail_timeout=\S+;`)
-	if !backup.MatchString(body) {
-		t.Errorf("wa_pool in %s has no `server 10.10.0.3:18801 backup max_fails=… "+
-			"fail_timeout=…;` line; without explicit health parameters on the backup peer "+
-			"too, a future edit to the primary's line can drift the backup onto nginx's own "+
-			"defaults without it showing in a diff", edgeConf)
+	waxum := namedBlock(t, waxumSource(t), "upstream", "waxum_pool")
+	waxumPeer := regexp.MustCompile(`server\s+10\.10\.0\.4:3451\s+max_fails=\d+\s+fail_timeout=\S+;`)
+	if !waxumPeer.MatchString(waxum) {
+		t.Errorf("waxum_pool in %s has no `server 10.10.0.4:3451 max_fails=… "+
+			"fail_timeout=…;` line; its one remaining peer must still carry explicit health "+
+			"parameters, not nginx's own silent defaults", waxumConf)
+	}
+	if strings.Contains(waxum, "backup") {
+		t.Errorf("waxum_pool in %s still has a `backup` peer; the laptop backup was removed "+
+			"2026-11-24 and the pool should now have exactly one member", waxumConf)
 	}
 }
 
