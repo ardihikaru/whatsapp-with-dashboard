@@ -709,7 +709,7 @@ never `down -v`'d (same singleton-identity rule as the hazard entries
 above — there is no reason to touch them, and every reason not to). The
 Let's Encrypt cert at `/etc/letsencrypt/live/wa/` still carries the
 `-laptop` SANs; that is harmless, so there is no reissue. The two entries
-below predate this decommission and describe the two-host topology as it
+above predate this decommission and describe the two-host topology as it
 was — read them as historical, not current.
 
 ---
